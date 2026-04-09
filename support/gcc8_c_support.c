@@ -1,4 +1,7 @@
 #include "gcc8_c_support.h"
+#include <exec/types.h>
+#include <exec/ports.h>
+#include <dos/dosextens.h>
 #include <proto/exec.h>
 extern struct ExecBase* SysBase;
 
@@ -114,10 +117,20 @@ extern void (*__fini_array_start[])() __attribute__((weak));
 extern void (*__fini_array_end[])() __attribute__((weak));
 
 __attribute__((used)) __attribute__((section(".text.unlikely"))) void _start() {
-	// initialize globals, ctors etc.
+	struct Process *proc;
+	struct Message *wb_msg = NULL;
 	unsigned long count;
 	unsigned long i;
 
+	/* Detect Workbench launch: no CLI segment means WBStartup message is
+	   waiting on pr_MsgPort.  Receive it now; we must reply before exit. */
+	proc = (struct Process *)FindTask(NULL);
+	if (proc->pr_CLI == 0) {
+		WaitPort(&proc->pr_MsgPort);
+		wb_msg = GetMsg(&proc->pr_MsgPort);
+	}
+
+	// initialize globals, ctors etc.
 	count = __preinit_array_end - __preinit_array_start;
 	for (i = 0; i < count; i++)
 		__preinit_array_start[i]();
@@ -132,6 +145,13 @@ __attribute__((used)) __attribute__((section(".text.unlikely"))) void _start() {
 	count = __fini_array_end - __fini_array_start;
 	for (i = count; i > 0; i--)
 		__fini_array_start[i - 1]();
+
+	/* Reply to the Workbench startup message.  Forbid() first so WB cannot
+	   delete our process between ReplyMsg() and the final RTS. */
+	if (wb_msg) {
+		Forbid();
+		ReplyMsg(wb_msg);
+	}
 }
 
 void warpmode(int on) { // bool
