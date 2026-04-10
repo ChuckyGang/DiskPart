@@ -2168,12 +2168,309 @@ static void rdb_restore_block(struct Window *win, struct BlockDev *bd)
 }
 
 /* ------------------------------------------------------------------ */
+/* Extended Backup / Restore — all blocks rdb_block_lo..HighRDSKBlock */
+/* File format: 32-byte header + raw blocks                           */
+/*   hdr[0] = 'ERDB' magic                                            */
+/*   hdr[1] = version 1                                               */
+/*   hdr[2] = block_lo                                                */
+/*   hdr[3] = block_size                                              */
+/*   hdr[4] = num_blocks                                              */
+/*   hdr[5..7] = reserved 0                                           */
+/* ------------------------------------------------------------------ */
+
+#define ERDB_MAGIC   0x45524442UL   /* 'ERDB' */
+#define ERDB_VERSION 1UL
+#define ERDB_HDR_SZ  32             /* 8 longwords */
+
+static void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
+                                  struct RDBInfo *rdb)
+{
+    struct EasyStruct es;
+    UBYTE *buf;
+    static char save_path[256];
+    ULONG block_lo, block_hi, num_blocks, blk;
+    ULONG hdr[8];
+
+    if (!rdb->valid) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Backup";
+        es.es_TextFormat=(UBYTE*)"No RDB found on this disk.\nNothing to backup.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+    if (!bd) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Backup";
+        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!buf) return;
+
+    /* Read RDSK block to get rdb_HighRDSKBlock */
+    if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
+        FreeVec(buf);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Backup";
+        es.es_TextFormat=(UBYTE*)"Failed to read RDB block from disk.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+    { struct RigidDiskBlock *r = (struct RigidDiskBlock *)buf;
+      block_lo = rdb->rdb_block_lo;
+      block_hi = r->rdb_HighRDSKBlock;
+      if (block_hi == RDB_END_MARK || block_hi < block_lo)
+          block_hi = block_lo;
+    }
+    num_blocks = block_hi - block_lo + 1;
+
+    if (!AslBase) {
+        FreeVec(buf);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Backup";
+        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    { struct FileRequester *fr; BOOL chosen = FALSE;
+      { struct TagItem at[] = {
+            { ASLFR_TitleText,    (ULONG)"Save Extended RDB Backup" },
+            { ASLFR_DoSaveMode,   TRUE },
+            { ASLFR_InitialDrawer,(ULONG)"RAM:" },
+            { ASLFR_InitialFile,  (ULONG)"RDB_extended.backup" },
+            { TAG_DONE, 0 } };
+        fr = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, at); }
+      if (fr) {
+          if (AslRequest(fr, NULL)) {
+              strncpy(save_path, fr->fr_Drawer, sizeof(save_path)-1);
+              save_path[sizeof(save_path)-1] = '\0';
+              AddPart((UBYTE *)save_path, (UBYTE *)fr->fr_File, sizeof(save_path));
+              chosen = TRUE;
+          }
+          FreeAslRequest(fr);
+      }
+      if (!chosen) { FreeVec(buf); return; }
+    }
+
+    { BPTR fh = Open((UBYTE *)save_path, MODE_NEWFILE);
+      if (!fh) {
+          FreeVec(buf);
+          es.es_StructSize=sizeof(es); es.es_Flags=0;
+          es.es_Title=(UBYTE*)"Extended Backup";
+          es.es_TextFormat=(UBYTE*)"Cannot create backup file.";
+          es.es_GadgetFormat=(UBYTE*)"OK";
+          EasyRequest(win, &es, NULL); return;
+      }
+
+      hdr[0]=ERDB_MAGIC; hdr[1]=ERDB_VERSION;
+      hdr[2]=block_lo;   hdr[3]=bd->block_size;
+      hdr[4]=num_blocks; hdr[5]=hdr[6]=hdr[7]=0;
+
+      if (Write(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ) {
+          Close(fh); FreeVec(buf);
+          es.es_StructSize=sizeof(es); es.es_Flags=0;
+          es.es_Title=(UBYTE*)"Extended Backup";
+          es.es_TextFormat=(UBYTE*)"Write error saving header.";
+          es.es_GadgetFormat=(UBYTE*)"OK";
+          EasyRequest(win, &es, NULL); return;
+      }
+
+      for (blk = block_lo; blk <= block_hi; blk++) {
+          if (!BlockDev_ReadBlock(bd, blk, buf)) {
+              ULONG k; for (k = 0; k < bd->block_size; k++) buf[k] = 0;
+          }
+          if (Write(fh, buf, (LONG)bd->block_size) != (LONG)bd->block_size) {
+              Close(fh); FreeVec(buf);
+              es.es_StructSize=sizeof(es); es.es_Flags=0;
+              es.es_Title=(UBYTE*)"Extended Backup";
+              es.es_TextFormat=(UBYTE*)"Write error saving block data.";
+              es.es_GadgetFormat=(UBYTE*)"OK";
+              EasyRequest(win, &es, NULL); return;
+          }
+      }
+      Close(fh);
+      { char msg[96];
+        sprintf(msg, "Extended RDB backup saved.\n%lu blocks (blocks %lu\x96%lu).",
+                (unsigned long)num_blocks,
+                (unsigned long)block_lo,
+                (unsigned long)block_hi);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Backup";
+        es.es_TextFormat=(UBYTE*)msg;
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); }
+    }
+    FreeVec(buf);
+}
+
+static void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
+{
+    struct EasyStruct es;
+    UBYTE *buf;
+    static char load_path[256];
+    BPTR   fh;
+    LONG   fsize;
+    ULONG  hdr[8];
+    ULONG  block_lo, block_size, num_blocks, blk;
+
+    if (!bd) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    es.es_StructSize=sizeof(es); es.es_Flags=0;
+    es.es_Title=(UBYTE*)"Extended Restore - WARNING";
+    es.es_TextFormat=(UBYTE*)
+        "WARNING: This will OVERWRITE multiple blocks\n"
+        "(RDB, partitions, filesystems) on the disk!\n\n"
+        "An incorrect backup WILL destroy the disk layout.\n"
+        "Ensure the backup matches THIS disk.\n\n"
+        "Are you absolutely sure?";
+    es.es_GadgetFormat=(UBYTE*)"Yes, restore|Cancel";
+    if (EasyRequest(win, &es, NULL) != 1) return;
+
+    if (!AslBase) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    { struct FileRequester *fr; BOOL chosen = FALSE;
+      { struct TagItem at[] = {
+            { ASLFR_TitleText,    (ULONG)"Select Extended RDB Backup File" },
+            { ASLFR_InitialDrawer,(ULONG)"RAM:" },
+            { ASLFR_InitialFile,  (ULONG)"RDB_extended.backup" },
+            { TAG_DONE, 0 } };
+        fr = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, at); }
+      if (fr) {
+          if (AslRequest(fr, NULL)) {
+              strncpy(load_path, fr->fr_Drawer, sizeof(load_path)-1);
+              load_path[sizeof(load_path)-1] = '\0';
+              AddPart((UBYTE *)load_path, (UBYTE *)fr->fr_File, sizeof(load_path));
+              chosen = TRUE;
+          }
+          FreeAslRequest(fr);
+      }
+      if (!chosen) return;
+    }
+
+    fh = Open((UBYTE *)load_path, MODE_OLDFILE);
+    if (!fh) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"Cannot open backup file.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    /* Get file size (Seek to end returns old pos; seek back returns end pos = size) */
+    Seek(fh, 0, OFFSET_END);
+    fsize = Seek(fh, 0, OFFSET_BEGINNING);
+
+    if (fsize < ERDB_HDR_SZ) {
+        Close(fh);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"File too small — not a valid extended backup.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    if (Read(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ ||
+        hdr[0] != ERDB_MAGIC || hdr[1] != ERDB_VERSION) {
+        Close(fh);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"Not a valid extended RDB backup.\n(Bad magic or unsupported version.)";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+    block_lo   = hdr[2];
+    block_size = hdr[3];
+    num_blocks = hdr[4];
+
+    if (block_size != bd->block_size) {
+        Close(fh);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"Block size mismatch between backup\nand this device. Aborted.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+    if (fsize != (LONG)(ERDB_HDR_SZ + num_blocks * block_size)) {
+        Close(fh);
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Extended Restore";
+        es.es_TextFormat=(UBYTE*)"File size does not match header.\nBackup may be corrupt. Aborted.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL); return;
+    }
+
+    /* Final confirmation */
+    { char msg[128];
+      sprintf(msg,
+          "LAST CHANCE\n\n"
+          "Write %lu blocks (blocks %lu\x96%lu) to\n"
+          "%s unit %lu ?\n\n"
+          "This CANNOT be undone.",
+          (unsigned long)num_blocks,
+          (unsigned long)block_lo,
+          (unsigned long)(block_lo + num_blocks - 1),
+          bd->devname, (unsigned long)bd->unit);
+      es.es_StructSize=sizeof(es); es.es_Flags=0;
+      es.es_Title=(UBYTE*)"Extended Restore - FINAL WARNING";
+      es.es_TextFormat=(UBYTE*)msg;
+      es.es_GadgetFormat=(UBYTE*)"Write it|Cancel";
+      if (EasyRequest(win, &es, NULL) != 1) { Close(fh); return; }
+    }
+
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!buf) { Close(fh); return; }
+
+    for (blk = 0; blk < num_blocks; blk++) {
+        if (Read(fh, buf, (LONG)block_size) != (LONG)block_size) {
+            Close(fh); FreeVec(buf);
+            es.es_StructSize=sizeof(es); es.es_Flags=0;
+            es.es_Title=(UBYTE*)"Extended Restore";
+            es.es_TextFormat=(UBYTE*)"Read error on backup file.";
+            es.es_GadgetFormat=(UBYTE*)"OK";
+            EasyRequest(win, &es, NULL); return;
+        }
+        if (!BlockDev_WriteBlock(bd, block_lo + blk, buf)) {
+            Close(fh); FreeVec(buf);
+            { char msg[80];
+              sprintf(msg, "Write failed on block %lu.", (unsigned long)(block_lo + blk));
+              es.es_StructSize=sizeof(es); es.es_Flags=0;
+              es.es_Title=(UBYTE*)"Extended Restore";
+              es.es_TextFormat=(UBYTE*)msg;
+              es.es_GadgetFormat=(UBYTE*)"OK";
+              EasyRequest(win, &es, NULL); }
+            return;
+        }
+    }
+    Close(fh); FreeVec(buf);
+    es.es_StructSize=sizeof(es); es.es_Flags=0;
+    es.es_Title=(UBYTE*)"Extended Restore";
+    es.es_TextFormat=(UBYTE*)"Extended RDB restored successfully.\nPlease reboot for changes to take effect.";
+    es.es_GadgetFormat=(UBYTE*)"OK";
+    EasyRequest(win, &es, NULL);
+}
+
+/* ------------------------------------------------------------------ */
 /* View RDB Block — read-only display of all RDB fields               */
 /* ------------------------------------------------------------------ */
 
 #define VRDB_LIST     1
 #define VRDB_DONE     2
-#define VRDB_MAXLINES 56
+#define VRDB_MAXLINES 120
 
 static char        vrdb_strs[VRDB_MAXLINES][80];
 static struct Node vrdb_nodes[VRDB_MAXLINES];
@@ -2207,6 +2504,55 @@ static char *vrdb_str(const char *src, UWORD srclen, char *dst, UWORD dstsize)
     dst[i] = '\0';
     if (i == 0) { dst[0] = '-'; dst[1] = '\0'; }
     return dst;
+}
+
+static BOOL vrdb_make_gadgets(APTR vi, struct Screen *scr,
+                               UWORD win_w, UWORD win_h,
+                               struct Gadget **glist_out)
+{
+    UWORD bor_l   = (UWORD)scr->WBorLeft;
+    UWORD bor_t   = (UWORD)scr->WBorTop + (UWORD)scr->Font->ta_YSize + 1;
+    UWORD bor_r   = (UWORD)scr->WBorRight;
+    UWORD bor_b   = (UWORD)scr->WBorBottom;
+    UWORD pad     = 4;
+    UWORD row_h   = (UWORD)scr->Font->ta_YSize + 2;
+    UWORD btn_h   = (UWORD)scr->Font->ta_YSize + 6;
+    UWORD inner_w = win_w - bor_l - bor_r;
+    UWORD overhead = bor_t + pad*3 + btn_h + bor_b;
+    UWORD lv_h    = (win_h > overhead + row_h) ? (win_h - overhead) : row_h;
+    struct NewGadget ng;
+    struct Gadget *gctx, *glist = NULL, *prev;
+
+    *glist_out = NULL;
+    gctx = CreateContext(&glist);
+    if (!gctx) return FALSE;
+
+    memset(&ng, 0, sizeof(ng));
+    ng.ng_VisualInfo = vi;
+    ng.ng_TextAttr   = scr->Font;
+    ng.ng_LeftEdge   = bor_l + pad;
+    ng.ng_TopEdge    = (WORD)(bor_t + pad);
+    ng.ng_Width      = inner_w - pad * 2;
+    ng.ng_Height     = lv_h;
+    ng.ng_GadgetID   = VRDB_LIST;
+    ng.ng_Flags      = 0;
+    { struct TagItem lt[] = { { GTLV_Labels,(ULONG)&vrdb_list }, { TAG_DONE,0 } };
+      prev = CreateGadgetA(LISTVIEW_KIND, gctx, &ng, lt);
+      if (!prev) { FreeGadgets(glist); return FALSE; } }
+
+    { struct TagItem bt[] = { { TAG_DONE, 0 } };
+      ng.ng_TopEdge    = (WORD)(bor_t + pad + lv_h + pad);
+      ng.ng_Height     = btn_h;
+      ng.ng_Width      = inner_w - pad * 2;
+      ng.ng_LeftEdge   = bor_l + pad;
+      ng.ng_GadgetText = "Close";
+      ng.ng_GadgetID   = VRDB_DONE;
+      ng.ng_Flags      = PLACETEXT_IN;
+      prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
+      if (!prev) { FreeGadgets(glist); return FALSE; } }
+
+    *glist_out = glist;
+    return TRUE;
 }
 
 static void rdb_view_block(struct Window *win, struct BlockDev *bd,
@@ -2260,6 +2606,34 @@ static void rdb_view_block(struct Window *win, struct BlockDev *bd,
         vrdb_list.lh_Head     = (struct Node *)&vrdb_list.lh_Tail;
         vrdb_list.lh_Tail     = NULL;
         vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
+
+        /* --- Installed Filesystems (from parsed RDB) --- */
+        { char b[80]; UWORD fi;
+          sprintf(b, "--- Installed Filesystems (%u) -----------------------", (unsigned)rdb->num_fs);
+          vrdb_add(b);
+          if (rdb->num_fs == 0) {
+              vrdb_add("  (none)");
+          } else {
+              for (fi = 0; fi < rdb->num_fs; fi++) {
+                  const struct FSInfo *fs = &rdb->filesystems[fi];
+                  char dt[16], ver[12], sz[16];
+                  FormatDosType(fs->dos_type, dt);
+                  if (fs->version)
+                      sprintf(ver, "v%lu.%lu",
+                              (unsigned long)(fs->version >> 16),
+                              (unsigned long)(fs->version & 0xFFFFUL));
+                  else
+                      sprintf(ver, "v?.?");
+                  if (fs->code && fs->code_size > 0)
+                      FormatSize((UQUAD)fs->code_size, sz);
+                  else
+                      sprintf(sz, "no code");
+                  sprintf(b, "  %-12s  %-8s  %s  (blk %lu)",
+                          dt, ver, sz, (unsigned long)fs->block_num);
+                  vrdb_add(b);
+              }
+          }
+        }
 
         /* --- Identity --- */
         vrdb_add("--- Identity -----------------------------------------");
@@ -2354,6 +2728,72 @@ static void rdb_view_block(struct Window *win, struct BlockDev *bd,
           { UWORD ii; for (ii=0; s[ii]; ii++) if (s[ii]<0x20||s[ii]>0x7E) s[ii]='.'; }
           if (s[0] == '\0') { s[0]='-'; s[1]='\0'; }
           sprintf(b,"  DriveInitName  : %s", s); vrdb_add(b); }
+
+        /* --- Reserved Fields --- */
+        vrdb_add("--- Reserved Fields ----------------------------------");
+        { UWORD ri; char b[80];
+          for (ri = 0; ri < 6; ri++) {
+              ULONG v = r->rdb_Reserved1[ri];
+              sprintf(b, "  Reserved1[%u]  : 0x%08lX%s", ri, (unsigned long)v,
+                      (v == 0xFFFFFFFFUL) ? "" : "  <-- modified");
+              vrdb_add(b); } }
+        { UWORD ri; char b[80];
+          for (ri = 0; ri < 3; ri++) {
+              ULONG v = r->rdb_Reserved2[ri];
+              sprintf(b, "  Reserved2[%u]  : 0x%08lX%s", ri, (unsigned long)v,
+                      (v == 0xFFFFFFFFUL) ? "" : "  <-- modified");
+              vrdb_add(b); } }
+        { UWORD ri; char b[80];
+          for (ri = 0; ri < 5; ri++) {
+              ULONG v = r->rdb_Reserved3[ri];
+              sprintf(b, "  Reserved3[%u]  : 0x%08lX%s", ri, (unsigned long)v,
+                      (v == 0xFFFFFFFFUL) ? "" : "  <-- modified");
+              vrdb_add(b); } }
+        { char b[80]; ULONG v = r->rdb_Reserved4;
+          sprintf(b, "  Reserved4     : 0x%08lX%s", (unsigned long)v,
+                  (v == 0xFFFFFFFFUL || v == 0) ? "" : "  <-- modified");
+          vrdb_add(b); }
+
+        /* --- Extra data: bytes 256-511 (beyond RigidDiskBlock struct) --- */
+        { const UBYTE *extra = buf + sizeof(struct RigidDiskBlock);
+          UWORD xlen = (UWORD)((bd->block_size > sizeof(struct RigidDiskBlock))
+                               ? bd->block_size - sizeof(struct RigidDiskBlock) : 0);
+          vrdb_add("--- Extra Block Data (bytes 256-511) -----------------");
+          if (xlen == 0) {
+              vrdb_add("  (block size matches struct size - no extra bytes)");
+          } else {
+              BOOL has_data = FALSE;
+              UWORD xi;
+              for (xi = 0; xi < xlen; xi++)
+                  if (extra[xi] != 0x00 && extra[xi] != 0xFF) { has_data = TRUE; break; }
+              if (!has_data) {
+                  char b[80];
+                  sprintf(b, "  %u bytes - all 0x00 or 0xFF (nothing stored here)",
+                          (unsigned)xlen);
+                  vrdb_add(b);
+              } else {
+                  char b[80];
+                  sprintf(b, "  %u bytes, contains data:", (unsigned)xlen);
+                  vrdb_add(b);
+                  for (xi = 0; xi < xlen; xi += 16) {
+                      char hex[52], asc[18];
+                      UWORD k, h = 0, a = 0;
+                      for (k = 0; k < 16; k++) {
+                          UBYTE c = (xi + k < xlen) ? extra[xi + k] : 0;
+                          hex[h++] = "0123456789ABCDEF"[c >> 4];
+                          hex[h++] = "0123456789ABCDEF"[c & 0xF];
+                          hex[h++] = ' ';
+                          if (k == 7) hex[h++] = ' ';
+                          asc[a++] = (c >= 0x20 && c <= 0x7E) ? (char)c : '.';
+                      }
+                      hex[h] = '\0'; asc[a] = '\0';
+                      sprintf(b, " %04X: %s%s",
+                              (unsigned)(0x100 + xi), hex, asc);
+                      vrdb_add(b);
+                  }
+              }
+          }
+        }
     }
 
     /* ---- Open window ---- */
@@ -2361,74 +2801,48 @@ static void rdb_view_block(struct Window *win, struct BlockDev *bd,
         struct Screen  *scr    = NULL;
         APTR            vi     = NULL;
         struct Gadget  *glist  = NULL;
-        struct Gadget  *gctx   = NULL;
-        struct Gadget  *lv_gad = NULL;
         struct Window  *vwin   = NULL;
+        UWORD font_h, bor_t, bor_b, row_h, btn_h, pad, win_w, win_h, min_h;
+        UWORD scr_w, scr_h;
 
         scr = LockPubScreen(NULL);
         if (!scr) goto vrdb_cleanup;
         vi = GetVisualInfoA(scr, NULL);
         if (!vi) goto vrdb_cleanup;
 
-        {
-            UWORD font_h  = scr->Font->ta_YSize;
-            UWORD bor_l   = (UWORD)scr->WBorLeft;
-            UWORD bor_t   = (UWORD)scr->WBorTop + font_h + 1;
-            UWORD bor_r   = (UWORD)scr->WBorRight;
-            UWORD bor_b   = (UWORD)scr->WBorBottom;
-            UWORD win_w   = 520;
-            UWORD inner_w = win_w - bor_l - bor_r;
-            UWORD pad     = 4;
-            UWORD row_h   = font_h + 2;
-            UWORD btn_h   = font_h + 6;
-            UWORD lv_rows = 18;
-            UWORD lv_h    = row_h * lv_rows;
-            UWORD win_h   = bor_t + pad + lv_h + pad + btn_h + pad + bor_b;
-            struct NewGadget ng;
-            struct Gadget *prev;
+        font_h = scr->Font->ta_YSize;
+        bor_t  = scr->WBorTop + font_h + 1;
+        bor_b  = scr->WBorBottom;
+        pad    = 4;
+        row_h  = font_h + 2;
+        btn_h  = font_h + 6;
+        win_w  = 520;
+        win_h  = bor_t + pad + row_h * 18 + pad + btn_h + pad + bor_b;
+        min_h  = bor_t + pad + row_h *  4 + pad + btn_h + pad + bor_b;
+        scr_w  = scr->Width;
+        scr_h  = scr->Height;
 
-            gctx = CreateContext(&glist);
-            if (!gctx) goto vrdb_cleanup;
+        if (!vrdb_make_gadgets(vi, scr, win_w, win_h, &glist))
+            goto vrdb_cleanup;
 
-            memset(&ng, 0, sizeof(ng));
-            ng.ng_VisualInfo = vi;
-            ng.ng_TextAttr   = scr->Font;
-
-            ng.ng_LeftEdge  = bor_l + pad;
-            ng.ng_TopEdge   = (WORD)(bor_t + pad);
-            ng.ng_Width     = inner_w - pad * 2;
-            ng.ng_Height    = lv_h;
-            ng.ng_GadgetID  = VRDB_LIST;
-            ng.ng_Flags     = 0;
-            { struct TagItem lt[] = { { GTLV_Labels,(ULONG)&vrdb_list }, { TAG_DONE,0 } };
-              lv_gad = CreateGadgetA(LISTVIEW_KIND, gctx, &ng, lt);
-              if (!lv_gad) goto vrdb_cleanup; }
-            prev = lv_gad;
-
-            { UWORD btn_y = bor_t + pad + lv_h + pad;
-              struct TagItem bt[] = { { TAG_DONE, 0 } };
-              ng.ng_TopEdge=btn_y; ng.ng_Height=btn_h;
-              ng.ng_Width=inner_w - pad * 2;
-              ng.ng_LeftEdge=bor_l+pad;
-              ng.ng_GadgetText="Close"; ng.ng_GadgetID=VRDB_DONE;
-              ng.ng_Flags=PLACETEXT_IN;
-              prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
-              if (!prev) goto vrdb_cleanup; }
-
-            { struct TagItem wt[] = {
-                  { WA_Left,      (ULONG)((scr->Width -win_w)/2) },
-                  { WA_Top,       (ULONG)((scr->Height-win_h)/2) },
-                  { WA_Width,     win_w }, { WA_Height, win_h },
-                  { WA_Title,     (ULONG)"RDB Block - View" },
-                  { WA_Gadgets,   (ULONG)glist },
-                  { WA_PubScreen, (ULONG)scr },
-                  { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
-                                  IDCMP_GADGETDOWN|IDCMP_REFRESHWINDOW },
-                  { WA_Flags,     WFLG_DRAGBAR|WFLG_DEPTHGADGET|
-                                  WFLG_CLOSEGADGET|WFLG_ACTIVATE|WFLG_SIMPLE_REFRESH },
-                  { TAG_DONE, 0 } };
-              vwin = OpenWindowTagList(NULL, wt); }
-        }
+        { struct TagItem wt[] = {
+              { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
+              { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
+              { WA_Width,     win_w }, { WA_Height, win_h },
+              { WA_Title,     (ULONG)"RDB Block - View" },
+              { WA_Gadgets,   (ULONG)glist },
+              { WA_PubScreen, (ULONG)scr },
+              { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
+                              IDCMP_GADGETDOWN|IDCMP_REFRESHWINDOW|IDCMP_NEWSIZE },
+              { WA_Flags,     WFLG_DRAGBAR|WFLG_DEPTHGADGET|
+                              WFLG_CLOSEGADGET|WFLG_ACTIVATE|WFLG_SIMPLE_REFRESH|
+                              WFLG_SIZEGADGET|WFLG_SIZEBBOTTOM },
+              { WA_MinWidth,  300 },
+              { WA_MinHeight, min_h },
+              { WA_MaxWidth,  scr_w },
+              { WA_MaxHeight, scr_h },
+              { TAG_DONE, 0 } };
+          vwin = OpenWindowTagList(NULL, wt); }
 
         UnlockPubScreen(NULL, scr); scr = NULL;
         if (!vwin) goto vrdb_cleanup;
@@ -2445,6 +2859,21 @@ static void rdb_view_block(struct Window *win, struct BlockDev *bd,
                     GT_ReplyIMsg(imsg);
                     switch (iclass) {
                     case IDCMP_CLOSEWINDOW: running = FALSE; break;
+                    case IDCMP_NEWSIZE: {
+                        struct Gadget *newglist = NULL;
+                        RemoveGList(vwin, glist, -1);
+                        FreeGadgets(glist);
+                        glist = NULL;
+                        if (vrdb_make_gadgets(vi, vwin->WScreen,
+                                              (UWORD)vwin->Width,
+                                              (UWORD)vwin->Height,
+                                              &newglist)) {
+                            glist = newglist;
+                            AddGList(vwin, glist, ~0, -1, NULL);
+                            RefreshGList(glist, vwin, NULL, -1);
+                        }
+                        GT_RefreshWindow(vwin, NULL);
+                        break; }
                     case IDCMP_GADGETUP:
                         if (gad->GadgetID == VRDB_DONE) running = FALSE;
                         break;
@@ -2490,13 +2919,17 @@ static void show_about(struct Window *win)
 }
 
 static struct NewMenu partview_menu_def[] = {
-    { NM_TITLE, "DiskPart",          NULL, 0, 0, NULL },
-    { NM_ITEM,  "About...",          NULL, 0, 0, NULL },
-    { NM_TITLE, "Advanced",           NULL, 0, 0, NULL },
-    { NM_ITEM,  "View RDB Block",    NULL, 0, 0, NULL },
-    { NM_ITEM,  "Backup RDB Block",  NULL, 0, 0, NULL },
-    { NM_ITEM,  "Restore RDB Block", NULL, 0, 0, NULL },
-    { NM_END,   NULL,                NULL, 0, 0, NULL },
+    { NM_TITLE, "DiskPart",              NULL,         0, 0, NULL },
+    { NM_ITEM,  "About...",              NULL,         0, 0, NULL },
+    { NM_TITLE, "Advanced",              NULL,         0, 0, NULL },
+    { NM_ITEM,  "View RDB Block",        NULL,         0, 0, NULL },
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },
+    { NM_ITEM,  "Backup RDB Block",      NULL,         0, 0, NULL },
+    { NM_ITEM,  "Restore RDB Block",     NULL,         0, 0, NULL },
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },
+    { NM_ITEM,  "Extended Backup...",    NULL,         0, 0, NULL },
+    { NM_ITEM,  "Extended Restore...",   NULL,         0, 0, NULL },
+    { NM_END,   NULL,                    NULL,         0, 0, NULL },
 };
 
 BOOL partview_run(const char *devname, ULONG unit)
@@ -2717,10 +3150,14 @@ BOOL partview_run(const char *devname, ULONG unit)
                             show_about(win);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 0)
                             rdb_view_block(win, bd, rdb);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 1)
-                            rdb_backup_block(win, bd, rdb);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 2)
+                            rdb_backup_block(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 3)
                             rdb_restore_block(win, bd);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 5)
+                            rdb_backup_extended(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 6)
+                            rdb_restore_extended(win, bd);
                         mcode = it->NextSelect;
                     }
                     break;
