@@ -48,6 +48,13 @@ struct BlockDev {
     UQUAD            total_bytes;   /* total disk capacity            */
     char             devname[64];
     ULONG            unit;
+    BYTE             last_io_err;       /* io_Error from last WriteBlock call */
+    BYTE             last_hd_err;       /* io_Error from HD_SCSICMD write     */
+    BYTE             last_hd_read_err;  /* io_Error from HD_SCSICMD read      */
+    ULONG            last_verify_block; /* block number that failed verify    */
+    ULONG            last_verify_off;   /* byte offset of first mismatch      */
+    UBYTE            last_wrote[4];     /* bytes at mismatch offset, written  */
+    UBYTE            last_read[4];      /* bytes at mismatch offset, on disk  */
 };
 
 /* Open/close a block device for probing or RDB I/O. */
@@ -129,5 +136,8 @@ void RDB_FreeCode (struct RDBInfo *rdb);  /* free all FSInfo.code buffers */
 
 void FormatDosType(ULONG dostype, char *buf);   /* buf >= 16 bytes */
 void FormatSize   (UQUAD bytes,   char *buf);   /* buf >= 16 bytes */
+
+/* Reads blocks 0-3, reports what was found.  buf >= 256 bytes. */
+void RDB_ScanDiag (struct BlockDev *bd, char *buf);
 
 #endif /* RDB_H */

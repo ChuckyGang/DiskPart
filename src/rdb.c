@@ -9,17 +9,28 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/io.h>
+#include <exec/errors.h>
 #include <exec/ports.h>
 #include <exec/lists.h>
 #include <exec/nodes.h>
 #include <exec/tasks.h>
 #include <devices/trackdisk.h>
 #include <devices/hardblocks.h>
+#include <devices/scsidisk.h>
 #include <dos/filehandler.h>
 #include <proto/exec.h>
 
 #include "clib.h"
 #include "rdb.h"
+
+/* TD_READ64/TD_WRITE64 are not in the Bartman SDK trackdisk.h but are
+   supported by most modern AmigaOS hard disk drivers (CMD_NONSTD=9). */
+#ifndef TD_WRITE64
+#define TD_WRITE64  (CMD_NONSTD + 16)   /* = 25 */
+#endif
+#ifndef TD_READ64
+#define TD_READ64   (CMD_NONSTD + 15)   /* = 24 */
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Local CreateMsgPort / DeleteMsgPort                                 */
@@ -73,6 +84,7 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
     bd->port = local_create_port();
     if (!bd->port) { FreeVec(bd); return NULL; }
 
+    bd->iotd.iotd_Req.io_Message.mn_Length    = sizeof(bd->iotd);
     bd->iotd.iotd_Req.io_Message.mn_ReplyPort = bd->port;
 
     err = OpenDevice((UBYTE *)devname, unit,
@@ -84,16 +96,19 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
     }
     bd->open = TRUE;
 
-    /* Try to read drive geometry for capacity info */
-    bd->iotd.iotd_Req.io_Command = TD_GETDRIVETYPE;
+    /* Query drive geometry for block size and capacity */
+    memset(&geom, 0, sizeof(geom));
+    bd->iotd.iotd_Req.io_Command = TD_GETGEOMETRY;
     bd->iotd.iotd_Req.io_Length  = sizeof(geom);
     bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
     bd->iotd.iotd_Req.io_Flags   = 0;
     DoIO((struct IORequest *)&bd->iotd);
     /* ignore error — geometry is informational only */
 
-    bd->block_size  = 512;          /* safe default */
-    bd->total_bytes = 0;
+    bd->block_size  = 512;   /* RDB format requires 512-byte blocks */
+    bd->total_bytes = (geom.dg_TotalSectors > 0)
+                      ? (UQUAD)geom.dg_TotalSectors * 512UL
+                      : 0;
 
     return bd;
 }
@@ -116,11 +131,55 @@ void BlockDev_Close(struct BlockDev *bd)
 
 BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
 {
+    BYTE err;
+
+    /* Try HD_SCSICMD READ(10) first — bypasses the scsi.device read cache
+       so we see what is physically on disk after an HD_SCSICMD write.
+       Falls through to CMD_READ on IOERR_NOCMD (non-SCSI devices). */
+    {
+        struct SCSICmd scmd;
+        UBYTE cdb[10];
+        cdb[0] = 0x28;                      /* READ(10) */
+        cdb[1] = 0x00;
+        cdb[2] = (UBYTE)(blocknum >> 24);
+        cdb[3] = (UBYTE)(blocknum >> 16);
+        cdb[4] = (UBYTE)(blocknum >>  8);
+        cdb[5] = (UBYTE)(blocknum);
+        cdb[6] = 0x00;
+        cdb[7] = 0x00;
+        cdb[8] = 0x01;
+        cdb[9] = 0x00;
+
+        scmd.scsi_Data        = (UWORD *)buf;
+        scmd.scsi_Length      = bd->block_size;
+        scmd.scsi_Actual      = 0;
+        scmd.scsi_Command     = cdb;
+        scmd.scsi_CmdLength   = 10;
+        scmd.scsi_CmdActual   = 0;
+        scmd.scsi_Flags       = SCSIF_READ;
+        scmd.scsi_Status      = 0;
+        scmd.scsi_SenseData   = NULL;
+        scmd.scsi_SenseLength = 0;
+        scmd.scsi_SenseActual = 0;
+
+        bd->iotd.iotd_Req.io_Command = HD_SCSICMD;
+        bd->iotd.iotd_Req.io_Length  = sizeof(scmd);
+        bd->iotd.iotd_Req.io_Data    = (APTR)&scmd;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+        bd->last_hd_read_err = err;
+        if (err == 0) return TRUE;
+        if (err != IOERR_NOCMD) return FALSE;
+        /* IOERR_NOCMD: not a SCSI device — fall through to CMD_READ */
+    }
+
     bd->iotd.iotd_Req.io_Command = CMD_READ;
     bd->iotd.iotd_Req.io_Length  = bd->block_size;
     bd->iotd.iotd_Req.io_Data    = buf;
     bd->iotd.iotd_Req.io_Offset  = blocknum * bd->block_size;
     bd->iotd.iotd_Req.io_Flags   = 0;
+    bd->iotd.iotd_Count          = 0;
     return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
 }
 
@@ -130,18 +189,92 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
 
 BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
 {
+    ULONG byte_offset = blocknum * bd->block_size;
+    BYTE  err;
+
+    /* Try TD_WRITE64 first (64-bit byte address).
+       iotd_Count = high 32 bits; always 0 for disks < 4 GB. */
+    bd->iotd.iotd_Req.io_Command = TD_WRITE64;
+    bd->iotd.iotd_Req.io_Length  = bd->block_size;
+    bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+    bd->iotd.iotd_Req.io_Offset  = byte_offset;
+    bd->iotd.iotd_Req.io_Flags   = 0;
+    bd->iotd.iotd_Count          = 0;
+    err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+    if (err == 0) return TRUE;
+
+    /* Any non-zero result from TD_WRITE64 means the driver either doesn't
+       support it or failed internally — fall through to CMD_WRITE.  We do
+       not report the TD_WRITE64 error here: if there is a real problem
+       (write-protect, bad media, etc.) CMD_WRITE will report it instead. */
+
+    /* HD_SCSICMD: raw SCSI WRITE(10) — bypasses the trackdisk layer
+       entirely.  Works on A3000 scsi.device where CMD_WRITE silently
+       discards data.  Falls through to CMD_WRITE if the device doesn't
+       support HD_SCSICMD (IOERR_NOCMD). */
+    {
+        struct SCSICmd scmd;
+        UBYTE cdb[10];
+        cdb[0] = 0x2A;                      /* WRITE(10) */
+        cdb[1] = 0x00;
+        cdb[2] = (UBYTE)(blocknum >> 24);
+        cdb[3] = (UBYTE)(blocknum >> 16);
+        cdb[4] = (UBYTE)(blocknum >>  8);
+        cdb[5] = (UBYTE)(blocknum);
+        cdb[6] = 0x00;
+        cdb[7] = 0x00;
+        cdb[8] = 0x01;                      /* 1 block */
+        cdb[9] = 0x00;
+
+        scmd.scsi_Data        = (UWORD *)buf;
+        scmd.scsi_Length      = bd->block_size;
+        scmd.scsi_Actual      = 0;
+        scmd.scsi_Command     = cdb;
+        scmd.scsi_CmdLength   = 10;
+        scmd.scsi_CmdActual   = 0;
+        scmd.scsi_Flags       = SCSIF_WRITE;
+        scmd.scsi_Status      = 0;
+        scmd.scsi_SenseData   = NULL;
+        scmd.scsi_SenseLength = 0;
+        scmd.scsi_SenseActual = 0;
+
+        bd->iotd.iotd_Req.io_Command = HD_SCSICMD;
+        bd->iotd.iotd_Req.io_Length  = sizeof(scmd);
+        bd->iotd.iotd_Req.io_Data    = (APTR)&scmd;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+        bd->last_hd_err = err;   /* record for diagnostics */
+        if (err == 0) return TRUE;
+        if (err != IOERR_NOCMD) { bd->last_io_err = err; return FALSE; }
+        /* IOERR_NOCMD: not a SCSI device — fall through to CMD_WRITE */
+    }
+
+    /* CMD_WRITE buffers the data in the driver; CMD_UPDATE flushes it to the
+       physical media.  Omitting CMD_UPDATE causes a silent discard on drivers
+       that use deferred writes (trackdisk, A3000 scsi.device). */
     bd->iotd.iotd_Req.io_Command = CMD_WRITE;
     bd->iotd.iotd_Req.io_Length  = bd->block_size;
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
-    bd->iotd.iotd_Req.io_Offset  = blocknum * bd->block_size;
+    bd->iotd.iotd_Req.io_Offset  = byte_offset;
     bd->iotd.iotd_Req.io_Flags   = 0;
-    if (DoIO((struct IORequest *)&bd->iotd) != 0) return FALSE;
+    bd->iotd.iotd_Count          = 0;
+    err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+    if (err != 0) { bd->last_io_err = err; return FALSE; }
 
+    /* CMD_UPDATE flushes the write buffer to physical media on drivers
+       that use deferred writes (e.g. A3000 scsi.device).  Not all drivers
+       implement it — ignore any error so emulated/non-buffering devices
+       that return IOERR_NOCMD are not treated as write failures. */
     bd->iotd.iotd_Req.io_Command = CMD_UPDATE;
     bd->iotd.iotd_Req.io_Length  = 0;
     bd->iotd.iotd_Req.io_Data    = NULL;
+    bd->iotd.iotd_Req.io_Offset  = 0;
     bd->iotd.iotd_Req.io_Flags   = 0;
-    return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    bd->iotd.iotd_Count          = 0;
+    DoIO((struct IORequest *)&bd->iotd);   /* best-effort flush; ignore error */
+
+    return TRUE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,9 +283,13 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
 
 BOOL BlockDev_HasMBR(struct BlockDev *bd)
 {
-    UBYTE buf[512];
-    if (!BlockDev_ReadBlock(bd, 0, buf)) return FALSE;
-    return (buf[510] == 0x55 && buf[511] == 0xAA) ? TRUE : FALSE;
+    UBYTE *buf = (UBYTE *)AllocVec(512, MEMF_CHIP);
+    BOOL   result = FALSE;
+    if (!buf) return FALSE;
+    if (BlockDev_ReadBlock(bd, 0, buf))
+        result = (buf[510] == 0x55 && buf[511] == 0xAA) ? TRUE : FALSE;
+    FreeVec(buf);
+    return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -203,7 +340,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
     memset(rdb, 0, sizeof(*rdb));
     rdb->valid = FALSE;
 
-    buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC);
+    buf = (UBYTE *)AllocVec(512, MEMF_CHIP);
     if (!buf)
         return FALSE;
 
@@ -214,6 +351,18 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         rdsk = (struct RigidDiskBlock *)buf;
         if (rdsk->rdb_ID != IDNAME_RIGIDDISK)
             continue;
+
+        /* Sanity-check the critical geometry fields before accepting this
+           block.  The RDSK ID alone is not enough — some partially-written
+           or corrupt blocks have a correct ID but garbage in every other
+           field.  Requiring plausible geometry catches those cases while
+           still accepting blocks whose checksums are wrong but whose data
+           is otherwise correct (e.g., certain older HDToolBox versions). */
+        if (rdsk->rdb_BlockBytes == 0 || rdsk->rdb_BlockBytes > 65536)
+            continue;
+        if (rdsk->rdb_Heads    == 0 || rdsk->rdb_Heads    > 255)  continue;
+        if (rdsk->rdb_Sectors  == 0 || rdsk->rdb_Sectors  > 255)  continue;
+        if (rdsk->rdb_Cylinders == 0 || rdsk->rdb_Cylinders > 0x100000) continue;
 
         rdb->valid       = TRUE;
         rdb->block_num   = blk;
@@ -355,6 +504,59 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
 }
 
 /* ------------------------------------------------------------------ */
+/* RDB_ScanDiag — diagnostic: read blocks 0-3 and describe contents   */
+/* ------------------------------------------------------------------ */
+
+void RDB_ScanDiag(struct BlockDev *bd, char *out)
+{
+    UBYTE *buf = (UBYTE *)AllocVec(512, MEMF_CHIP);
+    char  *p   = out;
+    ULONG  blk;
+
+    if (!buf) {
+        sprintf(out, "AllocVec(CHIP) failed");
+        return;
+    }
+
+    /* Block 0: show RDB geometry fields */
+    if (BlockDev_ReadBlock(bd, 0, buf)) {
+        /* rdb_Cylinders @+64, rdb_Sectors @+68, rdb_Heads @+72 (longs 16,17,18) */
+        const ULONG *lp = (const ULONG *)buf;
+        sprintf(p, "RDB: cyls=%lu heads=%lu secs=%lu\n",
+                lp[16], lp[17], lp[18]);
+    } else {
+        sprintf(p, "RDB: read error\n");
+    }
+    while (*p) p++;
+
+    /* Block 1: show PART drive name and DosEnvec */
+    if (BlockDev_ReadBlock(bd, 1, buf)) {
+        /* pb_DriveName is at offset 36 (BSTR: buf[36]=len, buf[37..]=chars) */
+        UBYTE  namelen = buf[36];
+        UBYTE  nc      = (namelen < 8) ? namelen : 8;
+        char   name[9];
+        ULONG  i;
+        /* pb_Environment at offset 128; env[1]=SizeBlock env[3]=Heads
+           env[5]=BlksPerTrack env[9]=LowCyl env[10]=HighCyl */
+        const ULONG *env = (const ULONG *)(buf + 128);
+        for (i = 0; i < nc; i++) name[i] = (char)buf[37 + i];
+        name[nc] = '\0';
+        sprintf(p,
+            "PART: namelen=%lu name=%s\n"
+            "SB=%lu H=%lu SPT=%lu\n"
+            "lo=%lu hi=%lu\n",
+            (unsigned long)namelen, name,
+            env[1], env[3], env[5],
+            env[9], env[10]);
+    } else {
+        sprintf(p, "PART: read error\n");
+    }
+    while (*p) p++;
+
+    FreeVec(buf);
+}
+
+/* ------------------------------------------------------------------ */
 /* RDB_FreeCode — free all AllocVec'd filesystem code buffers          */
 /* ------------------------------------------------------------------ */
 
@@ -409,10 +611,50 @@ void RDB_InitFresh(struct RDBInfo *rdb,
 }
 
 /* ------------------------------------------------------------------ */
+/* write_and_verify — write a block then read it back to confirm       */
+/* Sets bd->last_io_err = 1 on verify mismatch (distinguishable from  */
+/* exec error codes which are all 0 or negative).                      */
+/* ------------------------------------------------------------------ */
+
+static BOOL write_and_verify(struct BlockDev *bd, ULONG blocknum,
+                              const void *buf, void *vbuf)
+{
+    if (!BlockDev_WriteBlock(bd, blocknum, buf))
+        return FALSE;  /* last_io_err already set by WriteBlock */
+
+    if (!BlockDev_ReadBlock(bd, blocknum, vbuf)) {
+        bd->last_io_err = 1;   /* read-back failed */
+        return FALSE;
+    }
+    if (memcmp(buf, vbuf, bd->block_size) != 0) {
+        const UBYTE *b = (const UBYTE *)buf;
+        const UBYTE *v = (const UBYTE *)vbuf;
+        ULONG j;
+        bd->last_io_err       = 1;
+        bd->last_verify_block = blocknum;
+        bd->last_verify_off   = 0;
+        for (j = 0; j < bd->block_size; j++) {
+            if (b[j] != v[j]) {
+                bd->last_verify_off = j;
+                bd->last_wrote[0] = b[j];   bd->last_wrote[1] = (j+1 < bd->block_size) ? b[j+1] : 0;
+                bd->last_wrote[2] = (j+2 < bd->block_size) ? b[j+2] : 0;
+                bd->last_wrote[3] = (j+3 < bd->block_size) ? b[j+3] : 0;
+                bd->last_read[0]  = v[j];   bd->last_read[1]  = (j+1 < bd->block_size) ? v[j+1] : 0;
+                bd->last_read[2]  = (j+2 < bd->block_size) ? v[j+2] : 0;
+                bd->last_read[3]  = (j+3 < bd->block_size) ? v[j+3] : 0;
+                break;
+            }
+        }
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
 /* write_lseg_chain — write filesystem code as a chain of LSEG blocks */
 /* ------------------------------------------------------------------ */
 
-static BOOL write_lseg_chain(struct BlockDev *bd, ULONG *blk_buf,
+static BOOL write_lseg_chain(struct BlockDev *bd, ULONG *blk_buf, ULONG *vbuf,
                               const UBYTE *code, ULONG code_size,
                               ULONG first_blk)
 {
@@ -434,7 +676,7 @@ static BOOL write_lseg_chain(struct BlockDev *bd, ULONG *blk_buf,
         memcpy((UBYTE *)blk_buf + 20, code + off, chunk);  /* lsb_LoadData (offset 5 longs = 20 bytes) */
         blk_buf[2] = (ULONG)block_checksum(blk_buf, 128);
 
-        if (!BlockDev_WriteBlock(bd, blk, blk_buf)) return FALSE;
+        if (!write_and_verify(bd, blk, blk_buf, vbuf)) return FALSE;
     }
     return TRUE;
 }
@@ -454,6 +696,7 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
     struct RigidDiskBlock *rdsk;
     struct PartitionBlock *pb;
     ULONG *buf;
+    ULONG *vbuf;   /* read-back verify buffer */
     UWORD  i;
     ULONG  part_blk, fshd_blk, lseg_blk;
     ULONG  lseg_starts[MAX_FILESYSTEMS];
@@ -461,8 +704,13 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
 
     if (!bd || !rdb || !rdb->valid) return FALSE;
 
-    buf = (ULONG *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+    /* MEMF_CHIP: scsi.device DMA can only read from chip RAM.
+       Fast RAM buffers cause silent write failures (device reads wrong address). */
+    buf = (ULONG *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
     if (!buf) return FALSE;
+
+    vbuf = (ULONG *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
+    if (!vbuf) { FreeVec(buf); return FALSE; }
 
     /* First partition block immediately after the RDB block */
     part_blk = rdb->rdb_block_lo + 1;
@@ -501,11 +749,11 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         pi->block_num = part_blk;
         pi->next_part = next;
 
-        memset(buf, 0, 512);
+        memset(buf, 0, bd->block_size);
         pb = (struct PartitionBlock *)buf;
 
         pb->pb_ID          = IDNAME_PARTITION;
-        pb->pb_SummedLongs = 512 / 4;
+        pb->pb_SummedLongs = bd->block_size / 4;
         pb->pb_ChkSum      = 0;
         pb->pb_HostID      = 7;
         pb->pb_Next        = next;
@@ -524,10 +772,12 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         pb->pb_Environment[DE_SIZEBLOCK]    = 128;   /* 512 bytes / 4 */
         pb->pb_Environment[DE_SECORG]       = 0;
         pb->pb_Environment[DE_NUMHEADS]     =
-            pi->heads   > 0 ? pi->heads   : rdb->heads;
+            pi->heads   > 0 ? pi->heads   :
+            rdb->heads  > 0 ? rdb->heads  : 1;   /* never write 0 */
         pb->pb_Environment[DE_SECSPERBLK]   = 1;
         pb->pb_Environment[DE_BLKSPERTRACK] =
-            pi->sectors > 0 ? pi->sectors : rdb->sectors;
+            pi->sectors > 0 ? pi->sectors :
+            rdb->sectors > 0 ? rdb->sectors : 1; /* never write 0 */
         pb->pb_Environment[DE_RESERVEDBLKS] = 2;
         pb->pb_Environment[DE_PREFAC]       = 0;
         pb->pb_Environment[DE_INTERLEAVE]   = 0;
@@ -548,10 +798,10 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         pb->pb_Environment[19]              =      /* DE_BOOTBLOCKS */
             pi->boot_blocks > 0 ? pi->boot_blocks : 2;
 
-        pb->pb_ChkSum = block_checksum(buf, 512 / 4);
+        pb->pb_ChkSum = block_checksum(buf, bd->block_size / 4);
 
-        if (!BlockDev_WriteBlock(bd, part_blk, buf)) {
-            FreeVec(buf);
+        if (!write_and_verify(bd, part_blk, buf, vbuf)) {
+            FreeVec(vbuf); FreeVec(buf);
             return FALSE;
         }
         part_blk++;
@@ -565,7 +815,7 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
 
         fi->block_num = fshd_blk + i;
 
-        memset(buf, 0, 512);
+        memset(buf, 0, bd->block_size);
         fhb = (struct FileSysHeaderBlock *)buf;
 
         fhb->fhb_ID           = IDNAME_FSHEADER;
@@ -589,8 +839,8 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
 
         fhb->fhb_ChkSum = (LONG)block_checksum(buf, 128);
 
-        if (!BlockDev_WriteBlock(bd, fshd_blk + i, buf)) {
-            FreeVec(buf);
+        if (!write_and_verify(bd, fshd_blk + i, buf, vbuf)) {
+            FreeVec(vbuf); FreeVec(buf);
             return FALSE;
         }
     }
@@ -599,22 +849,22 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
     for (i = 0; i < rdb->num_fs; i++) {
         struct FSInfo *fi = &rdb->filesystems[i];
         if (fi->code && fi->code_size > 0 && lseg_starts[i] != RDB_END_MARK) {
-            if (!write_lseg_chain(bd, buf, fi->code, fi->code_size, lseg_starts[i])) {
-                FreeVec(buf);
+            if (!write_lseg_chain(bd, buf, vbuf, fi->code, fi->code_size, lseg_starts[i])) {
+                FreeVec(vbuf); FreeVec(buf);
                 return FALSE;
             }
         }
     }
 
     /* --- Write RigidDiskBlock --- */
-    memset(buf, 0, 512);
+    memset(buf, 0, bd->block_size);
     rdsk = (struct RigidDiskBlock *)buf;
 
     rdsk->rdb_ID          = IDNAME_RIGIDDISK;
-    rdsk->rdb_SummedLongs = 512 / 4;
+    rdsk->rdb_SummedLongs = bd->block_size / 4;
     rdsk->rdb_ChkSum      = 0;
     rdsk->rdb_HostID      = 7;
-    rdsk->rdb_BlockBytes  = 512;
+    rdsk->rdb_BlockBytes  = bd->block_size;
     rdsk->rdb_Flags       = rdb->flags;
 
     /* Optional block list heads: 0xFFFFFFFF = none */
@@ -654,13 +904,14 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
     memcpy(rdsk->rdb_DiskProduct,  rdb->disk_product,  16);
     memcpy(rdsk->rdb_DiskRevision, rdb->disk_revision, 4);
 
-    rdsk->rdb_ChkSum = block_checksum(buf, 512 / 4);
+    rdsk->rdb_ChkSum = block_checksum(buf, bd->block_size / 4);
 
-    if (!BlockDev_WriteBlock(bd, rdb->block_num, buf)) {
-        FreeVec(buf);
+    if (!write_and_verify(bd, rdb->block_num, buf, vbuf)) {
+        FreeVec(vbuf); FreeVec(buf);
         return FALSE;
     }
 
+    FreeVec(vbuf);
     FreeVec(buf);
     return TRUE;
 }

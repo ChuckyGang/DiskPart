@@ -803,9 +803,10 @@ static ULONG parse_dostype(const char *s)
 #define PDLG_ADVANCED    9
 #define PDLG_CANCEL      10
 #define PDLG_SYNCSCSI    11
+#define PDLG_AUTOMOUNT   12
 
-/* Rows: Name, LoCyl, HiCyl, FS, BootPri, Bootable+DirSCSI */
-#define PDLG_ROWS 6
+/* Rows: Name, LoCyl, SizeMB, FS, BootPri, Bootable+Automount, DirSCSI+SyncSCSI */
+#define PDLG_ROWS 7
 
 static void partition_advanced_dialog(struct PartInfo *pi)
 {
@@ -987,9 +988,10 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
     struct Gadget  *name_gad     = NULL;
     struct Gadget  *sizemb_gad   = NULL;
     struct Gadget  *bootpri_gad  = NULL;
-    struct Gadget  *boot_gad     = NULL;
-    struct Gadget  *dirscsi_gad  = NULL;
-    struct Gadget  *syncscsi_gad = NULL;
+    struct Gadget  *boot_gad      = NULL;
+    struct Gadget  *automount_gad = NULL;
+    struct Gadget  *dirscsi_gad   = NULL;
+    struct Gadget  *syncscsi_gad  = NULL;
     struct Window  *win          = NULL;
     BOOL            result       = FALSE;
     UWORD           cur_fs       = 1;   /* default FFS */
@@ -1132,33 +1134,49 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
 
             STR_GAD(PDLG_BOOTPRI, "Boot Priority", bootpri_str, 8, &bootpri_gad)
 
-            /* Bootable [x]   Direct SCSI [x]   Sync SCSI [x] */
+            /* Row 5: Bootable [x]   Automount [x] */
             {
-                BOOL is_bootable = (BOOL)((pi->flags & 2) == 0);
-                BOOL is_dirscsi  = (BOOL)((pi->flags & 4) != 0);
-                BOOL is_syncscsi = (BOOL)((pi->flags & 8) != 0);
-                UWORD third = (inner_w - pad * 4) / 3;
+                BOOL is_bootable  = (BOOL)((pi->flags & 1) != 0);  /* PBFF_BOOTABLE */
+                BOOL is_automount = (BOOL)((pi->flags & 2) == 0);  /* !PBFF_NOMOUNT */
+                UWORD half = (inner_w - pad * 3) / 2;
                 struct TagItem cbt[] = { { GTCB_Checked, 0 }, { TAG_DONE, 0 } };
 
                 cbt[0].ti_Data = (ULONG)is_bootable;
                 ng.ng_LeftEdge=bor_l+pad; ng.ng_TopEdge=ROW_Y(row);
-                ng.ng_Width=third; ng.ng_Height=row_h;
+                ng.ng_Width=half; ng.ng_Height=row_h;
                 ng.ng_GadgetText="Bootable"; ng.ng_GadgetID=PDLG_BOOTABLE;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 boot_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                 if (!boot_gad) goto cleanup; prev=boot_gad;
 
+                cbt[0].ti_Data=(ULONG)is_automount;
+                ng.ng_LeftEdge=bor_l+pad+half+pad; ng.ng_TopEdge=ROW_Y(row);
+                ng.ng_Width=half; ng.ng_Height=row_h;
+                ng.ng_GadgetText="Automount"; ng.ng_GadgetID=PDLG_AUTOMOUNT;
+                ng.ng_Flags=PLACETEXT_RIGHT;
+                automount_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
+                if (!automount_gad) goto cleanup; prev=automount_gad;
+            }
+            row++;
+
+            /* Row 6: Direct SCSI [x]   Sync SCSI [x] */
+            {
+                BOOL is_dirscsi  = (BOOL)((pi->flags & 4) != 0);
+                BOOL is_syncscsi = (BOOL)((pi->flags & 8) != 0);
+                UWORD half = (inner_w - pad * 3) / 2;
+                struct TagItem cbt[] = { { GTCB_Checked, 0 }, { TAG_DONE, 0 } };
+
                 cbt[0].ti_Data=(ULONG)is_dirscsi;
-                ng.ng_LeftEdge=bor_l+pad+third+pad; ng.ng_TopEdge=ROW_Y(row);
-                ng.ng_Width=third; ng.ng_Height=row_h;
+                ng.ng_LeftEdge=bor_l+pad; ng.ng_TopEdge=ROW_Y(row);
+                ng.ng_Width=half; ng.ng_Height=row_h;
                 ng.ng_GadgetText="Direct SCSI"; ng.ng_GadgetID=PDLG_DIRSCSI;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 dirscsi_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                 if (!dirscsi_gad) goto cleanup; prev=dirscsi_gad;
 
                 cbt[0].ti_Data=(ULONG)is_syncscsi;
-                ng.ng_LeftEdge=bor_l+pad+(third+pad)*2; ng.ng_TopEdge=ROW_Y(row);
-                ng.ng_Width=third; ng.ng_Height=row_h;
+                ng.ng_LeftEdge=bor_l+pad+half+pad; ng.ng_TopEdge=ROW_Y(row);
+                ng.ng_Width=half; ng.ng_Height=row_h;
                 ng.ng_GadgetText="Sync SCSI"; ng.ng_GadgetID=PDLG_SYNCSCSI;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 syncscsi_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
@@ -1261,9 +1279,10 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         si = (struct StringInfo *)bootpri_gad->SpecialInfo;
                         pi->boot_pri = parse_long((char *)si->Buffer);
                         pi->flags = 0;
-                        if (!(boot_gad->Flags     & GFLG_SELECTED)) pi->flags |= 2UL;
-                        if (  dirscsi_gad->Flags  & GFLG_SELECTED)  pi->flags |= 4UL;
-                        if (  syncscsi_gad->Flags & GFLG_SELECTED)  pi->flags |= 8UL;
+                        if (  boot_gad->Flags      & GFLG_SELECTED) pi->flags |= 1UL; /* PBFF_BOOTABLE */
+                        if (!(automount_gad->Flags & GFLG_SELECTED)) pi->flags |= 2UL; /* PBFF_NOMOUNT */
+                        if (  dirscsi_gad->Flags   & GFLG_SELECTED) pi->flags |= 4UL;
+                        if (  syncscsi_gad->Flags  & GFLG_SELECTED) pi->flags |= 8UL;
                         pi->dos_type = dlg_fs_dostypes[cur_fs];
                         result = TRUE; running = FALSE; break;
                     }
@@ -1291,10 +1310,11 @@ cleanup:
 
 /* Gadget IDs for the filesystem manager window */
 #define FSDLG_LIST    1
-#define FSDLG_ADD     2
-#define FSDLG_EDIT    3
-#define FSDLG_DELETE  4
-#define FSDLG_DONE    5
+#define FSDLG_SEL     2   /* GTLV_ShowSelected target — display only */
+#define FSDLG_ADD     3
+#define FSDLG_EDIT    4
+#define FSDLG_DELETE  5
+#define FSDLG_DONE    6
 
 /* Gadget IDs for the add-FS sub-dialog */
 #define AFSDLG_DOSTYPE  1
@@ -1407,7 +1427,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
     char           dt_str[20];
     static char    file_str[256];   /* static so ASL path update persists */
 
-    sprintf(dt_str, "0x%08lX", (unsigned long)fi->dos_type);
+    FormatDosType(fi->dos_type, dt_str);
     if (is_edit) {
         file_str[0] = '\0';   /* empty = keep existing code */
     } else {
@@ -1449,7 +1469,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         /* DosType */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad);
         ng.ng_Width=gad_w; ng.ng_Height=row_h;
-        ng.ng_GadgetText="DosType (hex or PFS\\3)"; ng.ng_GadgetID=AFSDLG_DOSTYPE;
+        ng.ng_GadgetText="DosType"; ng.ng_GadgetID=AFSDLG_DOSTYPE;
         ng.ng_Flags=PLACETEXT_LEFT;
         { struct TagItem st[]={{GTST_String,(ULONG)dt_str},{GTST_MaxChars,18},{TAG_DONE,0}};
           dostype_gad=CreateGadgetA(STRING_KIND,gctx,&ng,st);
@@ -1605,7 +1625,9 @@ static BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
         UWORD btn_h   = font_h + 6;
         UWORD hdr_h   = font_h + 3;
         UWORD lv_h    = (UWORD)(font_h + 2) * 6;
-        UWORD win_h   = bor_t + pad + hdr_h + lv_h + pad + btn_h + pad + bor_b;
+        UWORD sel_h   = font_h + 4;   /* GTLV_ShowSelected string gadget */
+        UWORD win_h   = bor_t + pad + hdr_h + lv_h + pad + sel_h + pad + btn_h + pad + bor_b;
+        struct Gadget *sel_gad = NULL;
         struct NewGadget ng;
         struct Gadget *prev;
 
@@ -1616,18 +1638,38 @@ static BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
         ng.ng_VisualInfo = vi;
         ng.ng_TextAttr   = scr->Font;
 
+        /* GTLV_ShowSelected target — must be created BEFORE the listview.
+           With this set, GadTools gives the listview persistent selection
+           highlighting and GADGETUP Code becomes the reliable item ordinal. */
+        { UWORD sel_y = bor_t + pad + hdr_h + lv_h + pad;
+          struct TagItem st[] = {{GTST_String,(ULONG)""},{GTST_MaxChars,63},{TAG_DONE,0}};
+          ng.ng_LeftEdge  = bor_l + pad;
+          ng.ng_TopEdge   = (WORD)sel_y;
+          ng.ng_Width     = inner_w - pad * 2;
+          ng.ng_Height    = sel_h;
+          ng.ng_GadgetText= NULL;
+          ng.ng_GadgetID  = FSDLG_SEL;
+          ng.ng_Flags     = 0;
+          sel_gad = CreateGadgetA(STRING_KIND, gctx, &ng, st);
+          if (!sel_gad) goto fs_mgr_cleanup;
+          prev = sel_gad; }
+
+        /* Listview — GTLV_ShowSelected links it to sel_gad above */
         ng.ng_LeftEdge  = bor_l + pad;
         ng.ng_TopEdge   = (WORD)(bor_t + pad + hdr_h);
         ng.ng_Width     = inner_w - pad * 2;
         ng.ng_Height    = lv_h;
+        ng.ng_GadgetText= NULL;
         ng.ng_GadgetID  = FSDLG_LIST;
         ng.ng_Flags     = 0;
-        { struct TagItem lt[]={{GTLV_Labels,(ULONG)&fs_list_gad},{TAG_DONE,0}};
-          lv_gad=CreateGadgetA(LISTVIEW_KIND,gctx,&ng,lt);
-          if (!lv_gad) goto fs_mgr_cleanup; }
-        prev = lv_gad;
+        { struct TagItem lt[] = {{GTLV_Labels,    (ULONG)&fs_list_gad},
+                                  {GTLV_ShowSelected,(ULONG)sel_gad},
+                                  {TAG_DONE,0}};
+          lv_gad = CreateGadgetA(LISTVIEW_KIND, prev, &ng, lt);
+          if (!lv_gad) goto fs_mgr_cleanup;
+          prev = lv_gad; }
 
-        { UWORD btn_y    = bor_t + pad + hdr_h + lv_h + pad;
+        { UWORD btn_y    = bor_t + pad + hdr_h + lv_h + pad + sel_h + pad;
           UWORD quarter  = (inner_w - pad * 2 - pad * 3) / 4;
           struct TagItem bt[] = {{TAG_DONE,0}};
           ng.ng_TopEdge=btn_y; ng.ng_Height=btn_h;
@@ -1689,11 +1731,15 @@ static BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
                 switch (iclass) {
                 case IDCMP_CLOSEWINDOW: running = FALSE; break;
                 case IDCMP_GADGETDOWN:
-                    if (gad->GadgetID == FSDLG_LIST) sel = (WORD)code;
                     break;
                 case IDCMP_GADGETUP:
                     switch (gad->GadgetID) {
-                    case FSDLG_LIST: sel = (WORD)code; break;
+                    case FSDLG_LIST:
+                        /* With GTLV_ShowSelected set, Code is the reliable item ordinal */
+                        sel = (WORD)code;
+                        break;
+                    case FSDLG_SEL:
+                        break; /* show-selected string gadget — ignore */
                     case FSDLG_DONE: running = FALSE; break;
 
                     case FSDLG_ADD:
@@ -1974,7 +2020,7 @@ static void rdb_backup_block(struct Window *win, struct BlockDev *bd,
         return;
     }
 
-    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
     if (!buf) return;
 
     if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
@@ -2123,7 +2169,7 @@ static void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         return;
     }
 
-    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
     if (!buf) { Close(fh); return; }
 
     if (Read(fh, buf, fsize) != fsize) {
@@ -2206,7 +2252,7 @@ static void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
         EasyRequest(win, &es, NULL); return;
     }
 
-    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
     if (!buf) return;
 
     /* Read RDSK block to get rdb_HighRDSKBlock */
@@ -2432,7 +2478,7 @@ static void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
       if (EasyRequest(win, &es, NULL) != 1) { Close(fh); return; }
     }
 
-    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
     if (!buf) { Close(fh); return; }
 
     for (blk = 0; blk < num_blocks; blk++) {
@@ -2579,7 +2625,7 @@ static void rdb_view_block(struct Window *win, struct BlockDev *bd,
         return;
     }
 
-    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_CHIP | MEMF_CLEAR);
     if (!buf) return;
 
     if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
@@ -2943,9 +2989,11 @@ BOOL partview_run(const char *devname, ULONG unit)
     struct Window    *win      = NULL;
     struct Menu      *menu     = NULL;
     WORD              sel      = -1;
-    BOOL              dirty    = FALSE;   /* unsaved changes pending */
-    BOOL              exit_req = FALSE;
+    BOOL              dirty        = FALSE;  /* unsaved changes pending */
+    BOOL              needs_reboot = FALSE;  /* partition layout changed */
+    BOOL              exit_req     = FALSE;
     WORD              i;
+    static char       wfmt[128];            /* formatted write-fail message — static: off stack */
     static char       win_title[80];
 
     /* Drag resize state */
@@ -2992,8 +3040,17 @@ BOOL partview_run(const char *devname, ULONG unit)
             bd->iotd.iotd_Req.io_Length  = sizeof(geom);
             bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
             bd->iotd.iotd_Req.io_Flags   = 0;
-            if (DoIO((struct IORequest *)&bd->iotd) == 0 && geom.dg_Cylinders > 0) {
-                rdb->cylinders = geom.dg_Cylinders;
+            if (DoIO((struct IORequest *)&bd->iotd) == 0 &&
+                geom.dg_Heads > 0 && geom.dg_TrackSectors > 0) {
+                ULONG cyls = geom.dg_Cylinders;
+                /* dg_Cylinders can be CHS-limited (e.g. 4096 max).
+                   Use dg_TotalSectors to compute the real cylinder count. */
+                if (geom.dg_TotalSectors > 0) {
+                    ULONG cyls_ts = geom.dg_TotalSectors /
+                                    (geom.dg_Heads * geom.dg_TrackSectors);
+                    if (cyls_ts > cyls) cyls = cyls_ts;
+                }
+                rdb->cylinders = cyls;
                 rdb->heads     = geom.dg_Heads;
                 rdb->sectors   = geom.dg_TrackSectors;
             }
@@ -3165,15 +3222,41 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                 case IDCMP_CLOSEWINDOW: {
                     struct EasyStruct es;
-                    es.es_StructSize   = sizeof(es);
-                    es.es_Flags        = 0;
-                    es.es_Title        = (UBYTE *)"DiskPart";
-                    es.es_TextFormat   = (UBYTE *)"Exit DiskPart?";
-                    es.es_GadgetFormat = (UBYTE *)"Yes|No";
-                    if (EasyRequestArgs(win, &es, NULL, NULL) == 1) {
-                        exit_req = TRUE;
-                        running  = FALSE;
+                    LONG r;
+                    es.es_StructSize = sizeof(es);
+                    es.es_Flags      = 0;
+                    es.es_Title      = (UBYTE *)"DiskPart";
+                    if (dirty) {
+                        es.es_TextFormat   = (UBYTE *)"You have unsaved changes.\nWrite partition table to disk?";
+                        es.es_GadgetFormat = (UBYTE *)"Write|Discard|Cancel";
+                        r = EasyRequest(win, &es, NULL);
+                        if (r == 0) break;           /* Cancel — stay */
+                        if (r == 1 && bd) {          /* Write */
+                            if (RDB_Write(bd, rdb)) {
+                                dirty = FALSE;
+                                if (needs_reboot) {
+                                    es.es_TextFormat   = (UBYTE *)"Partition table written.\nReboot now for changes to take effect.";
+                                    es.es_GadgetFormat = (UBYTE *)"Reboot|Later";
+                                    if (EasyRequest(win, &es, NULL) == 1)
+                                        ColdReboot();
+                                }
+                            } else {
+                                sprintf(wfmt, "Write failed (err %d)!\nCheck device and try again.",
+                                        (int)bd->last_io_err);
+                                es.es_TextFormat   = (UBYTE *)wfmt;
+                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                EasyRequest(win, &es, NULL);
+                                break; /* stay open */
+                            }
+                        }
+                        /* r == 2: Discard — fall through to exit */
+                    } else {
+                        es.es_TextFormat   = (UBYTE *)"Exit DiskPart?";
+                        es.es_GadgetFormat = (UBYTE *)"Yes|No";
+                        if (EasyRequest(win, &es, NULL) != 1) break;
                     }
+                    exit_req = TRUE;
+                    running  = FALSE;
                     break;
                 }
 
@@ -3310,7 +3393,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 es.es_TextFormat   = (UBYTE *)msg;
                                 es.es_GadgetFormat = (UBYTE *)"Yes|No";
                                 if (EasyRequest(win, &es, NULL) == 1) {
-                                    dirty = TRUE;
+                                    dirty = TRUE; needs_reboot = TRUE;
                                 } else {
                                     /* Revert */
                                     rdb->parts[confirmed_part].low_cyl  = drag_orig_lo;
@@ -3343,7 +3426,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.boot_blocks  = 2;
                                 if (partition_dialog(&new_pi, "Add Partition", rdb)) {
                                     rdb->parts[rdb->num_parts++] = new_pi;
-                                    dirty = TRUE;
+                                    dirty = TRUE; needs_reboot = TRUE;
                                     refresh_listview(win, lv_gad, rdb, sel);
                                 }
                             }
@@ -3436,10 +3519,17 @@ BOOL partview_run(const char *devname, ULONG unit)
                             bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
                             bd->iotd.iotd_Req.io_Flags   = 0;
                             if (DoIO((struct IORequest *)&bd->iotd) == 0 &&
-                                geom.dg_Cylinders > 0) {
+                                geom.dg_Heads > 0 && geom.dg_TrackSectors > 0) {
                                 real_cyls  = geom.dg_Cylinders;
                                 real_heads = geom.dg_Heads;
                                 real_secs  = geom.dg_TrackSectors;
+                                /* dg_Cylinders can be CHS-limited (e.g. 4096 max).
+                                   Use dg_TotalSectors for the real cylinder count. */
+                                if (geom.dg_TotalSectors > 0) {
+                                    ULONG cyls_ts = geom.dg_TotalSectors /
+                                                    (real_heads * real_secs);
+                                    if (cyls_ts > real_cyls) real_cyls = cyls_ts;
+                                }
                             }
                         }
                         /* Fall back to whatever we already know */
@@ -3555,7 +3645,7 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                         if (partition_dialog(&new_pi, "Add Partition", rdb)) {
                             rdb->parts[rdb->num_parts++] = new_pi;
-                            dirty = TRUE;
+                            dirty = TRUE; needs_reboot = TRUE;
                             refresh_listview(win, lv_gad, rdb, sel);
                             draw_static(win, devname, unit, rdb,
                                         ix, iy, iw, bx, by, bw, bh,
@@ -3595,7 +3685,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 for (j=(UWORD)sel; j+1 < rdb->num_parts; j++)
                                     rdb->parts[j] = rdb->parts[j+1];
                                 rdb->num_parts--;
-                                dirty = TRUE;
+                                dirty = TRUE; needs_reboot = TRUE;
                                 if (sel >= (WORD)rdb->num_parts)
                                     sel = (WORD)rdb->num_parts - 1;
                                 refresh_listview(win, lv_gad, rdb, sel);
@@ -3629,13 +3719,73 @@ BOOL partview_run(const char *devname, ULONG unit)
                         es.es_TextFormat   = (UBYTE *)"Write partition table to disk?\nAll existing data may be lost!";
                         es.es_GadgetFormat = (UBYTE *)"Write|Cancel";
                         if (EasyRequest(win, &es, NULL) == 1) {
-                            if (bd) RDB_Write(bd, rdb);
-                            dirty = FALSE;
+                            if (!bd || !RDB_Write(bd, rdb)) {
+                                if (bd && bd->last_io_err == 1)
+                                    sprintf(wfmt,
+                                        "Verify fail blk %lu off %lu\n"
+                                        "W:%02X%02X%02X%02X R:%02X%02X%02X%02X\n"
+                                        "Wr=%d Rd=%d",
+                                        (unsigned long)bd->last_verify_block,
+                                        (unsigned long)bd->last_verify_off,
+                                        bd->last_wrote[0], bd->last_wrote[1],
+                                        bd->last_wrote[2], bd->last_wrote[3],
+                                        bd->last_read[0],  bd->last_read[1],
+                                        bd->last_read[2],  bd->last_read[3],
+                                        (int)bd->last_hd_err,
+                                        (int)bd->last_hd_read_err);
+                                else
+                                    sprintf(wfmt, "Write failed (err %d, SCSI %d)!\nCheck device and try again.",
+                                        bd ? (int)bd->last_io_err : 0,
+                                        bd ? (int)bd->last_hd_err : 0);
+                                es.es_TextFormat   = (UBYTE *)wfmt;
+                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                EasyRequest(win, &es, NULL);
+                            } else {
+                                dirty = FALSE;
+                                if (needs_reboot) {
+                                    es.es_TextFormat   = (UBYTE *)"Partition table written.\nReboot now for changes to take effect.";
+                                    es.es_GadgetFormat = (UBYTE *)"Reboot|Later";
+                                    if (EasyRequest(win, &es, NULL) == 1)
+                                        ColdReboot();
+                                    else
+                                        needs_reboot = FALSE;
+                                }
+                            }
                         }
                         break;
                     }
 
                     case GID_BACK:
+                        if (dirty) {
+                            struct EasyStruct es;
+                            LONG r;
+                            es.es_StructSize   = sizeof(es);
+                            es.es_Flags        = 0;
+                            es.es_Title        = (UBYTE *)"DiskPart";
+                            es.es_TextFormat   = (UBYTE *)"You have unsaved changes.\nWrite partition table to disk?";
+                            es.es_GadgetFormat = (UBYTE *)"Write|Discard|Cancel";
+                            r = EasyRequest(win, &es, NULL);
+                            if (r == 0) break;           /* Cancel — stay */
+                            if (r == 1 && bd) {          /* Write */
+                                if (RDB_Write(bd, rdb)) {
+                                    dirty = FALSE;
+                                    if (needs_reboot) {
+                                        es.es_TextFormat   = (UBYTE *)"Partition table written.\nReboot now for changes to take effect.";
+                                        es.es_GadgetFormat = (UBYTE *)"Reboot|Later";
+                                        if (EasyRequest(win, &es, NULL) == 1)
+                                            ColdReboot();
+                                    }
+                                } else {
+                                    sprintf(wfmt, "Write failed (err %d)!\nCheck device and try again.",
+                                            (int)bd->last_io_err);
+                                    es.es_TextFormat   = (UBYTE *)wfmt;
+                                    es.es_GadgetFormat = (UBYTE *)"OK";
+                                    EasyRequest(win, &es, NULL);
+                                    break; /* stay open */
+                                }
+                            }
+                            /* r == 2: Discard — fall through to exit */
+                        }
                         running = FALSE; break;
                     }
                     break;

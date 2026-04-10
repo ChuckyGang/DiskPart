@@ -16,6 +16,7 @@ extern size_t strlen(const char *s);
 extern void  *memset(void *dst, int c, size_t n);
 extern void  *memcpy(void *dst, const void *src, size_t n);
 extern void  *memmove(void *dst, const void *src, size_t n);
+extern int    memcmp (const void *a, const void *b, size_t n);
 
 int   sprintf(char *buf, const char *fmt, ...);
 int   strcmp(const char *a, const char *b);

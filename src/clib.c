@@ -9,6 +9,17 @@
 #include <stddef.h>
 #include "clib.h"
 
+int memcmp(const void *a, const void *b, size_t n)
+{
+    const unsigned char *pa = (const unsigned char *)a;
+    const unsigned char *pb = (const unsigned char *)b;
+    while (n--) {
+        if (*pa != *pb) return (int)*pa - (int)*pb;
+        pa++; pb++;
+    }
+    return 0;
+}
+
 int strcmp(const char *a, const char *b)
 {
     while (*a && (*a == *b)) { a++; b++; }
