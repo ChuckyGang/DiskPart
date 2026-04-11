@@ -17,6 +17,7 @@
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
 #include <graphics/gfxbase.h>
+#include <graphics/text.h>
 #include <libraries/gadtools.h>
 #include <devices/inputevent.h>
 #ifndef IEQUALIFIER_DOUBLECLICK
@@ -114,7 +115,7 @@ static UWORD build_name_list(struct List *lst, struct Node *nodes,
     list_init(lst);
     for (i = 0; i < dev_names.count; i++) {
         if (!show_all && !is_storage_device(dev_names.names[i])) continue;
-        nodes[count].ln_Name = dev_names.names[i];
+        nodes[count].ln_Name = dev_names.display[i];
         nodes[count].ln_Type = NT_USER;
         nodes[count].ln_Pri  = 0;
         AddTail(lst, &nodes[count]);
@@ -172,6 +173,7 @@ static WORD run_devname_window(void)
 
     {
         UWORD font_h  = scr->Font->ta_YSize;
+        UWORD font_x  = scr->RastPort.Font ? (UWORD)scr->RastPort.Font->tf_XSize : 8;
         UWORD bor_l   = (UWORD)scr->WBorLeft;
         UWORD bor_t   = (UWORD)scr->WBorTop + font_h + 1;
         UWORD bor_r   = (UWORD)scr->WBorRight;
@@ -179,6 +181,14 @@ static WORD run_devname_window(void)
         UWORD win_w   = 400;
         UWORD inner_w = win_w - bor_l - bor_r;
         UWORD pad     = 4;
+        /* Format device display strings now that we know the font width.
+           Listview pixel width minus scrollbar (~16px) and frame borders
+           (~4px each side) and text indent (~2px), divided by font x-size. */
+        {
+            UWORD lv_px  = inner_w - pad * 2;
+            UWORD cols   = (lv_px > 30) ? (UWORD)((lv_px - 30) / font_x) : 20;
+            DevNameList_FormatDisplay(&dev_names, cols);
+        }
         UWORD btn_h   = font_h + 6;
         UWORD lv_h    = (UWORD)(font_h + 2) * 10;
         UWORD lbl_h   = (UWORD)(font_h + 2);  /* label floats above gadget top */

@@ -131,6 +131,52 @@ void BlockDev_Close(struct BlockDev *bd)
 
 BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
 {
+    BYTE err;
+
+    /* Try HD_SCSICMD SCSI READ(10) first — bypasses the trackdisk DMA
+       layer entirely.  On the A3000 scsi.device (WD33C93 + SDMAC), CMD_READ
+       returns stale DMA FIFO data for bytes 4+ even on repeated reads when
+       the block number changes between transfers; HD_SCSICMD is not affected
+       by this and gives reliable data.  Falls through to CMD_READ if the
+       device does not support HD_SCSICMD (e.g. uaehf.device, ide.device). */
+    {
+        struct SCSICmd scmd;
+        UBYTE cdb[10];
+        cdb[0] = 0x28;                      /* READ(10) */
+        cdb[1] = 0x00;
+        cdb[2] = (UBYTE)(blocknum >> 24);
+        cdb[3] = (UBYTE)(blocknum >> 16);
+        cdb[4] = (UBYTE)(blocknum >>  8);
+        cdb[5] = (UBYTE)(blocknum);
+        cdb[6] = 0x00;
+        cdb[7] = 0x00;
+        cdb[8] = 0x01;                      /* 1 block */
+        cdb[9] = 0x00;
+
+        scmd.scsi_Data        = (UWORD *)buf;
+        scmd.scsi_Length      = bd->block_size;
+        scmd.scsi_Actual      = 0;
+        scmd.scsi_Command     = cdb;
+        scmd.scsi_CmdLength   = 10;
+        scmd.scsi_CmdActual   = 0;
+        scmd.scsi_Flags       = SCSIF_READ;
+        scmd.scsi_Status      = 0;
+        scmd.scsi_SenseData   = NULL;
+        scmd.scsi_SenseLength = 0;
+        scmd.scsi_SenseActual = 0;
+
+        bd->iotd.iotd_Req.io_Command = HD_SCSICMD;
+        bd->iotd.iotd_Req.io_Length  = sizeof(scmd);
+        bd->iotd.iotd_Req.io_Data    = (APTR)&scmd;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+        bd->last_hd_read_err = err;
+        if (err == 0) return TRUE;
+        if (err != IOERR_NOCMD) return FALSE;
+        /* IOERR_NOCMD: not a SCSI device — fall through to CMD_READ */
+    }
+
     bd->iotd.iotd_Req.io_Command = CMD_READ;
     bd->iotd.iotd_Req.io_Length  = bd->block_size;
     bd->iotd.iotd_Req.io_Data    = buf;
@@ -150,11 +196,15 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
     BYTE  err;
 
     /* Try TD_WRITE64 first (64-bit byte address).
-       iotd_Count = high 32 bits; always 0 for disks < 4 GB. */
+       io_Actual = high 32 bits of byte address; must be cleared or a stale
+       value from the previous CMD_READ (io_Actual = bytes transferred = 0x200)
+       will be used as the high address word, placing writes ~8 GB out of range.
+       iotd_Count is the change counter (removable media); always 0 here. */
     bd->iotd.iotd_Req.io_Command = TD_WRITE64;
     bd->iotd.iotd_Req.io_Length  = bd->block_size;
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
     bd->iotd.iotd_Req.io_Offset  = byte_offset;
+    bd->iotd.iotd_Req.io_Actual  = 0;           /* high 32 bits of address */
     bd->iotd.iotd_Req.io_Flags   = 0;
     bd->iotd.iotd_Count          = 0;
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
@@ -284,20 +334,137 @@ void FormatSize(UQUAD bytes, char *buf)
 }
 
 /* ------------------------------------------------------------------ */
-/* read2 — read a block twice into the same chip-RAM buf              */
+/* read2 — read a block three times into the same chip-RAM buf        */
 /*                                                                     */
-/* On the A3000 built-in scsi.device (WD33C93 + SDMAC), the first     */
-/* CMD_READ for any given (block, buffer-address) pair may return      */
-/* partially-corrupted data — the block ID bytes (0-3) are typically   */
-/* correct but fields at higher offsets (e.g. DosEnvec at +128) may   */
-/* contain stale DMA FIFO contents.  An IMMEDIATE second read of the  */
-/* SAME block into the SAME address reliably returns correct data.     */
+/* On the A3000 built-in scsi.device (WD33C93 + SDMAC) the DMA FIFO  */
+/* leaks stale data from a previously-read block.  The corruption      */
+/* manifests as a 2-byte pipeline lag: each successive read of the    */
+/* same block shifts the "correct window" forward by 2 bytes.  After  */
+/* one read only the first ~160 bytes are stable; a second read fixes  */
+/* the next pair but corrupts the pair after that.  Three consecutive  */
+/* reads of the same block fully drains the pipeline so that the final */
+/* result is correct for all 512 bytes.                                */
 /* ------------------------------------------------------------------ */
 
+/* Reconstruct a DosType whose high word was zeroed by DMA corruption.
+   Pattern: the A3000 SDMAC can zero the first word of a longword at
+   specific block offsets (0x24, 0xC0 observed).  For AmigaDOS filesystem
+   types the encoding is always 3 printable ASCII bytes + 1 version byte:
+     byte[0]='D'(0x44) byte[1]='O'(0x4F) byte[2]='S'(0x53) byte[3]=ver
+   When the DMA zeroes bytes 0-1, we get 0x00005303 instead of 0x444F5303.
+   We detect this by: high word == 0  AND  byte[2] is a printable ASCII
+   char that belongs to a known filesystem signature in the low word.
+   Known restorable prefixes:
+     0x53 ('S') → high = 0x444F  (DOS\x, MUFS\x etc.)
+     0x46 ('F') → high = 0x5346  (SFS\x = SmartFilesystem)
+     0x50 ('P') → high = 0x4C4E  (LNX\P = Linux partition — skip)
+   We only restore what we can be sure about.  Unknown: leave as-is.     */
+static ULONG fix_dostype(ULONG dt)
+{
+    if ((dt >> 16) != 0) return dt;  /* high word present — already good */
+    switch ((dt >> 8) & 0xFF) {      /* byte[2] of the DosType */
+    case 0x53: return 0x444F0000UL | (dt & 0xFFFFUL);  /* DOS\x / MUFS\x  */
+    case 0x46: return 0x53460000UL | (dt & 0xFFFFUL);  /* SFS\x           */
+    default:   return dt;
+    }
+}
+
+/* Verify the RDB block checksum: sum all SummedLongs longwords; result
+   must be 0.  Returns FALSE if SummedLongs is out of range or sum != 0. */
+static BOOL block_checksum_ok(const UBYTE *buf)
+{
+    const ULONG *lp = (const ULONG *)buf;
+    ULONG summed = lp[1];   /* SummedLongs is the second field of every RDB block */
+    ULONG sum = 0, i;
+    if (summed < 2 || summed > 128) return FALSE;
+    for (i = 0; i < summed; i++)
+        sum += lp[i];
+    return (sum == 0);
+}
+
+/* Read an RDB block using CMD_READ with repeated drain reads until the
+   block checksum validates, or we exhaust retries.
+
+   CMD_READ is used here (not HD_SCSICMD) because on real A3000 hardware
+   (WD33C93 + SDMAC), HD_SCSICMD returns success but produces corrupted
+   data at certain offsets (e.g. 0x24, 0xC0) that is IDENTICAL on every
+   retry — so checksum retries cannot fix it.  CMD_READ has an SDMAC DMA
+   FIFO pipeline lag, but each successive read of the same block shifts
+   the stable window forward; after a few reads the checksum passes and
+   the full 512 bytes are correct.
+
+   RDB blocks always live within the first RDB_SCAN_LIMIT (16) blocks, so
+   the 32-bit byte offset in CMD_READ never overflows. */
 static BOOL read2(struct BlockDev *bd, ULONG blocknum, UBYTE *buf)
 {
-    BlockDev_ReadBlock(bd, blocknum, buf);          /* prime — discard */
-    return BlockDev_ReadBlock(bd, blocknum, buf);   /* stable read     */
+    BYTE err;
+    int  i;
+    for (i = 0; i < 16; i++) {
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = bd->block_size;
+        bd->iotd.iotd_Req.io_Data    = buf;
+        bd->iotd.iotd_Req.io_Offset  = blocknum * bd->block_size;
+        bd->iotd.iotd_Req.io_Actual  = 0;   /* high 32 bits of address — must be 0 */
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+        if (err != 0) return FALSE;
+        if (block_checksum_ok(buf)) return TRUE;
+    }
+    return TRUE;   /* return last read — caller checks block ID */
+}
+
+/* Attempt to recover a BSTR partition name that was zeroed by DMA corruption.
+   On the A3000 SDMAC the DMA FIFO pipeline lag causes different bytes to be
+   corrupted on each successive CMD_READ of the same block.  read2() reuses
+   the same buffer so a clean read at offset 0x24 gets overwritten by later
+   retries.  This function reads into a SEPARATE chip-RAM buffer and checks
+   only offset 0x24 (pb_DriveName, 32 bytes) for a valid BSTR after each read.
+   If found, those bytes are patched into buf (which points at the PART block).
+   Returns TRUE if a valid name was recovered. */
+static BOOL recover_part_name(struct BlockDev *bd, ULONG blocknum, UBYTE *buf)
+{
+    UBYTE *alt;
+    BOOL   found = FALSE;
+    int    i;
+
+    alt = (UBYTE *)AllocVec(512, MEMF_CHIP | MEMF_CLEAR);
+    if (!alt) return FALSE;
+
+    for (i = 0; i < 64 && !found; i++) {
+        UBYTE len, k;
+        BOOL  ok;
+        UBYTE *bstr;
+
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = bd->block_size;
+        bd->iotd.iotd_Req.io_Data    = alt;
+        bd->iotd.iotd_Req.io_Offset  = blocknum * bd->block_size;
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        if ((BYTE)DoIO((struct IORequest *)&bd->iotd) != 0) break;
+
+        /* Check pb_DriveName BSTR at block offset 0x24 */
+        bstr = alt + 0x24;
+        len  = bstr[0];
+        if (len == 0 || len > 30) continue;   /* still corrupt or garbage */
+
+        /* Verify all 'len' chars are printable ASCII */
+        ok = TRUE;
+        for (k = 0; k < len; k++) {
+            UBYTE c = bstr[1 + k];
+            if (c < 0x20 || c > 0x7E) { ok = FALSE; break; }
+        }
+        if (!ok) continue;
+
+        /* Looks valid — patch the 32-byte DriveName field into the main buffer */
+        memcpy(buf + 0x24, bstr, 32);
+        found = TRUE;
+    }
+
+    FreeVec(alt);
+    return found;
 }
 
 /* ------------------------------------------------------------------ */
@@ -343,15 +510,19 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         rdb->hi_cyl      = rdsk->rdb_HiCylinder;
 
         /* Sanitize lo_cyl/hi_cyl: some tools write garbage here.
-           If they are clearly wrong (reversed, or beyond the disk),
-           derive sensible values from rdb_Cylinders instead. */
-        if (rdb->cylinders > 0 &&
-            (rdb->lo_cyl >= rdb->cylinders ||
-             rdb->hi_cyl >= rdb->cylinders ||
-             rdb->lo_cyl >  rdb->hi_cyl))
-        {
-            rdb->lo_cyl = 1;                    /* cyl 0 holds the RDB */
-            rdb->hi_cyl = rdb->cylinders - 1;
+           Handle two distinct cases:
+           1. hi_cyl >= cylinders: some tools (e.g. lide on large drives) write
+              hi_cyl = cylinders rather than cylinders-1 (off-by-one).  Clamp
+              silently — the rest of the RDB is valid and should not be reset.
+           2. lo_cyl out of range or reversed: clearly garbage; derive both
+              values from rdb_Cylinders. */
+        if (rdb->cylinders > 0) {
+            if (rdb->hi_cyl >= rdb->cylinders)
+                rdb->hi_cyl = rdb->cylinders - 1;
+            if (rdb->lo_cyl >= rdb->cylinders || rdb->lo_cyl > rdb->hi_cyl) {
+                rdb->lo_cyl = 1;                /* cyl 0 holds the RDB */
+                rdb->hi_cyl = rdb->cylinders - 1;
+            }
         }
 
         rdb->part_list   = rdsk->rdb_PartitionList;
@@ -369,17 +540,6 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
     }
 
     /* Walk partition linked list */
-    /* Debug: probe the first partition block before the loop */
-    rdb->dbg_part_read = FALSE;
-    rdb->dbg_part_id   = 0;
-    if (rdb->part_list != RDB_END_MARK) {
-        if (read2(bd, rdb->part_list, buf)) {
-            rdb->dbg_part_read = TRUE;
-            rdb->dbg_part_id   = ((ULONG)buf[0]<<24)|((ULONG)buf[1]<<16)|
-                                  ((ULONG)buf[2]<<8)|(ULONG)buf[3];
-        }
-    }
-
     next = rdb->part_list;
     while (next != RDB_END_MARK && rdb->num_parts < MAX_PARTITIONS) {
         ULONG *env;
@@ -398,9 +558,37 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         pi->next_part = pb->pb_Next;
         pi->flags     = pb->pb_Flags;
 
-        /* BSTR drive name */
-        bstr = pb->pb_DriveName;
+        /* BSTR drive name.
+           pb_DriveName lives at block offset 0x24 — the first longword there
+           (bytes 0x24-0x27) is a known A3000 SDMAC DMA corruption target: the
+           high word is zeroed, wiping bstr[0] (length) AND bstr[1..3] (first
+           3 name chars).  When that happens we do additional CMD_READs into a
+           separate buffer looking for a read where the pipeline lag has shifted
+           past this offset so the field is clean.
+           If the full first longword is zero (bstr[0..3] all 0x00), attempt
+           recovery via separate-buffer retries.  If that fails too, fall back
+           to scanning bstr[4..31] for any surviving printable fragment. */
+        bstr = pb->pb_DriveName;   /* pb points into buf */
         len  = bstr[0];
+        if (len == 0 && bstr[1] == 0 && bstr[2] == 0 && bstr[3] == 0) {
+            /* Entire first longword zeroed by DMA — try separate-buffer recovery */
+            recover_part_name(bd, next, buf);
+            /* pb still points into buf; reload bstr/len after potential patch */
+            bstr = pb->pb_DriveName;
+            len  = bstr[0];
+        }
+        if (len == 0) {
+            /* Length byte still zero (recovery failed or only length zeroed).
+               Scan bstr[1..30] for a null-terminated printable fragment — works
+               when only bstr[0] was corrupted but bstr[1..] survived. */
+            UBYTE k;
+            for (k = 0; k < 30; k++) {
+                UBYTE c = bstr[1 + k];
+                if (c == 0) break;
+                if (c < 0x20 || c > 0x7E) { k = 0; break; }
+            }
+            len = k;
+        }
         if (len >= (UBYTE)sizeof(pi->drive_name))
             len = (UBYTE)(sizeof(pi->drive_name) - 1);
         memcpy(pi->drive_name, bstr + 1, len);
@@ -408,19 +596,24 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
 
         /* DosEnvec array */
         env = pb->pb_Environment;
-        pi->low_cyl      = env[DE_LOWCYL];
-        pi->high_cyl     = env[DE_UPPERCYL];
-        pi->heads        = env[DE_NUMHEADS];
-        pi->sectors      = env[DE_BLKSPERTRACK];
-        pi->block_size   = env[DE_SIZEBLOCK] * 4;
-        pi->dos_type     = env[DE_DOSTYPE];
-        pi->boot_pri     = (LONG)env[DE_BOOTPRI];
-        pi->max_transfer = env[DE_MAXTRANSFER];
-        pi->mask         = env[DE_MASK];
-        pi->num_buffer   = env[DE_NUMBUFFERS];
-        pi->buf_mem_type = env[DE_BUFMEMTYPE];
+        pi->low_cyl       = env[DE_LOWCYL];
+        pi->high_cyl      = env[DE_UPPERCYL];
+        pi->heads         = env[DE_NUMHEADS];
+        pi->sectors       = env[DE_BLKSPERTRACK];
+        pi->block_size    = env[DE_SIZEBLOCK] * 4;
+        pi->dos_type      = fix_dostype(env[DE_DOSTYPE]);
+        pi->boot_pri      = (LONG)env[DE_BOOTPRI];
+        pi->reserved_blks = env[DE_RESERVEDBLKS];
+        pi->interleave    = env[DE_INTERLEAVE];
+        pi->max_transfer  = env[DE_MAXTRANSFER];
+        pi->mask          = env[DE_MASK];
+        pi->num_buffer    = env[DE_NUMBUFFERS];
+        pi->buf_mem_type  = env[DE_BUFMEMTYPE];
+        pi->baud          = (env[DE_TABLESIZE] >= DE_BAUD)    ? env[DE_BAUD]    : 0;
+        pi->control       = (env[DE_TABLESIZE] >= DE_CONTROL) ? env[DE_CONTROL] : 0;
         /* DE_BOOTBLOCKS = 19; only present when table size covers it */
-        pi->boot_blocks  = (env[DE_TABLESIZE] >= 19) ? env[19] : 2;
+        pi->boot_blocks   = (env[DE_TABLESIZE] >= 19) ? env[19] : 2;
+        pi->dev_flags     = pb->pb_DevFlags;
 
         next = pb->pb_Next;
         rdb->num_parts++;
@@ -444,7 +637,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         fi->block_num    = next;
         fi->next_fshd    = fhb->fhb_Next;
         fi->flags        = fhb->fhb_Flags;
-        fi->dos_type     = fhb->fhb_DosType;
+        fi->dos_type     = fix_dostype(fhb->fhb_DosType);
         fi->version      = fhb->fhb_Version;
         fi->patch_flags  = fhb->fhb_PatchFlags;
         fi->stack_size   = fhb->fhb_StackSize;
@@ -491,6 +684,26 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
     }
 
     FreeVec(buf);
+
+    /* Safety net: if a PART block's DosType has a zero high word (a known
+       DMA corruption pattern at offset 0xC0), replace it with the DosType
+       from the matching FSHD block (same low 16 bits, non-zero high word). */
+    {
+        UWORD pi, fi;
+        for (pi = 0; pi < rdb->num_parts; pi++) {
+            struct PartInfo *p = &rdb->parts[pi];
+            if ((p->dos_type >> 16) != 0) continue;   /* looks OK */
+            for (fi = 0; fi < rdb->num_fs; fi++) {
+                struct FSInfo *f = &rdb->filesystems[fi];
+                if ((f->dos_type >> 16) == 0) continue;  /* FSHD also bad */
+                if ((f->dos_type & 0xFFFFu) == (p->dos_type & 0xFFFFu)) {
+                    p->dos_type = f->dos_type;
+                    break;
+                }
+            }
+        }
+    }
+
     return TRUE;
 }
 
@@ -617,6 +830,7 @@ static BOOL write_and_verify(struct BlockDev *bd, ULONG blocknum,
         bd->last_io_err = 1;   /* read-back failed */
         return FALSE;
     }
+
     if (memcmp(buf, vbuf, bd->block_size) != 0) {
         const UBYTE *b = (const UBYTE *)buf;
         const UBYTE *v = (const UBYTE *)vbuf;
@@ -749,7 +963,7 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         pb->pb_HostID      = 7;
         pb->pb_Next        = next;
         pb->pb_Flags       = pi->flags;
-        pb->pb_DevFlags    = 0;
+        pb->pb_DevFlags    = pi->dev_flags;
 
         /* BSTR drive name */
         bstr = pb->pb_DriveName;
@@ -760,18 +974,20 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
 
         /* DosEnvec — index 19 (DE_BOOTBLOCKS) is the highest index we fill */
         pb->pb_Environment[DE_TABLESIZE]    = 19;
-        pb->pb_Environment[DE_SIZEBLOCK]    = 128;   /* 512 bytes / 4 */
+        pb->pb_Environment[DE_SIZEBLOCK]    = pi->block_size > 0
+                                              ? pi->block_size / 4 : 128;
         pb->pb_Environment[DE_SECORG]       = 0;
         pb->pb_Environment[DE_NUMHEADS]     =
             pi->heads   > 0 ? pi->heads   :
-            rdb->heads  > 0 ? rdb->heads  : 1;   /* never write 0 */
+            rdb->heads  > 0 ? rdb->heads  : 1;
         pb->pb_Environment[DE_SECSPERBLK]   = 1;
         pb->pb_Environment[DE_BLKSPERTRACK] =
             pi->sectors > 0 ? pi->sectors :
-            rdb->sectors > 0 ? rdb->sectors : 1; /* never write 0 */
-        pb->pb_Environment[DE_RESERVEDBLKS] = 2;
+            rdb->sectors > 0 ? rdb->sectors : 1;
+        pb->pb_Environment[DE_RESERVEDBLKS] = pi->reserved_blks > 0
+                                              ? pi->reserved_blks : 2;
         pb->pb_Environment[DE_PREFAC]       = 0;
-        pb->pb_Environment[DE_INTERLEAVE]   = 0;
+        pb->pb_Environment[DE_INTERLEAVE]   = pi->interleave;
         pb->pb_Environment[DE_LOWCYL]       = pi->low_cyl;
         pb->pb_Environment[DE_UPPERCYL]     = pi->high_cyl;
         pb->pb_Environment[DE_NUMBUFFERS]   =
@@ -784,9 +1000,9 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
             pi->mask > 0         ? pi->mask         : 0xFFFFFFFEUL;
         pb->pb_Environment[DE_BOOTPRI]      = (ULONG)(LONG)pi->boot_pri;
         pb->pb_Environment[DE_DOSTYPE]      = pi->dos_type;
-        pb->pb_Environment[17]              = 0;   /* DE_BAUD    — unused */
-        pb->pb_Environment[18]              = 0;   /* DE_CONTROL — unused */
-        pb->pb_Environment[19]              =      /* DE_BOOTBLOCKS */
+        pb->pb_Environment[DE_BAUD]         = pi->baud;
+        pb->pb_Environment[DE_CONTROL]      = pi->control;
+        pb->pb_Environment[DE_BOOTBLOCKS]   =
             pi->boot_blocks > 0 ? pi->boot_blocks : 2;
 
         pb->pb_ChkSum = block_checksum(buf, bd->block_size / 4);

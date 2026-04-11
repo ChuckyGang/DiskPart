@@ -9,6 +9,7 @@
 #include <exec/types.h>
 #include <exec/memory.h>
 #include <exec/execbase.h>
+#include <exec/libraries.h>
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <dos/filehandler.h>
@@ -232,6 +233,66 @@ void Devices_Scan(struct DevNameList *nl)
         add_name(nl, name);
     }
     Permit();
+
+    /* Phase 3: collect version numbers from exec DeviceList.
+       Devices are struct Library subclasses — lib_Version / lib_Revision
+       are valid for any open driver.  display[] is filled later by
+       DevNameList_FormatDisplay() once the screen font metrics are known. */
+    {
+        UWORD i;
+        Forbid();
+        for (node = SysBase->DeviceList.lh_Head;
+             node->ln_Succ != NULL;
+             node = node->ln_Succ) {
+            struct Library *lib = (struct Library *)node;
+            if (!node->ln_Name) continue;
+            for (i = 0; i < nl->count; i++) {
+                if (strcmp(nl->names[i], node->ln_Name) == 0) {
+                    nl->vers[i] = lib->lib_Version;
+                    nl->revs[i] = lib->lib_Revision;
+                    break;
+                }
+            }
+        }
+        Permit();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* DevNameList_FormatDisplay                                           */
+/* ------------------------------------------------------------------ */
+
+void DevNameList_FormatDisplay(struct DevNameList *nl, UWORD col_chars)
+{
+    UWORD i;
+    if (col_chars < 20) col_chars = 20;
+    if (col_chars > 78) col_chars = 78;
+
+    for (i = 0; i < nl->count; i++) {
+        if (nl->vers[i] > 0) {
+            char  ver[12];
+            UWORD vlen, name_col, nlen, j;
+            char *p = nl->display[i];
+
+            sprintf(ver, "v%u.%u", (unsigned)nl->vers[i], (unsigned)nl->revs[i]);
+            vlen     = (UWORD)strlen(ver);
+            name_col = (col_chars > vlen + 1) ? (col_chars - vlen - 1) : 1;
+
+            /* Copy name, pad with spaces to name_col width */
+            nlen = (UWORD)strlen(nl->names[i]);
+            if (nlen > name_col) nlen = name_col;
+            memcpy(p, nl->names[i], nlen);
+            p += nlen;
+            for (j = nlen; j < name_col; j++) *p++ = ' ';
+            *p++ = ' ';
+            memcpy(p, ver, vlen);
+            p += vlen;
+            *p = '\0';
+        } else {
+            strncpy(nl->display[i], nl->names[i], 79);
+            nl->display[i][79] = '\0';
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */

@@ -76,6 +76,7 @@ struct PartInfo {
     ULONG block_num;
     ULONG next_part;
     ULONG flags;
+    ULONG dev_flags;       /* pb_DevFlags: preferred flags for OpenDevice */
     char  drive_name[32];
     ULONG low_cyl;
     ULONG high_cyl;
@@ -84,11 +85,15 @@ struct PartInfo {
     ULONG block_size;
     ULONG dos_type;
     LONG  boot_pri;
+    ULONG reserved_blks;   /* DE_RESERVEDBLKS: unavailable blocks at start (usually 2) */
+    ULONG interleave;      /* DE_INTERLEAVE: interleave (usually 0) */
     ULONG max_transfer;
     ULONG mask;
     ULONG num_buffer;
     ULONG buf_mem_type;
     ULONG boot_blocks;
+    ULONG baud;            /* DE_BAUD: baud rate for serial handlers */
+    ULONG control;         /* DE_CONTROL: control word for handler/filesystem */
 };
 
 struct FSInfo {

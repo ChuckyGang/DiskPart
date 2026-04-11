@@ -22,11 +22,15 @@
 #include <exec/lists.h>
 #include <exec/nodes.h>
 #include <dos/dos.h>
+#include <dos/dosextens.h>
+#include <dos/filehandler.h>
 #include <libraries/asl.h>
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
 #include <graphics/gfxbase.h>
 #include <graphics/rastport.h>
+#include <devices/scsidisk.h>
+#include <exec/errors.h>
 #include <libraries/gadtools.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
@@ -548,12 +552,8 @@ static void draw_info(struct Window *win, const char *devname, ULONG unit,
                     model, (unsigned)rdb->num_parts,
                     rdb->num_parts == 1 ? "" : "s", fsz);
         else
-            sprintf(line2, "RDB: %u part  PL=%lu rd=%d id=%08lX  Free: %s",
-                    (unsigned)rdb->num_parts,
-                    (unsigned long)rdb->part_list,
-                    (int)rdb->dbg_part_read,
-                    (unsigned long)rdb->dbg_part_id,
-                    fsz);
+            sprintf(line2, "RDB: %u part  Free: %s",
+                    (unsigned)rdb->num_parts, fsz);
     } else {
         sprintf(line2, "RDB: Not found  (disk is unpartitioned)");
     }
@@ -690,6 +690,23 @@ static const struct { const char *name; ULONG dostype; } builtin_fs[] = {
 };
 #define NUM_BUILTIN_FS 3
 
+/* Block size — maps cycle index ↔ bytes value */
+static const char * const blocksize_labels[] = {
+    "512", "1024", "2048", "4096", "8192", "16384", "32768", NULL
+};
+static const ULONG blocksize_values[] = {
+    512UL, 1024UL, 2048UL, 4096UL, 8192UL, 16384UL, 32768UL
+};
+#define NUM_BLOCKSIZES 7
+
+static UWORD blocksize_index(ULONG bsz)
+{
+    UWORD i;
+    for (i = 0; i < NUM_BLOCKSIZES; i++)
+        if (blocksize_values[i] == bsz) return i;
+    return 0;   /* default 512 */
+}
+
 /* BufMemType — maps cycle index ↔ MEMF_* value */
 static const char * const bufmem_labels[] = {
     "Any", "Chip", "Fast", "24-bit DMA", NULL
@@ -794,7 +811,11 @@ static ULONG parse_dostype(const char *s)
 #define ADLG_MASK        5
 #define ADLG_OK          6
 #define ADLG_CANCEL      7
-#define ADLG_ROWS        5
+#define ADLG_RESERVED    8
+#define ADLG_INTERLEAVE  9
+#define ADLG_CONTROL     10
+#define ADLG_DEVFLAGS    11
+#define ADLG_ROWS        9
 
 /* ------------------------------------------------------------------ */
 /* Main dialog gadget IDs                                              */
@@ -802,6 +823,7 @@ static ULONG parse_dostype(const char *s)
 #define PDLG_NAME        1
 #define PDLG_SIZEMB      3
 #define PDLG_TYPE        4
+#define PDLG_BLOCKSIZE   13
 #define PDLG_BOOTPRI     5
 #define PDLG_BOOTABLE    6
 #define PDLG_DIRSCSI     7
@@ -811,8 +833,8 @@ static ULONG parse_dostype(const char *s)
 #define PDLG_SYNCSCSI    11
 #define PDLG_AUTOMOUNT   12
 
-/* Rows: Name, LoCyl, SizeMB, FS, BootPri, Bootable+Automount, DirSCSI+SyncSCSI */
-#define PDLG_ROWS 7
+/* Rows: Name, LoCyl, SizeMB, FS, BlockSize, BootPri, Bootable+Automount, DirSCSI+SyncSCSI */
+#define PDLG_ROWS 8
 
 static void partition_advanced_dialog(struct PartInfo *pi)
 {
@@ -824,14 +846,23 @@ static void partition_advanced_dialog(struct PartInfo *pi)
     struct Gadget  *bootblks_gad = NULL;
     struct Gadget  *maxtrans_gad = NULL;
     struct Gadget  *mask_gad     = NULL;
+    struct Gadget  *reserved_gad = NULL;
+    struct Gadget  *interleave_gad = NULL;
+    struct Gadget  *control_gad  = NULL;
+    struct Gadget  *devflags_gad = NULL;
     struct Window  *win          = NULL;
     UWORD           cur_bufmem   = bufmem_index(pi->buf_mem_type);
 
     char buffers_str[16], bootblks_str[16], maxtrans_str[16], mask_str[16];
-    sprintf(buffers_str,  "%lu",     (unsigned long)(pi->num_buffer  > 0 ? pi->num_buffer  : 30));
-    sprintf(bootblks_str, "%lu",     (unsigned long)(pi->boot_blocks > 0 ? pi->boot_blocks :  2));
-    sprintf(maxtrans_str, "0x%08lX", (unsigned long)pi->max_transfer);
-    sprintf(mask_str,     "0x%08lX", (unsigned long)pi->mask);
+    char reserved_str[16], interleave_str[16], control_str[16], devflags_str[16];
+    sprintf(buffers_str,    "%lu",     (unsigned long)(pi->num_buffer  > 0 ? pi->num_buffer  : 30));
+    sprintf(bootblks_str,   "%lu",     (unsigned long)(pi->boot_blocks > 0 ? pi->boot_blocks :  2));
+    sprintf(maxtrans_str,   "0x%08lX", (unsigned long)pi->max_transfer);
+    sprintf(mask_str,       "0x%08lX", (unsigned long)pi->mask);
+    sprintf(reserved_str,   "%lu",     (unsigned long)(pi->reserved_blks > 0 ? pi->reserved_blks : 2));
+    sprintf(interleave_str, "%lu",     (unsigned long)pi->interleave);
+    sprintf(control_str,    "0x%08lX", (unsigned long)pi->control);
+    sprintf(devflags_str,   "0x%08lX", (unsigned long)pi->dev_flags);
 
     scr = LockPubScreen(NULL);
     if (!scr) goto cleanup;
@@ -876,7 +907,9 @@ static void partition_advanced_dialog(struct PartInfo *pi)
       *(pgad)=CreateGadgetA(STRING_KIND,prev,&ng,st_); \
       if (!*(pgad)) goto cleanup; prev=*(pgad); } row++;
 
-            STR_GAD(ADLG_BUFFERS,     "Buffers",     buffers_str,  6,  &buffers_gad)
+            STR_GAD(ADLG_RESERVED,    "Reserved Blks", reserved_str,   6,  &reserved_gad)
+            STR_GAD(ADLG_INTERLEAVE,  "Interleave",    interleave_str, 6,  &interleave_gad)
+            STR_GAD(ADLG_BUFFERS,     "Buffers",       buffers_str,    6,  &buffers_gad)
 
             /* BufMemType cycle */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
@@ -889,9 +922,11 @@ static void partition_advanced_dialog(struct PartInfo *pi)
               if (!prev) goto cleanup; }
             row++;
 
-            STR_GAD(ADLG_BOOTBLOCKS,  "Boot Blocks", bootblks_str, 6,  &bootblks_gad)
-            STR_GAD(ADLG_MAXTRANSFER, "MaxTransfer", maxtrans_str, 12, &maxtrans_gad)
-            STR_GAD(ADLG_MASK,        "Mask",        mask_str,     12, &mask_gad)
+            STR_GAD(ADLG_BOOTBLOCKS,  "Boot Blocks",  bootblks_str,  6,  &bootblks_gad)
+            STR_GAD(ADLG_MAXTRANSFER, "MaxTransfer",  maxtrans_str, 12, &maxtrans_gad)
+            STR_GAD(ADLG_MASK,        "Mask",         mask_str,     12, &mask_gad)
+            STR_GAD(ADLG_CONTROL,     "Control",      control_str,  12, &control_gad)
+            STR_GAD(ADLG_DEVFLAGS,    "Dev Flags",    devflags_str, 12, &devflags_gad)
 
 #undef STR_GAD
 #undef ROW_Y
@@ -952,6 +987,10 @@ static void partition_advanced_dialog(struct PartInfo *pi)
                     case ADLG_BUFMEMTYPE: cur_bufmem = (UWORD)code; break;
                     case ADLG_OK: {
                         struct StringInfo *si;
+                        si = (struct StringInfo *)reserved_gad->SpecialInfo;
+                        pi->reserved_blks = parse_num((char *)si->Buffer);
+                        si = (struct StringInfo *)interleave_gad->SpecialInfo;
+                        pi->interleave   = parse_num((char *)si->Buffer);
                         si = (struct StringInfo *)buffers_gad->SpecialInfo;
                         pi->num_buffer   = parse_num((char *)si->Buffer);
                         pi->buf_mem_type = bufmem_values[cur_bufmem];
@@ -961,6 +1000,10 @@ static void partition_advanced_dialog(struct PartInfo *pi)
                         pi->max_transfer = parse_num((char *)si->Buffer);
                         si = (struct StringInfo *)mask_gad->SpecialInfo;
                         pi->mask         = parse_num((char *)si->Buffer);
+                        si = (struct StringInfo *)control_gad->SpecialInfo;
+                        pi->control      = parse_num((char *)si->Buffer);
+                        si = (struct StringInfo *)devflags_gad->SpecialInfo;
+                        pi->dev_flags    = parse_num((char *)si->Buffer);
                         running = FALSE; break;
                     }
                     case ADLG_CANCEL: running = FALSE; break;
@@ -1001,6 +1044,7 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
     struct Window  *win          = NULL;
     BOOL            result       = FALSE;
     UWORD           cur_fs       = 1;   /* default FFS */
+    UWORD           cur_bsz      = 0;   /* default 512 */
 
     /* Dynamic filesystem list: built-ins + whatever is in the RDB FSHD list */
 #define MAX_DLG_FS (NUM_BUILTIN_FS + MAX_FILESYSTEMS + 1)
@@ -1046,6 +1090,7 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
         for (k = 0; k < dlg_num_fs; k++)
             if (dlg_fs_dostypes[k] == pi->dos_type) { cur_fs = k; break; }
     }
+    cur_bsz = blocksize_index(pi->block_size > 0 ? pi->block_size : 512);
 
     char locyl_str[16], sizemb_str[16], bootpri_str[16];
     {
@@ -1135,6 +1180,17 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
             { struct TagItem ct[]={{GTCY_Labels,(ULONG)dlg_fs_labels},
                                    {GTCY_Active,(ULONG)cur_fs},{TAG_DONE,0}};
               prev=CreateGadgetA(CYCLE_KIND,prev,&ng,ct);
+              if (!prev) goto cleanup; }
+            row++;
+
+            /* Block Size (cycle) */
+            ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
+            ng.ng_Width=gad_w; ng.ng_Height=row_h;
+            ng.ng_GadgetText="Block Size"; ng.ng_GadgetID=PDLG_BLOCKSIZE;
+            ng.ng_Flags=PLACETEXT_LEFT;
+            { struct TagItem bs[]={{GTCY_Labels,(ULONG)blocksize_labels},
+                                   {GTCY_Active,(ULONG)cur_bsz},{TAG_DONE,0}};
+              prev=CreateGadgetA(CYCLE_KIND,prev,&ng,bs);
               if (!prev) goto cleanup; }
             row++;
 
@@ -1249,7 +1305,8 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
                 case IDCMP_CLOSEWINDOW: running = FALSE; break;
                 case IDCMP_GADGETUP:
                     switch (gad->GadgetID) {
-                    case PDLG_TYPE: cur_fs = (UWORD)code; break;
+                    case PDLG_TYPE:      cur_fs  = (UWORD)code; break;
+                    case PDLG_BLOCKSIZE: cur_bsz = (UWORD)code; break;
                     case PDLG_ADVANCED:
                         partition_advanced_dialog(pi);
                         break;
@@ -1258,6 +1315,7 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         si = (struct StringInfo *)name_gad->SpecialInfo;
                         strncpy(pi->drive_name, (char *)si->Buffer,
                                 sizeof(pi->drive_name)-1);
+                        pi->block_size = blocksize_values[cur_bsz];
                         /* Convert Size (MB) to high_cyl */
                         {
                             ULONG bytes_per_cyl = pi->heads * pi->sectors
@@ -1998,6 +2056,7 @@ static BOOL build_gadgets(APTR vi,
 /* partview_run                                                         */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 /* Advanced menu — Backup / Restore RDB block                          */
 /* ------------------------------------------------------------------ */
@@ -2975,12 +3034,27 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
     vrdb_list.lh_Tail     = NULL;
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
-    vrdb_add("--- CMD_READ scan, blocks 0-15 ---");
+    /* Helper: decode a 4-byte block ID into printable text + tag */
+#define DECODE_ID(buf_, idval_, idtxt_, tag_) do { \
+    ULONG _v = ((ULONG)(buf_)[0]<<24)|((ULONG)(buf_)[1]<<16)| \
+               ((ULONG)(buf_)[2]<<8)|(ULONG)(buf_)[3]; \
+    UWORD _k; \
+    (idval_) = _v; \
+    for (_k=0;_k<4;_k++) { char _c=(char)(buf_)[_k]; \
+        (idtxt_)[_k]=(_c>=0x20&&_c<=0x7E)?_c:'.'; } \
+    (idtxt_)[4]='\0'; \
+    if      (_v==IDNAME_RIGIDDISK) (tag_)="RDSK"; \
+    else if (_v==IDNAME_PARTITION) (tag_)="PART"; \
+    else if (_v==IDNAME_FSHEADER)  (tag_)="FSHD"; \
+    else if (_v==IDNAME_LOADSEG)   (tag_)="LSEG"; \
+    else                           (tag_)=""; \
+} while(0)
+
+    /* --- Pass 1: single CMD_READ --- */
+    vrdb_add("--- CMD_READ scan (single read), blocks 0-15 ---");
 
     for (blk = 0; blk < 16; blk++) {
-        ULONG id;
-        char  idtxt[5];
-        const char *tag;
+        ULONG id; char idtxt[5]; const char *tag;
 
         bd->iotd.iotd_Req.io_Command = CMD_READ;
         bd->iotd.iotd_Req.io_Length  = 512;
@@ -2991,25 +3065,49 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
         if (err != 0) {
-            sprintf(line, "Blk %2lu: CMD_READ err=%ld", (unsigned long)blk, (long)err);
-            vrdb_add(line);
-            continue;
+            sprintf(line, "Blk %2lu: err=%ld", (unsigned long)blk, (long)err);
+            vrdb_add(line); continue;
         }
+        DECODE_ID(buf, id, idtxt, tag);
+        sprintf(line, "Blk %2lu: OK  id=%s 0x%08lX  %s",
+                (unsigned long)blk, idtxt, id, tag);
+        vrdb_add(line);
+    }
 
-        id = ((ULONG)buf[0] << 24) | ((ULONG)buf[1] << 16) |
-             ((ULONG)buf[2] <<  8) |  (ULONG)buf[3];
-        for (i = 0; i < 4; i++) {
-            char c = (char)buf[i];
-            idtxt[i] = (c >= 0x20 && c <= 0x7E) ? c : '.';
+    /* --- Pass 2: double CMD_READ (same as RDB_Read's read2) ---
+       On the A3000 SDMAC the first read of any block may return stale DMA
+       FIFO data; the second consecutive read is reliable.  If pass 1 missed
+       RDSK but pass 2 finds it, read2 is working correctly.  If neither
+       finds it, CMD_READ itself is the problem. */
+    vrdb_add("");
+    vrdb_add("--- CMD_READ scan (double read = read2), blocks 0-15 ---");
+
+    for (blk = 0; blk < 16; blk++) {
+        ULONG id; char idtxt[5]; const char *tag;
+
+        /* First read — discard, just to prime the DMA FIFO */
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = 512;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = blk * 512UL;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        (void)DoIO((struct IORequest *)&bd->iotd);   /* ignore first result */
+
+        /* Second read — this is the stable one */
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = 512;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = blk * 512UL;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+
+        if (err != 0) {
+            sprintf(line, "Blk %2lu: err=%ld", (unsigned long)blk, (long)err);
+            vrdb_add(line); continue;
         }
-        idtxt[4] = '\0';
-
-        if      (id == IDNAME_RIGIDDISK) tag = "RDSK";
-        else if (id == IDNAME_PARTITION) tag = "PART";
-        else if (id == IDNAME_FSHEADER)  tag = "FSHD";
-        else if (id == IDNAME_LOADSEG)   tag = "LSEG";
-        else                             tag = "";
-
+        DECODE_ID(buf, id, idtxt, tag);
         sprintf(line, "Blk %2lu: OK  id=%s 0x%08lX  %s",
                 (unsigned long)blk, idtxt, id, tag);
         vrdb_add(line);
@@ -3072,7 +3170,14 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         vrdb_add("");
         vrdb_add("--- RDSK: not found in blocks 0-15 ---");
     } else {
-        /* buf still holds the RDSK block from the scan loop */
+        /* Re-read RDSK block 3× with BlockDev_ReadBlock so key fields
+           (PartitionList, Cylinders, etc.) are stable despite SDMAC lag.
+           The scan loop above used a single CMD_READ which is only reliable
+           for the first 4 bytes (block ID) on A3000 hardware. */
+        BlockDev_ReadBlock(bd, rdsk_blk, buf);
+        BlockDev_ReadBlock(bd, rdsk_blk, buf);
+        BlockDev_ReadBlock(bd, rdsk_blk, buf);
+        {
         ULONG *lw = (ULONG *)buf;
         ULONG part_blk;
         char  hdr[48];
@@ -3092,16 +3197,18 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
             sprintf(line, "--- PART block at blk %lu ---", part_blk);
             vrdb_add(line);
 
-            bd->iotd.iotd_Req.io_Command = CMD_READ;
-            bd->iotd.iotd_Req.io_Length  = 512;
-            bd->iotd.iotd_Req.io_Data    = (APTR)buf;
-            bd->iotd.iotd_Req.io_Offset  = part_blk * 512UL;
-            bd->iotd.iotd_Req.io_Flags   = 0;
-            bd->iotd.iotd_Count          = 0;
-            err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+            /* Three-pass read matching RDB_Read / read2 (now 3 reads).
+               The A3000 SDMAC pipeline lag shifts by 2 bytes per read;
+               three reads fully drain it for all 512 bytes. */
+            BlockDev_ReadBlock(bd, part_blk, buf);   /* prime 1 — discard */
+            BlockDev_ReadBlock(bd, part_blk, buf);   /* prime 2 — discard */
+            if (!BlockDev_ReadBlock(bd, part_blk, buf))
+                err = -1;
+            else
+                err = 0;
 
             if (err != 0) {
-                sprintf(line, "  CMD_READ err=%ld", (long)err);
+                sprintf(line, "  read err");
                 vrdb_add(line);
             } else {
                 /* pb_DriveName BSTR @ offset 36; pb_Environment @ offset 128 */
@@ -3115,6 +3222,14 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
                 sprintf(line, "  ID=0x%08lX  namelen=%lu", pid, (unsigned long)nlen);
                 vrdb_add(line);
+
+                /* Show raw bytes 36-43 so we can see the BSTR regardless of length */
+                { char *p = line;
+                  sprintf(p, "  name raw [36..43]: "); p += 20;
+                  for (k = 0; k < 8; k++) {
+                      sprintf(p, "%02lX ", (unsigned long)buf[36 + k]); p += 3;
+                  }
+                  *p = '\0'; vrdb_add(line); }
 
                 if (nlen > 31) nlen = 31;
                 for (k = 0; k < (ULONG)nlen; k++) {
@@ -3137,13 +3252,19 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                 sprintf(line, "  env[11]=NumBuf=%lu  env[15]=BootPri=%lu",
                         env[11], env[15]);
                 vrdb_add(line);
-                sprintf(line, "  env[16]=DosType=0x%08lX", env[16]);
+                sprintf(line, "  env[16]=DosType=0x%08lX  raw@0xC0: %02lX %02lX %02lX %02lX",
+                        env[16],
+                        (unsigned long)buf[192], (unsigned long)buf[193],
+                        (unsigned long)buf[194], (unsigned long)buf[195]);
+                vrdb_add(line);
+                sprintf(line, "  env[13]=MaxXfer=0x%08lX  env[14]=Mask=0x%08lX",
+                        env[13], env[14]);
                 vrdb_add(line);
 
-                /* Hex dump of env region: bytes 128-175 (env[0]-env[11]) */
-                vrdb_add("  env hex (bytes 0x80-0xAF):");
+                /* Hex dump of env region: bytes 128-207 (env[0]-env[19]) */
+                vrdb_add("  env hex (bytes 0x80-0xCF):");
                 { ULONG off;
-                  for (off = 128; off < 176; off += 16) {
+                  for (off = 128; off < 208; off += 16) {
                       char *p = line;
                       *p++ = ' '; *p++ = ' ';
                       sprintf(p, "%04lX: ", (unsigned long)off); p += 6;
@@ -3163,8 +3284,60 @@ static void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                 }
             }
         }
+        } /* end extra { from RDSK re-read */
     } /* end else (rdsk_blk found) */
     } /* end rdsk scan block */
+
+    /* ---- DosList scan: show device entries for this devname+unit ---- */
+    {
+        struct DosList *dl;
+        vrdb_add("");
+        vrdb_add("--- DosList entries (this device+unit) ---");
+        dl = LockDosList(LDF_DEVICES | LDF_READ);
+        while ((dl = NextDosEntry(dl, LDF_DEVICES)) != NULL) {
+            struct FileSysStartupMsg *fssm;
+            const UBYTE *dev_bstr;
+            char  dev_name[64];
+            char  node_name[36];
+            const UBYTE *nm;
+            UBYTE dev_len, nm_len, k;
+
+            if (dl->dol_misc.dol_handler.dol_Startup == 0) continue;
+            fssm = (struct FileSysStartupMsg *)
+                   BADDR(dl->dol_misc.dol_handler.dol_Startup);
+            if (!fssm) continue;
+
+            dev_bstr = (const UBYTE *)BADDR(fssm->fssm_Device);
+            if (!dev_bstr) continue;
+            dev_len = dev_bstr[0];
+            if (dev_len > 62) dev_len = 62;
+            for (k = 0; k < dev_len; k++) dev_name[k] = (char)dev_bstr[1+k];
+            dev_name[dev_len] = '\0';
+
+            nm = (const UBYTE *)BADDR(dl->dol_Name);
+            if (nm) {
+                nm_len = nm[0]; if (nm_len > 30) nm_len = 30;
+                for (k = 0; k < nm_len; k++) node_name[k] = (char)nm[1+k];
+                node_name[nm_len] = '\0';
+            } else {
+                node_name[0] = '\0';
+            }
+
+            if (!fssm->fssm_Environ) continue;
+            {
+                const ULONG *env = (const ULONG *)BADDR(fssm->fssm_Environ);
+                ULONG lo = 0, hi = 0;
+                if (env && env[DE_TABLESIZE] >= (ULONG)DE_UPPERCYL) {
+                    lo = env[DE_LOWCYL]; hi = env[DE_UPPERCYL];
+                }
+                sprintf(line, "  %s: unit=%lu dev=%s lo=%lu hi=%lu",
+                        node_name, fssm->fssm_Unit, dev_name,
+                        (unsigned long)lo, (unsigned long)hi);
+                vrdb_add(line);
+            }
+        }
+        UnLockDosList(LDF_DEVICES | LDF_READ);
+    }
 
     FreeVec(buf);
 
@@ -3261,6 +3434,681 @@ rscan_cleanup:
 }
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* raw_disk_read — show all on-disk fields for blocks 0-15            */
+/* Single CMD_READ per block, no retries, no fixups.  Shows exactly   */
+/* what is stored on the medium — useful for debugging DMA corruption. */
+/* ------------------------------------------------------------------ */
+
+static void raw_disk_read(struct Window *win, struct BlockDev *bd)
+{
+    UBYTE *buf;
+    char   line[80];
+    ULONG  blk;
+    ULONG  rc_last_lba  = 0;   /* last LBA from READ CAPACITY, 0 if unavailable */
+    ULONG  rc_blksz     = 512; /* block size from READ CAPACITY */
+    BOOL   scsi_ok      = FALSE; /* TRUE if HD_SCSICMD works on this device */
+    struct DriveGeometry geom;
+    struct EasyStruct es;
+
+    if (!bd) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Raw Disk Read";
+        es.es_TextFormat=(UBYTE*)"No device open.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+
+    buf = (UBYTE *)AllocVec(512, MEMF_CHIP | MEMF_CLEAR);
+    if (!buf) return;
+
+    vrdb_count = 0;
+    vrdb_list.lh_Head     = (struct Node *)&vrdb_list.lh_Tail;
+    vrdb_list.lh_Tail     = NULL;
+    vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
+
+    /* --- TD_GETGEOMETRY --- */
+    vrdb_add("=== TD_GETGEOMETRY ===");
+    memset(&geom, 0, sizeof(geom));
+    bd->iotd.iotd_Req.io_Command = TD_GETGEOMETRY;
+    bd->iotd.iotd_Req.io_Length  = sizeof(geom);
+    bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
+    bd->iotd.iotd_Req.io_Flags   = 0;
+    if (DoIO((struct IORequest *)&bd->iotd) == 0) {
+        sprintf(line, "  TotalSectors : %lu", (unsigned long)geom.dg_TotalSectors);
+        vrdb_add(line);
+        sprintf(line, "  Cylinders    : %lu", (unsigned long)geom.dg_Cylinders);
+        vrdb_add(line);
+        sprintf(line, "  Heads        : %lu", (unsigned long)geom.dg_Heads);
+        vrdb_add(line);
+        sprintf(line, "  TrackSectors : %lu", (unsigned long)geom.dg_TrackSectors);
+        vrdb_add(line);
+        sprintf(line, "  SectorSize   : %lu", (unsigned long)geom.dg_SectorSize);
+        vrdb_add(line);
+        sprintf(line, "  DeviceType   : %lu  Flags: 0x%lX",
+                (unsigned long)geom.dg_DeviceType,
+                (unsigned long)geom.dg_Flags);
+        vrdb_add(line);
+    } else {
+        vrdb_add("  TD_GETGEOMETRY failed (error or unsupported)");
+    }
+    vrdb_add("");
+
+    /* --- SCSI INQUIRY — asks the device directly, bypasses driver --- */
+    vrdb_add("=== SCSI INQUIRY (HD_SCSICMD, direct to device) ===");
+    {
+        struct SCSICmd scmd;
+        UBYTE cdb[6];
+        UBYTE sense[32];
+        BYTE  err;
+        UBYTE i, j;
+
+        memset(buf,   0, 64);
+        memset(sense, 0, sizeof(sense));
+        memset(&scmd, 0, sizeof(scmd));
+        cdb[0] = 0x12;   /* INQUIRY */
+        cdb[1] = 0x00;
+        cdb[2] = 0x00;
+        cdb[3] = 0x00;
+        cdb[4] = 36;     /* allocation length */
+        cdb[5] = 0x00;
+
+        scmd.scsi_Data        = (UWORD *)buf;
+        scmd.scsi_Length      = 36;
+        scmd.scsi_Command     = cdb;
+        scmd.scsi_CmdLength   = 6;
+        scmd.scsi_Flags       = SCSIF_READ;
+        scmd.scsi_SenseData   = sense;
+        scmd.scsi_SenseLength = sizeof(sense);
+
+        bd->iotd.iotd_Req.io_Command = HD_SCSICMD;
+        bd->iotd.iotd_Req.io_Length  = sizeof(scmd);
+        bd->iotd.iotd_Req.io_Data    = (APTR)&scmd;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+
+        if (err == IOERR_NOCMD) {
+            vrdb_add("  Not supported (non-SCSI device)");
+        } else if (err != 0) {
+            sprintf(line, "  Error: %ld", (long)err);
+            vrdb_add(line);
+        } else {
+            char vendor[9], product[17], revision[5];
+            UBYTE devtype = buf[0] & 0x1F;
+
+            for (i = 0; i < 8;  i++) vendor[i]   = (buf[8 +i] >= 0x20) ? (char)buf[8 +i] : ' ';
+            for (i = 0; i < 16; i++) product[i]  = (buf[16+i] >= 0x20) ? (char)buf[16+i] : ' ';
+            for (i = 0; i < 4;  i++) revision[i] = (buf[32+i] >= 0x20) ? (char)buf[32+i] : ' ';
+            vendor[8] = product[16] = revision[4] = '\0';
+            for (i = 7;  i > 0 && vendor[i]   == ' '; i--) vendor[i]   = '\0';
+            for (i = 15; i > 0 && product[i]  == ' '; i--) product[i]  = '\0';
+            for (i = 3;  i > 0 && revision[i] == ' '; i--) revision[i] = '\0';
+
+            scsi_ok = TRUE;
+            sprintf(line, "  DevType : 0x%02X  Vendor  : \"%s\"",
+                    (unsigned)devtype, vendor);
+            vrdb_add(line);
+            sprintf(line, "  Product : \"%s\"  Rev: \"%s\"",
+                    product, revision);
+            vrdb_add(line);
+
+            /* Hex dump: 36 bytes, 16 per row */
+            for (i = 0; i < 36; i += 16) {
+                UBYTE end = i + 16; if (end > 36) end = 36;
+                char *p = line;
+                p += sprintf(p, "  %02X:", (unsigned)i);
+                for (j = i; j < end; j++) p += sprintf(p, " %02X", (unsigned)buf[j]);
+                vrdb_add(line);
+            }
+        }
+    }
+    vrdb_add("");
+
+    /* --- SCSI READ CAPACITY(10) — get real sector count from device --- */
+    vrdb_add("=== SCSI READ CAPACITY(10) (HD_SCSICMD, direct to device) ===");
+    {
+        struct SCSICmd scmd;
+        UBYTE cdb[10];
+        UBYTE sense[32];
+        BYTE  err;
+
+        memset(buf,   0, 16);
+        memset(sense, 0, sizeof(sense));
+        memset(&scmd, 0, sizeof(scmd));
+        memset(cdb,   0, sizeof(cdb));
+        cdb[0] = 0x25;   /* READ CAPACITY (10) */
+
+        scmd.scsi_Data        = (UWORD *)buf;
+        scmd.scsi_Length      = 8;
+        scmd.scsi_Command     = cdb;
+        scmd.scsi_CmdLength   = 10;
+        scmd.scsi_Flags       = SCSIF_READ;
+        scmd.scsi_SenseData   = sense;
+        scmd.scsi_SenseLength = sizeof(sense);
+
+        bd->iotd.iotd_Req.io_Command = HD_SCSICMD;
+        bd->iotd.iotd_Req.io_Length  = sizeof(scmd);
+        bd->iotd.iotd_Req.io_Data    = (APTR)&scmd;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+
+        if (err == IOERR_NOCMD) {
+            vrdb_add("  Not supported (non-SCSI device)");
+        } else if (err != 0) {
+            sprintf(line, "  Error: %ld", (long)err);
+            vrdb_add(line);
+        } else {
+            ULONG last_lba = ((ULONG)buf[0]<<24)|((ULONG)buf[1]<<16)|
+                             ((ULONG)buf[2]<<8)|(ULONG)buf[3];
+            ULONG blksz    = ((ULONG)buf[4]<<24)|((ULONG)buf[5]<<16)|
+                             ((ULONG)buf[6]<<8)|(ULONG)buf[7];
+            ULONG total    = last_lba + 1;
+            char  szbuf[16];
+
+            rc_last_lba = last_lba;
+            rc_blksz    = (blksz > 0) ? blksz : 512;
+            scsi_ok     = TRUE;
+
+            sprintf(line, "  LastLBA   : %lu  (TotalBlocks: %lu)",
+                    (unsigned long)last_lba, (unsigned long)total);
+            vrdb_add(line);
+            sprintf(line, "  BlockSize : %lu bytes", (unsigned long)blksz);
+            vrdb_add(line);
+            FormatSize((UQUAD)total * (UQUAD)blksz, szbuf);
+            sprintf(line, "  TotalSize : %s", szbuf);
+            vrdb_add(line);
+            sprintf(line, "  Hex: %02X %02X %02X %02X  %02X %02X %02X %02X",
+                    buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7]);
+            vrdb_add(line);
+        }
+    }
+    vrdb_add("");
+
+    /* --- Capacity probe: binary-search real last LBA via HD_SCSICMD --- */
+    /* Sends SCSI READ(10) directly to the drive at increasing LBAs.      */
+    /* Drive responds with success or CHECK CONDITION — no driver         */
+    /* interpretation involved.  Finds real capacity even if READ         */
+    /* CAPACITY response was corrupted or truncated by the driver.        */
+    vrdb_add("=== Real capacity probe (HD_SCSICMD binary search) ===");
+    if (!scsi_ok) {
+        vrdb_add("  Skipped (HD_SCSICMD not available)");
+    } else {
+        ULONG lo = rc_last_lba; /* last known readable LBA */
+        ULONG hi = 0;           /* first known unreadable LBA */
+        ULONG steps = 0;
+        BYTE  perr;
+
+/* Issue one SCSI READ(10) at given LBA into buf; result in perr */
+#define PROBE_LBA(lba) do { \
+    struct SCSICmd _sc; UBYTE _cdb[10]; UBYTE _sns[16]; \
+    memset(&_sc,0,sizeof(_sc)); memset(_cdb,0,10); memset(_sns,0,16); \
+    _cdb[0]=0x28; \
+    _cdb[2]=(UBYTE)((lba)>>24); _cdb[3]=(UBYTE)((lba)>>16); \
+    _cdb[4]=(UBYTE)((lba)>>8);  _cdb[5]=(UBYTE)(lba); \
+    _cdb[8]=1; \
+    _sc.scsi_Data=(UWORD*)buf; _sc.scsi_Length=rc_blksz; \
+    _sc.scsi_Command=_cdb; _sc.scsi_CmdLength=10; \
+    _sc.scsi_Flags=SCSIF_READ; \
+    _sc.scsi_SenseData=_sns; _sc.scsi_SenseLength=16; \
+    bd->iotd.iotd_Req.io_Command=HD_SCSICMD; \
+    bd->iotd.iotd_Req.io_Length=sizeof(_sc); \
+    bd->iotd.iotd_Req.io_Data=(APTR)&_sc; \
+    bd->iotd.iotd_Req.io_Flags=0; bd->iotd.iotd_Count=0; \
+    perr=(BYTE)DoIO((struct IORequest *)&bd->iotd); \
+} while(0)
+
+        /* Step 1: probe just past reported capacity.
+           If it reads OK the driver is under-reporting — expand upward.
+           If it fails we already have the real boundary. */
+        PROBE_LBA(rc_last_lba + 1); steps++;
+        if (perr != 0) {
+            /* Reported capacity matches reality */
+            hi = rc_last_lba + 1;
+        } else {
+            /* Drive has more sectors than reported — find real upper bound */
+            lo = rc_last_lba + 1;
+            while (steps < 32) {
+                ULONG next = lo * 2 + 1;
+                if (next > 0x40000000UL) next = 0x40000000UL; /* cap ~128GB */
+                PROBE_LBA(next); steps++;
+                if (perr == 0) {
+                    lo = next;
+                    if (next >= 0x40000000UL) { hi = next; break; }
+                } else {
+                    hi = next;
+                    break;
+                }
+            }
+        }
+
+        /* Step 2: binary search to find exact last readable LBA */
+        while (hi > lo + 1 && steps < 64) {
+            ULONG mid = lo + (hi - lo) / 2;
+            PROBE_LBA(mid); steps++;
+            if (perr == 0) lo = mid;
+            else           hi = mid;
+        }
+#undef PROBE_LBA
+
+        {
+            char szbuf[16];
+            FormatSize((UQUAD)(lo + 1) * (UQUAD)rc_blksz, szbuf);
+            sprintf(line, "  Probes used  : %lu", (unsigned long)steps);
+            vrdb_add(line);
+            sprintf(line, "  Last readable LBA : %lu", (unsigned long)lo);
+            vrdb_add(line);
+            sprintf(line, "  Real capacity     : %s  (%lu sectors)",
+                    szbuf, (unsigned long)(lo + 1));
+            vrdb_add(line);
+            if (lo != rc_last_lba) {
+                char szbuf2[16];
+                FormatSize((UQUAD)(rc_last_lba + 1) * (UQUAD)rc_blksz, szbuf2);
+                sprintf(line, "  READ CAPACITY said: %s — WRONG!", szbuf2);
+                vrdb_add(line);
+                vrdb_add("  *** Driver/DMA reports wrong size — use Manual Geometry! ***");
+            } else {
+                vrdb_add("  READ CAPACITY agrees — reported size is correct.");
+            }
+        }
+    }
+    vrdb_add("");
+
+    /* --- Raw block scan --- */
+    vrdb_add("=== Blocks 0-15: single CMD_READ, no fixups ===");
+    for (blk = 0; blk < 16; blk++) {
+        ULONG id, csum_stored, csum_calc;
+        ULONG summed_longs;
+        const ULONG *lp;
+        ULONG i;
+        BYTE  err;
+        char  idtxt[8];
+
+        memset(buf, 0, 512);
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = 512;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = blk * 512UL;
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+        if (err != 0) {
+            sprintf(line, "Block %2lu: CMD_READ error %ld",
+                    (unsigned long)blk, (long)err);
+            vrdb_add(line);
+            continue;
+        }
+
+        lp = (const ULONG *)buf;
+        id           = lp[0];
+        summed_longs = lp[1];
+        csum_stored  = (ULONG)((LONG)lp[2]);
+
+        /* Compute checksum */
+        csum_calc = 0;
+        if (summed_longs >= 2 && summed_longs <= 128)
+            for (i = 0; i < summed_longs; i++) csum_calc += lp[i];
+
+        /* ID as 4 printable chars */
+        { int j;
+          for (j = 0; j < 4; j++) {
+              UBYTE c = (UBYTE)(id >> (24 - j * 8));
+              idtxt[j] = (c >= 0x20 && c <= 0x7E) ? (char)c : '.';
+          }
+          idtxt[4] = '\0'; }
+
+        sprintf(line, "Block %2lu  ID=%08lX (%s)  sum=%s",
+                (unsigned long)blk, (unsigned long)id, idtxt,
+                (csum_calc == 0) ? "OK" : "BAD");
+        vrdb_add(line);
+
+        if (id == IDNAME_RIGIDDISK) {
+            /* RDSK fields */
+            sprintf(line, "  Cyls=%lu  Heads=%lu  Secs=%lu",
+                    (unsigned long)lp[16], (unsigned long)lp[17],
+                    (unsigned long)lp[18]);
+            vrdb_add(line);
+            sprintf(line, "  RDBlo=%lu  RDBhi=%lu  LoCyl=%lu  HiCyl=%lu",
+                    (unsigned long)lp[22], (unsigned long)lp[23],
+                    (unsigned long)lp[24], (unsigned long)lp[25]);
+            vrdb_add(line);
+            sprintf(line, "  PartList=%08lX  FSHDList=%08lX",
+                    (unsigned long)lp[7], (unsigned long)lp[8]);
+            vrdb_add(line);
+
+        } else if (id == IDNAME_PARTITION) {
+            /* PART fields — note offsets 0x24 and 0xC0 are DMA-suspect */
+            UBYTE *bstr = buf + 0x24;   /* pb_DriveName BSTR */
+            ULONG *env  = (ULONG *)(buf + 128); /* pb_Environment */
+            char  name[32];
+            UBYTE len = bstr[0];
+            UBYTE k;
+            for (k = 0; k < 30 && k < len; k++) {
+                UBYTE c = bstr[1+k];
+                name[k] = (c >= 0x20 && c <= 0x7E) ? (char)c : '?';
+            }
+            name[k] = '\0';
+            sprintf(line, "  Name BSTR raw [0x24]: len=0x%02X \"%s\"",
+                    (unsigned)bstr[0], name);
+            vrdb_add(line);
+            sprintf(line, "  Raw bytes 0x24-0x27: %02X %02X %02X %02X",
+                    buf[0x24], buf[0x25], buf[0x26], buf[0x27]);
+            vrdb_add(line);
+            sprintf(line, "  DosType [0xC0]: %08lX  LoCyl=%lu  HiCyl=%lu",
+                    (unsigned long)env[16],
+                    (unsigned long)env[9], (unsigned long)env[10]);
+            vrdb_add(line);
+            sprintf(line, "  Raw bytes 0xC0-0xC3: %02X %02X %02X %02X",
+                    buf[0xC0], buf[0xC1], buf[0xC2], buf[0xC3]);
+            vrdb_add(line);
+            sprintf(line, "  Next=%08lX  Flags=%08lX  DevFlags=%08lX",
+                    (unsigned long)lp[4], (unsigned long)lp[5],
+                    (unsigned long)lp[6]);
+            vrdb_add(line);
+
+        } else if (id == IDNAME_FSHEADER) {
+            /* FSHD fields */
+            sprintf(line, "  DosType=%08lX  Version=%lu.%lu",
+                    (unsigned long)lp[8],
+                    (unsigned long)(lp[9] >> 16),
+                    (unsigned long)(lp[9] & 0xFFFF));
+            vrdb_add(line);
+            sprintf(line, "  Next=%08lX  SegListBlk=%08lX",
+                    (unsigned long)lp[4], (unsigned long)lp[12]);
+            vrdb_add(line);
+
+        } else if (id == IDNAME_LOADSEG) {
+            sprintf(line, "  Next=%08lX", (unsigned long)lp[4]);
+            vrdb_add(line);
+
+        } else if (id != 0 && id != 0xFFFFFFFFUL) {
+            sprintf(line, "  Raw: %08lX %08lX %08lX %08lX",
+                    (unsigned long)lp[0], (unsigned long)lp[1],
+                    (unsigned long)lp[2], (unsigned long)lp[3]);
+            vrdb_add(line);
+        }
+    }
+
+    FreeVec(buf);
+
+    /* Show in vrdb window */
+    {
+        struct Screen *scr = NULL;
+        APTR           vi  = NULL;
+        struct Gadget *glist = NULL;
+        struct Window *vwin  = NULL;
+        UWORD font_h, bor_t, bor_b, pad, row_h, btn_h, win_w, win_h, min_h, scr_w, scr_h;
+
+        scr = LockPubScreen(NULL);
+        if (!scr) return;
+        vi = GetVisualInfoA(scr, NULL);
+        if (!vi) goto rdr_cleanup;
+
+        font_h = scr->Font->ta_YSize;
+        bor_t  = scr->WBorTop + font_h + 1;
+        bor_b  = scr->WBorBottom;
+        pad    = 4;
+        row_h  = font_h + 2;
+        btn_h  = font_h + 6;
+        win_w  = 520;
+        win_h  = bor_t + pad + row_h * 20 + pad + btn_h + pad + bor_b;
+        min_h  = bor_t + pad + row_h *  4 + pad + btn_h + pad + bor_b;
+        scr_w  = scr->Width;
+        scr_h  = scr->Height;
+
+        if (!vrdb_make_gadgets(vi, scr, win_w, win_h, &glist))
+            goto rdr_cleanup;
+
+        { struct TagItem wt[] = {
+              { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
+              { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
+              { WA_Width,     win_w }, { WA_Height, win_h },
+              { WA_Title,     (ULONG)"Raw Disk Read" },
+              { WA_Gadgets,   (ULONG)glist },
+              { WA_PubScreen, (ULONG)scr },
+              { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
+                              IDCMP_NEWSIZE|IDCMP_REFRESHWINDOW },
+              { WA_Flags,     WFLG_DRAGBAR|WFLG_DEPTHGADGET|
+                              WFLG_CLOSEGADGET|WFLG_ACTIVATE|WFLG_SIMPLE_REFRESH|
+                              WFLG_SIZEGADGET|WFLG_SIZEBBOTTOM },
+              { WA_MinWidth,  300 }, { WA_MinHeight, min_h },
+              { WA_MaxWidth,  scr_w }, { WA_MaxHeight, scr_h },
+              { TAG_DONE, 0 } };
+          vwin = OpenWindowTagList(NULL, wt); }
+
+        UnlockPubScreen(NULL, scr); scr = NULL;
+        if (!vwin) goto rdr_cleanup;
+        GT_RefreshWindow(vwin, NULL);
+
+        { BOOL running = TRUE;
+          while (running) {
+            struct IntuiMessage *imsg;
+            WaitPort(vwin->UserPort);
+            while ((imsg = GT_GetIMsg(vwin->UserPort)) != NULL) {
+                ULONG iclass = imsg->Class;
+                struct Gadget *gad = (struct Gadget *)imsg->IAddress;
+                GT_ReplyIMsg(imsg);
+                switch (iclass) {
+                case IDCMP_CLOSEWINDOW: running = FALSE; break;
+                case IDCMP_NEWSIZE: {
+                    struct Gadget *ng2 = NULL;
+                    RemoveGList(vwin, glist, -1); FreeGadgets(glist); glist = NULL;
+                    if (vrdb_make_gadgets(vi, vwin->WScreen,
+                                          (UWORD)vwin->Width, (UWORD)vwin->Height, &ng2)) {
+                        glist = ng2;
+                        AddGList(vwin, glist, ~0, -1, NULL);
+                        RefreshGList(glist, vwin, NULL, -1);
+                    }
+                    GT_RefreshWindow(vwin, NULL); break; }
+                case IDCMP_GADGETUP:
+                    if (gad->GadgetID == VRDB_DONE) running = FALSE; break;
+                case IDCMP_REFRESHWINDOW:
+                    GT_BeginRefresh(vwin); GT_EndRefresh(vwin, TRUE); break;
+                }
+            }
+          }
+        }
+
+rdr_cleanup:
+        if (vwin)  { RemoveGList(vwin, glist, -1); CloseWindow(vwin); }
+        if (glist)   FreeGadgets(glist);
+        if (vi)      FreeVisualInfo(vi);
+        if (scr)     UnlockPubScreen(NULL, scr);
+    }
+}
+
+/* raw_hex_dump — dump raw CMD_READ hex+ASCII of blocks 0..N-1        */
+/* Uses vrdb listview.  Bypasses BlockDev_ReadBlock entirely.         */
+/* ------------------------------------------------------------------ */
+
+#define DUMP_BLOCKS 8   /* number of blocks to dump */
+
+static void raw_hex_dump(struct Window *win, struct BlockDev *bd)
+{
+    UBYTE *buf;
+    ULONG  blk, i;
+    BYTE   err;
+    char   line[80];
+    struct EasyStruct es;
+
+    if (!bd) {
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)"Hex Dump";
+        es.es_TextFormat=(UBYTE*)"No device open.";
+        es.es_GadgetFormat=(UBYTE*)"OK";
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+
+    buf = (UBYTE *)AllocVec(512, MEMF_CHIP | MEMF_CLEAR);
+    if (!buf) return;
+
+    vrdb_count = 0;
+    vrdb_list.lh_Head     = (struct Node *)&vrdb_list.lh_Tail;
+    vrdb_list.lh_Tail     = NULL;
+    vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
+
+    for (blk = 0; blk < DUMP_BLOCKS; blk++) {
+        ULONG id;
+        char  idtxt[5];
+        UWORD k;
+
+        /* Single raw CMD_READ — no retries, no checksum; raw on-disk bytes */
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = 512;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = blk * 512UL;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        bd->iotd.iotd_Count          = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+
+        if (err != 0) {
+            sprintf(line, "=== Block %lu: CMD_READ error %ld ===",
+                    (unsigned long)blk, (long)err);
+            vrdb_add(line);
+            continue;
+        }
+
+        /* Block header: ID tag + checksum result */
+        id = ((ULONG)buf[0]<<24)|((ULONG)buf[1]<<16)|
+             ((ULONG)buf[2]<<8)|(ULONG)buf[3];
+        for (k = 0; k < 4; k++) {
+            char c = (char)buf[k];
+            idtxt[k] = (c >= 0x20 && c <= 0x7E) ? c : '.';
+        }
+        idtxt[4] = '\0';
+        {
+            /* compute checksum for display */
+            const ULONG *lp = (const ULONG *)buf;
+            ULONG summed = lp[1];
+            ULONG sum = 0, s;
+            if (summed >= 2 && summed <= 128)
+                for (s = 0; s < summed; s++) sum += lp[s];
+            sprintf(line, "=== Block %lu  ID=%s(0x%08lX)  csum=%s ===",
+                    (unsigned long)blk, idtxt, id,
+                    (summed >= 2 && summed <= 128 && sum == 0) ? "OK" : "BAD");
+        }
+        vrdb_add(line);
+
+        /* Hex + ASCII, 16 bytes per line */
+        for (i = 0; i < 512; i += 16) {
+            char hex[52], asc[18];
+            UWORD h = 0, a = 0;
+            for (k = 0; k < 16; k++) {
+                UBYTE c = buf[i + k];
+                hex[h++] = "0123456789ABCDEF"[c >> 4];
+                hex[h++] = "0123456789ABCDEF"[c & 0xF];
+                hex[h++] = ' ';
+                if (k == 7) hex[h++] = ' ';
+                asc[a++] = (c >= 0x20 && c <= 0x7E) ? (char)c : '.';
+            }
+            hex[h] = '\0'; asc[a] = '\0';
+            sprintf(line, "%03lX: %s%s", (unsigned long)i, hex, asc);
+            vrdb_add(line);
+        }
+        vrdb_add("");
+    }
+
+    FreeVec(buf);
+
+    /* Open vrdb viewer window */
+    {
+        struct Screen  *scr   = NULL;
+        APTR            vi    = NULL;
+        struct Gadget  *glist = NULL;
+        struct Window  *vwin  = NULL;
+        UWORD font_h, bor_t, bor_b, row_h, btn_h, pad, win_w, win_h, min_h;
+        UWORD scr_w, scr_h;
+
+        scr = LockPubScreen(NULL);
+        if (!scr) return;
+        vi = GetVisualInfoA(scr, NULL);
+        if (!vi) { UnlockPubScreen(NULL, scr); return; }
+
+        font_h = scr->Font->ta_YSize;
+        bor_t  = scr->WBorTop + font_h + 1;
+        bor_b  = scr->WBorBottom;
+        pad    = 4;
+        row_h  = font_h + 2;
+        btn_h  = font_h + 6;
+        win_w  = 560;
+        win_h  = bor_t + pad + row_h * 20 + pad + btn_h + pad + bor_b;
+        min_h  = bor_t + pad + row_h *  4 + pad + btn_h + pad + bor_b;
+        scr_w  = scr->Width;
+        scr_h  = scr->Height;
+
+        if (!vrdb_make_gadgets(vi, scr, win_w, win_h, &glist))
+            goto hexdump_cleanup;
+
+        { struct TagItem wt[] = {
+              { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
+              { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
+              { WA_Width,     win_w }, { WA_Height, win_h },
+              { WA_Title,     (ULONG)"Hex Dump - Raw Blocks (CMD_READ)" },
+              { WA_Gadgets,   (ULONG)glist },
+              { WA_PubScreen, (ULONG)scr },
+              { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
+                              IDCMP_GADGETDOWN|IDCMP_REFRESHWINDOW|IDCMP_NEWSIZE },
+              { WA_Flags,     WFLG_DRAGBAR|WFLG_DEPTHGADGET|
+                              WFLG_CLOSEGADGET|WFLG_ACTIVATE|WFLG_SIMPLE_REFRESH|
+                              WFLG_SIZEGADGET|WFLG_SIZEBBOTTOM },
+              { WA_MinWidth,  300 },
+              { WA_MinHeight, min_h },
+              { WA_MaxWidth,  scr_w },
+              { WA_MaxHeight, scr_h },
+              { TAG_DONE, 0 } };
+          vwin = OpenWindowTagList(NULL, wt); }
+
+        UnlockPubScreen(NULL, scr); scr = NULL;
+        if (!vwin) goto hexdump_cleanup;
+        GT_RefreshWindow(vwin, NULL);
+
+        {
+            BOOL running = TRUE;
+            while (running) {
+                struct IntuiMessage *imsg;
+                WaitPort(vwin->UserPort);
+                while ((imsg = GT_GetIMsg(vwin->UserPort)) != NULL) {
+                    ULONG iclass = imsg->Class;
+                    struct Gadget *gad = (struct Gadget *)imsg->IAddress;
+                    GT_ReplyIMsg(imsg);
+                    switch (iclass) {
+                    case IDCMP_CLOSEWINDOW: running = FALSE; break;
+                    case IDCMP_NEWSIZE: {
+                        struct Gadget *ng2 = NULL;
+                        RemoveGList(vwin, glist, -1);
+                        FreeGadgets(glist); glist = NULL;
+                        if (vrdb_make_gadgets(vi, vwin->WScreen,
+                                              (UWORD)vwin->Width,
+                                              (UWORD)vwin->Height, &ng2)) {
+                            glist = ng2;
+                            AddGList(vwin, glist, ~0, -1, NULL);
+                            RefreshGList(glist, vwin, NULL, -1);
+                        }
+                        GT_RefreshWindow(vwin, NULL);
+                        break; }
+                    case IDCMP_GADGETUP:
+                        if (gad->GadgetID == VRDB_DONE) running = FALSE;
+                        break;
+                    case IDCMP_REFRESHWINDOW:
+                        GT_BeginRefresh(vwin); GT_EndRefresh(vwin, TRUE); break;
+                    }
+                }
+            }
+        }
+
+hexdump_cleanup:
+        if (vwin)  { RemoveGList(vwin, glist, -1); CloseWindow(vwin); }
+        if (glist)   FreeGadgets(glist);
+        if (vi)      FreeVisualInfo(vi);
+        if (scr)     UnlockPubScreen(NULL, scr);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 
 static void show_about(struct Window *win)
 {
@@ -3285,18 +4133,225 @@ static void show_about(struct Window *win)
     EasyRequestArgs(win, &es, NULL, NULL);
 }
 
+/* ------------------------------------------------------------------ */
+/* geometry_dialog — manual disk geometry entry                        */
+/* Used when TD_GETGEOMETRY fails or user wants to override.           */
+/* Returns TRUE (OK with valid values) or FALSE (cancelled).           */
+/* ------------------------------------------------------------------ */
+
+#define GDLG_CYLS    1
+#define GDLG_HEADS   2
+#define GDLG_SECS    3
+#define GDLG_OK      4
+#define GDLG_CANCEL  5
+#define GDLG_ROWS    3
+
+static BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
+                            ULONG *out_cyls, ULONG *out_heads, ULONG *out_secs)
+{
+    struct Screen  *scr       = NULL;
+    APTR            vi        = NULL;
+    struct Gadget  *glist     = NULL;
+    struct Gadget  *gctx      = NULL;
+    struct Gadget  *cyls_gad  = NULL;
+    struct Gadget  *heads_gad = NULL;
+    struct Gadget  *secs_gad  = NULL;
+    struct Window  *win       = NULL;
+    BOOL            result    = FALSE;
+    UWORD           warn_y    = 0;
+    UWORD           warn_fh   = 8;
+    char  cyls_str[12], heads_str[12], secs_str[12];
+
+    if (def_cyls  == 0) def_cyls  = 1;
+    if (def_heads == 0) def_heads = 1;
+    if (def_secs  == 0) def_secs  = 1;
+
+    sprintf(cyls_str,  "%lu", (unsigned long)def_cyls);
+    sprintf(heads_str, "%lu", (unsigned long)def_heads);
+    sprintf(secs_str,  "%lu", (unsigned long)def_secs);
+
+    scr = LockPubScreen(NULL);
+    if (!scr) goto geom_cleanup;
+    vi = GetVisualInfoA(scr, NULL);
+    if (!vi) goto geom_cleanup;
+
+    {
+        UWORD font_h  = scr->Font->ta_YSize;
+        UWORD bor_l   = (UWORD)scr->WBorLeft;
+        UWORD bor_t   = (UWORD)scr->WBorTop + font_h + 1;
+        UWORD bor_r   = (UWORD)scr->WBorRight;
+        UWORD bor_b   = (UWORD)scr->WBorBottom;
+        UWORD win_w   = 380;
+        UWORD inner_w = win_w - bor_l - bor_r;
+        UWORD pad     = 3;
+        UWORD row_h   = font_h + 4;
+        UWORD lbl_w   = 110;
+        UWORD gad_x   = bor_l + lbl_w;
+        UWORD gad_w   = inner_w - lbl_w - pad;
+        UWORD warn_rh = (UWORD)(font_h + 3);
+        UWORD gad_top = bor_t + pad + warn_rh * 2 + pad * 2;
+        UWORD win_h   = gad_top
+                      + (UWORD)GDLG_ROWS * (row_h + pad)
+                      + row_h + pad + bor_b;
+
+        warn_y  = bor_t + pad;
+        warn_fh = font_h;
+
+        gctx = CreateContext(&glist);
+        if (!gctx) goto geom_cleanup;
+
+        {
+            struct NewGadget ng;
+            struct Gadget *prev = gctx;
+            UWORD row = 0;
+            memset(&ng, 0, sizeof(ng));
+            ng.ng_VisualInfo = vi;
+            ng.ng_TextAttr   = scr->Font;
+
+#define GROW_Y(r) ((WORD)(gad_top + (r) * (row_h + pad)))
+#define GSTR_GAD(gid, lbl, istr, pgad) \
+    ng.ng_LeftEdge=(WORD)gad_x; ng.ng_TopEdge=GROW_Y(row); \
+    ng.ng_Width=(WORD)gad_w; ng.ng_Height=(WORD)row_h; \
+    ng.ng_GadgetText=(lbl); ng.ng_GadgetID=(gid); ng.ng_Flags=PLACETEXT_LEFT; \
+    { struct TagItem _gs[]={{GTST_String,(ULONG)(istr)}, \
+                            {GTST_MaxChars,10},{TAG_DONE,0}}; \
+      *(pgad)=CreateGadgetA(STRING_KIND,prev,&ng,_gs); \
+      if (!*(pgad)) goto geom_cleanup; prev=*(pgad); } row++;
+
+            GSTR_GAD(GDLG_CYLS,  "Cylinders",   cyls_str,  &cyls_gad)
+            GSTR_GAD(GDLG_HEADS, "Heads",        heads_str, &heads_gad)
+            GSTR_GAD(GDLG_SECS,  "Sectors/Trk", secs_str,  &secs_gad)
+
+#undef GSTR_GAD
+#undef GROW_Y
+
+            {
+                UWORD btn_y  = gad_top + (UWORD)GDLG_ROWS * (row_h + pad);
+                UWORD half_w = (inner_w - pad * 2 - pad) / 2;
+                struct TagItem bt[] = { { TAG_DONE, 0 } };
+                ng.ng_TopEdge=(WORD)btn_y; ng.ng_Height=(WORD)row_h;
+                ng.ng_Width=(WORD)half_w; ng.ng_Flags=PLACETEXT_IN;
+                ng.ng_LeftEdge=(WORD)(bor_l+pad); ng.ng_GadgetText="OK";
+                ng.ng_GadgetID=GDLG_OK;
+                prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
+                if (!prev) goto geom_cleanup;
+                ng.ng_LeftEdge=(WORD)(bor_l+pad+half_w+pad);
+                ng.ng_GadgetText="Cancel"; ng.ng_GadgetID=GDLG_CANCEL;
+                prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
+                if (!prev) goto geom_cleanup;
+            }
+        }
+
+        {
+            struct TagItem wt[] = {
+                { WA_Left,      (ULONG)((scr->Width  - win_w) / 2) },
+                { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
+                { WA_Width,     (ULONG)win_w },
+                { WA_Height,    (ULONG)win_h },
+                { WA_Title,     (ULONG)"Manual Geometry Entry" },
+                { WA_Gadgets,   (ULONG)glist },
+                { WA_PubScreen, (ULONG)scr },
+                { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
+                                IDCMP_REFRESHWINDOW },
+                { WA_Flags,     WFLG_DRAGBAR | WFLG_DEPTHGADGET |
+                                WFLG_CLOSEGADGET | WFLG_ACTIVATE |
+                                WFLG_SIMPLE_REFRESH },
+                { TAG_DONE, 0 }
+            };
+            win = OpenWindowTagList(NULL, wt);
+        }
+    }
+
+    UnlockPubScreen(NULL, scr); scr = NULL;
+    if (!win) goto geom_cleanup;
+    GT_RefreshWindow(win, NULL);
+
+    /* Draw 2-line warning */
+#define GEOM_WARN(win_, y_, fh_, str_) do { \
+    struct RastPort *_rp = (win_)->RPort; \
+    SetAPen(_rp, 1); \
+    Move(_rp, (WORD)((win_)->BorderLeft + 4), \
+              (WORD)((y_) + _rp->TxBaseline)); \
+    Text(_rp, (str_), (WORD)strlen(str_)); \
+} while(0)
+    GEOM_WARN(win, warn_y,            warn_fh, "WARNING: Incorrect values may cause data loss.");
+    GEOM_WARN(win, warn_y+warn_fh+3,  warn_fh, "Use only when automatic detection fails.");
+
+    {
+        BOOL running = TRUE;
+        while (running) {
+            struct IntuiMessage *imsg;
+            WaitPort(win->UserPort);
+            while ((imsg = GT_GetIMsg(win->UserPort)) != NULL) {
+                ULONG iclass = imsg->Class;
+                struct Gadget *gad = (struct Gadget *)imsg->IAddress;
+                GT_ReplyIMsg(imsg);
+                switch (iclass) {
+                case IDCMP_CLOSEWINDOW:
+                    running = FALSE;
+                    break;
+                case IDCMP_GADGETUP:
+                    switch (gad->GadgetID) {
+                    case GDLG_OK: {
+                        struct StringInfo *si;
+                        ULONG c, h, s;
+                        si = (struct StringInfo *)cyls_gad->SpecialInfo;
+                        c  = parse_num((char *)si->Buffer);
+                        si = (struct StringInfo *)heads_gad->SpecialInfo;
+                        h  = parse_num((char *)si->Buffer);
+                        si = (struct StringInfo *)secs_gad->SpecialInfo;
+                        s  = parse_num((char *)si->Buffer);
+                        if (c > 0 && h > 0 && s > 0) {
+                            *out_cyls  = c;
+                            *out_heads = h;
+                            *out_secs  = s;
+                            result = TRUE;
+                        }
+                        running = FALSE;
+                        break;
+                    }
+                    case GDLG_CANCEL:
+                        running = FALSE;
+                        break;
+                    }
+                    break;
+                case IDCMP_REFRESHWINDOW:
+                    GT_BeginRefresh(win);
+                    GT_EndRefresh(win, TRUE);
+                    GEOM_WARN(win, warn_y,           warn_fh, "WARNING: Incorrect values may cause data loss.");
+                    GEOM_WARN(win, warn_y+warn_fh+3, warn_fh, "Use only when automatic detection fails.");
+                    break;
+                }
+            }
+        }
+    }
+#undef GEOM_WARN
+
+geom_cleanup:
+    if (win)   { RemoveGList(win, glist, -1); CloseWindow(win); }
+    if (glist)   FreeGadgets(glist);
+    if (vi)      FreeVisualInfo(vi);
+    if (scr)     UnlockPubScreen(NULL, scr);
+    return result;
+}
+
+/* ------------------------------------------------------------------ */
+
 static struct NewMenu partview_menu_def[] = {
     { NM_TITLE, "DiskPart",              NULL,         0, 0, NULL },
     { NM_ITEM,  "About...",              NULL,         0, 0, NULL },
     { NM_TITLE, "Advanced",              NULL,         0, 0, NULL },
     { NM_ITEM,  "View RDB Block",        NULL,         0, 0, NULL },  /* ITEM 0 */
     { NM_ITEM,  "Raw Block Scan...",     NULL,         0, 0, NULL },  /* ITEM 1 */
-    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 2 */
-    { NM_ITEM,  "Backup RDB Block",      NULL,         0, 0, NULL },  /* ITEM 3 */
-    { NM_ITEM,  "Restore RDB Block",     NULL,         0, 0, NULL },  /* ITEM 4 */
-    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 5 */
-    { NM_ITEM,  "Extended Backup...",    NULL,         0, 0, NULL },  /* ITEM 6 */
-    { NM_ITEM,  "Extended Restore...",   NULL,         0, 0, NULL },  /* ITEM 7 */
+    { NM_ITEM,  "Hex Dump Blocks...",    NULL,         0, 0, NULL },  /* ITEM 2 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 3 */
+    { NM_ITEM,  "Backup RDB Block",      NULL,         0, 0, NULL },  /* ITEM 4 */
+    { NM_ITEM,  "Restore RDB Block",     NULL,         0, 0, NULL },  /* ITEM 5 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 6 */
+    { NM_ITEM,  "Extended Backup...",    NULL,         0, 0, NULL },  /* ITEM 7 */
+    { NM_ITEM,  "Extended Restore...",   NULL,         0, 0, NULL },  /* ITEM 8 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 9 */
+    { NM_ITEM,  "Raw Disk Read...",      NULL,         0, 0, NULL },  /* ITEM 10 */
     { NM_END,   NULL,                    NULL,         0, 0, NULL },
 };
 
@@ -3355,6 +4410,11 @@ BOOL partview_run(const char *devname, ULONG unit)
 
     if (bd) {
         RDB_Read(bd, rdb);
+        /* Fill in any missing partition names from the AmigaDOS DosList.
+           Some disks have pb_DriveName[0]=0 (no BSTR name on disk);
+           the OS names the partition at boot time and we can recover
+           that name by matching device+unit+lo_cyl+hi_cyl in the list. */
+        /* nothing extra — names and DosTypes come from disk (PART/FSHD blocks) */
         if (!rdb->valid) {
             struct DriveGeometry geom;
             memset(&geom, 0, sizeof(geom));
@@ -3531,14 +4591,18 @@ BOOL partview_run(const char *devname, ULONG unit)
                             rdb_view_block(win, bd, rdb);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 1)
                             rdb_raw_scan(win, bd);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 3)
-                            rdb_backup_block(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 2)
+                            raw_hex_dump(win, bd);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 4)
+                            rdb_backup_block(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 5)
                             rdb_restore_block(win, bd);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 6)
-                            rdb_backup_extended(win, bd, rdb);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 7)
+                            rdb_backup_extended(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 8)
                             rdb_restore_extended(win, bd);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 10)
+                            raw_disk_read(win, bd);
                         mcode = it->NextSelect;
                     }
                     break;
@@ -3741,13 +4805,18 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.high_cyl     = drag_new_hi;
                                 new_pi.heads        = rdb->heads;
                                 new_pi.sectors      = rdb->sectors;
-                                new_pi.block_size   = 512;
-                                new_pi.boot_pri     = (rdb->num_parts == 0) ? 0 : -128;
-                                new_pi.max_transfer = 0x7FFFFFFFUL;
-                                new_pi.mask         = 0xFFFFFFFEUL;
-                                new_pi.num_buffer   = 30;
-                                new_pi.buf_mem_type = 0;
-                                new_pi.boot_blocks  = 2;
+                                new_pi.block_size    = 512;
+                                new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
+                                new_pi.reserved_blks = 2;
+                                new_pi.interleave    = 0;
+                                new_pi.max_transfer  = 0x7FFFFFFFUL;
+                                new_pi.mask          = 0xFFFFFFFEUL;
+                                new_pi.num_buffer    = 30;
+                                new_pi.buf_mem_type  = 0;
+                                new_pi.boot_blocks   = 2;
+                                new_pi.baud          = 0;
+                                new_pi.control       = 0;
+                                new_pi.dev_flags     = 0;
                                 if (partition_dialog(&new_pi, "Add Partition", rdb)) {
                                     rdb->parts[rdb->num_parts++] = new_pi;
                                     dirty = TRUE; needs_reboot = TRUE;
@@ -3859,80 +4928,109 @@ BOOL partview_run(const char *devname, ULONG unit)
                         /* Fall back to whatever we already know */
                         if (real_cyls == 0) real_cyls  = rdb->cylinders;
                         if (real_cyls == 0) {
-                            es.es_StructSize   = sizeof(es);
-                            es.es_Flags        = 0;
-                            es.es_Title        = (UBYTE *)"DiskPart";
-                            es.es_TextFormat   = (UBYTE *)"Cannot determine disk geometry.\nMake sure the device is accessible.";
-                            es.es_GadgetFormat = (UBYTE *)"OK";
-                            EasyRequest(win, &es, NULL);
-                            break;
+                            /* Auto-detection failed — offer manual entry */
+                            if (!geometry_dialog(0, 0, 0,
+                                                 &real_cyls, &real_heads, &real_secs))
+                                break;
+                            /* geometry_dialog validated cyls/heads/secs > 0 */
                         }
                         if (real_heads == 0) real_heads = rdb->heads;
                         if (real_secs  == 0) real_secs  = rdb->sectors;
 
                         if (rdb->valid) {
-                            /* Disk already has an RDB — offer Re-init or Update Geometry */
-                            LONG choice;
-                            char msg[512];
+                            /* Disk already has an RDB.
+                               Loop so "Manual..." can update geometry and re-show dialog. */
+                            BOOL geom_retry = TRUE;
+                            while (geom_retry) {
+                                LONG choice;
+                                char msg[512];
+                                geom_retry = FALSE;
 
-                            sprintf(msg,
-                                "Disk already has an RDB with %u partition%s.\n\n"
-                                "Device geometry: %lu cyl x %lu hd x %lu sec\n"
-                                "RDB geometry:    %lu cyl x %lu hd x %lu sec\n\n"
-                                "Re-init: wipe all partitions, create fresh RDB.\n"
-                                "Update Geometry (EXPERIMENTAL): keep partitions,\n"
-                                "  update RDB to match device size.",
-                                (unsigned)rdb->num_parts,
-                                rdb->num_parts == 1 ? "" : "s",
-                                (unsigned long)real_cyls,
-                                (unsigned long)real_heads,
-                                (unsigned long)real_secs,
-                                (unsigned long)rdb->cylinders,
-                                (unsigned long)rdb->heads,
-                                (unsigned long)rdb->sectors);
+                                sprintf(msg,
+                                    "Disk already has an RDB with %u partition%s.\n\n"
+                                    "Device geometry: %lu cyl x %lu hd x %lu sec\n"
+                                    "RDB geometry:    %lu cyl x %lu hd x %lu sec\n\n"
+                                    "Re-init: wipe all partitions, create fresh RDB.\n"
+                                    "Update Geometry (EXPERIMENTAL): keep partitions,\n"
+                                    "  update RDB to match device size.\n"
+                                    "Manual...: enter geometry by hand.",
+                                    (unsigned)rdb->num_parts,
+                                    rdb->num_parts == 1 ? "" : "s",
+                                    (unsigned long)real_cyls,
+                                    (unsigned long)real_heads,
+                                    (unsigned long)real_secs,
+                                    (unsigned long)rdb->cylinders,
+                                    (unsigned long)rdb->heads,
+                                    (unsigned long)rdb->sectors);
 
-                            es.es_StructSize   = sizeof(es);
-                            es.es_Flags        = 0;
-                            es.es_Title        = (UBYTE *)"Init RDB";
-                            es.es_TextFormat   = (UBYTE *)msg;
-                            es.es_GadgetFormat = (UBYTE *)"Re-init|Update Geometry|Cancel";
-                            choice = EasyRequest(win, &es, NULL);
+                                es.es_StructSize   = sizeof(es);
+                                es.es_Flags        = 0;
+                                es.es_Title        = (UBYTE *)"Init RDB";
+                                es.es_TextFormat   = (UBYTE *)msg;
+                                es.es_GadgetFormat =
+                                    (UBYTE *)"Re-init|Update Geometry|Manual...|Cancel";
+                                choice = EasyRequest(win, &es, NULL);
 
-                            if (choice == 1) {
-                                /* Re-init */
-                                RDB_InitFresh(rdb, real_cyls, real_heads, real_secs);
-                                sel   = -1;
-                                dirty = TRUE;
-                                refresh_listview(win, lv_gad, rdb, sel);
-                                draw_static(win, devname, unit, rdb,
-                                            ix, iy, iw, bx, by, bw, bh,
-                                            hx, hy, hw, sel);
-                            } else if (choice == 2) {
-                                /* Update Geometry (EXPERIMENTAL) */
-                                rdb->cylinders = real_cyls;
-                                rdb->heads     = real_heads;
-                                rdb->sectors   = real_secs;
-                                rdb->hi_cyl    = real_cyls - 1;
-                                dirty = TRUE;
-                                draw_static(win, devname, unit, rdb,
-                                            ix, iy, iw, bx, by, bw, bh,
-                                            hx, hy, hw, sel);
+                                if (choice == 1) {
+                                    /* Re-init */
+                                    RDB_InitFresh(rdb, real_cyls, real_heads, real_secs);
+                                    sel   = -1;
+                                    dirty = TRUE;
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    draw_static(win, devname, unit, rdb,
+                                                ix, iy, iw, bx, by, bw, bh,
+                                                hx, hy, hw, sel);
+                                } else if (choice == 2) {
+                                    /* Update Geometry (EXPERIMENTAL) */
+                                    rdb->cylinders = real_cyls;
+                                    rdb->heads     = real_heads;
+                                    rdb->sectors   = real_secs;
+                                    rdb->hi_cyl    = real_cyls - 1;
+                                    dirty = TRUE;
+                                    draw_static(win, devname, unit, rdb,
+                                                ix, iy, iw, bx, by, bw, bh,
+                                                hx, hy, hw, sel);
+                                } else if (choice == 3) {
+                                    /* Manual — re-enter geometry, then re-show dialog */
+                                    if (geometry_dialog(real_cyls, real_heads, real_secs,
+                                                        &real_cyls, &real_heads, &real_secs))
+                                        geom_retry = TRUE;
+                                }
+                                /* choice == 0: Cancel — exit loop */
                             }
                         } else {
                             /* No RDB — confirm and create fresh */
-                            es.es_StructSize   = sizeof(es);
-                            es.es_Flags        = 0;
-                            es.es_Title        = (UBYTE *)"Init RDB";
-                            es.es_TextFormat   = (UBYTE *)"Create a new RDB on this disk?\nAll existing data will be lost.";
-                            es.es_GadgetFormat = (UBYTE *)"Yes|No";
-                            if (EasyRequest(win, &es, NULL) == 1) {
-                                RDB_InitFresh(rdb, real_cyls, real_heads, real_secs);
-                                sel   = -1;
-                                dirty = TRUE;
-                                refresh_listview(win, lv_gad, rdb, sel);
-                                draw_static(win, devname, unit, rdb,
-                                            ix, iy, iw, bx, by, bw, bh,
-                                            hx, hy, hw, sel);
+                            BOOL geom_retry = TRUE;
+                            while (geom_retry) {
+                                LONG choice;
+                                geom_retry = FALSE;
+
+                                es.es_StructSize   = sizeof(es);
+                                es.es_Flags        = 0;
+                                es.es_Title        = (UBYTE *)"Init RDB";
+                                es.es_TextFormat   =
+                                    (UBYTE *)"Create a new RDB on this disk?\n"
+                                             "All existing data will be lost.\n\n"
+                                             "Manual...: enter geometry by hand.";
+                                es.es_GadgetFormat = (UBYTE *)"Yes|Manual...|No";
+                                choice = EasyRequest(win, &es, NULL);
+
+                                if (choice == 1) {
+                                    /* Yes */
+                                    RDB_InitFresh(rdb, real_cyls, real_heads, real_secs);
+                                    sel   = -1;
+                                    dirty = TRUE;
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    draw_static(win, devname, unit, rdb,
+                                                ix, iy, iw, bx, by, bw, bh,
+                                                hx, hy, hw, sel);
+                                } else if (choice == 2) {
+                                    /* Manual — re-enter geometry, then re-show dialog */
+                                    if (geometry_dialog(real_cyls, real_heads, real_secs,
+                                                        &real_cyls, &real_heads, &real_secs))
+                                        geom_retry = TRUE;
+                                }
+                                /* choice == 0 (No): exit loop */
                             }
                         }
                         break;
@@ -3958,13 +5056,18 @@ BOOL partview_run(const char *devname, ULONG unit)
                         new_pi.high_cyl     = hi;
                         new_pi.heads        = rdb->heads;
                         new_pi.sectors      = rdb->sectors;
-                        new_pi.block_size   = 512;
-                        new_pi.boot_pri     = (rdb->num_parts == 0) ? 0 : -128;
-                        new_pi.max_transfer = 0x7FFFFFFFUL;
-                        new_pi.mask         = 0xFFFFFFFEUL;
-                        new_pi.num_buffer   = 30;
-                        new_pi.buf_mem_type = 0;   /* Any */
-                        new_pi.boot_blocks  = 2;
+                        new_pi.block_size    = 512;
+                        new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
+                        new_pi.reserved_blks = 2;
+                        new_pi.interleave    = 0;
+                        new_pi.max_transfer  = 0x7FFFFFFFUL;
+                        new_pi.mask          = 0xFFFFFFFEUL;
+                        new_pi.num_buffer    = 30;
+                        new_pi.buf_mem_type  = 0;
+                        new_pi.boot_blocks   = 2;
+                        new_pi.baud          = 0;
+                        new_pi.control       = 0;
+                        new_pi.dev_flags     = 0;
                         /* flags: 0 = bootable */
 
                         if (partition_dialog(&new_pi, "Add Partition", rdb)) {

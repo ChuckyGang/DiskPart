@@ -15,6 +15,9 @@
 struct DevNameList {
     UWORD count;
     char  names[MAX_DEV_NAMES][64];
+    UWORD vers[MAX_DEV_NAMES];         /* lib_Version, 0 if unknown */
+    UWORD revs[MAX_DEV_NAMES];         /* lib_Revision               */
+    char  display[MAX_DEV_NAMES][80];  /* formatted by DevNameList_FormatDisplay */
 };
 
 /* ---- Level-2 list: units found for one driver, with disk info ---- */
@@ -36,6 +39,14 @@ struct UnitList {
  * No I/O is performed — this is a pure memory walk and completes instantly.
  */
 void Devices_Scan(struct DevNameList *nl);
+
+/*
+ * Format nl->display[] strings: device name left-justified, version
+ * right-aligned to col_chars columns.  Call after Devices_Scan, once
+ * the screen font metrics are known so col_chars can be calculated as
+ * (listview_pixel_width - internal_padding) / font_x_size.
+ */
+void DevNameList_FormatDisplay(struct DevNameList *nl, UWORD col_chars);
 
 /* Probe progress callback — called before and after each unit open attempt.
  * phase PROBE_START : about to probe this unit  (info = NULL)
