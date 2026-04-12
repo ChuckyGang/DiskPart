@@ -109,6 +109,8 @@ static void list_init(struct List *l)
     l->lh_TailPred = (struct Node *)&l->lh_Head;
 }
 
+static void FriendlyDosType(ULONG dostype, char *buf);  /* defined after builtin_fs[] */
+
 static void build_part_list(struct RDBInfo *rdb, WORD sel)
 {
     UWORD i;
@@ -126,7 +128,7 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
         UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
         const char *nm = pi->drive_name[0] ? pi->drive_name : "(none)";
 
-        FormatDosType(pi->dos_type, dt);
+        FriendlyDosType(pi->dos_type, dt);
         FormatSize(bytes, sz);
 
         /* ">" marker for selected row, space otherwise */
@@ -694,6 +696,21 @@ static const struct { const char *name; ULONG dostype; } builtin_fs[] = {
 };
 #define NUM_BUILTIN_FS 3
 
+/* Returns a human-readable filesystem name: built-in friendly name if known,
+   otherwise falls back to FormatDosType (e.g. "PFS\3").  buf >= 16 bytes. */
+static void FriendlyDosType(ULONG dostype, char *buf)
+{
+    UWORD i;
+    for (i = 0; i < NUM_BUILTIN_FS; i++) {
+        if (builtin_fs[i].dostype == dostype) {
+            strncpy(buf, builtin_fs[i].name, 15);
+            buf[15] = '\0';
+            return;
+        }
+    }
+    FormatDosType(dostype, buf);
+}
+
 /* Block size — maps cycle index ↔ bytes value */
 static const char * const blocksize_labels[] = {
     "512", "1024", "2048", "4096", "8192", "16384", "32768", NULL
@@ -1071,21 +1088,9 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
             for (k = 0; k < dlg_num_fs; k++)
                 if (dlg_fs_dostypes[k] == dt) { dup = TRUE; break; }
             if (!dup && dlg_num_fs < MAX_DLG_FS - 1) {
-                FormatDosType(dt, dlg_fs_names[dlg_num_fs]);
+                FriendlyDosType(dt, dlg_fs_names[dlg_num_fs]);
                 dlg_fs_labels[dlg_num_fs]   = dlg_fs_names[dlg_num_fs];
                 dlg_fs_dostypes[dlg_num_fs] = dt;
-                dlg_num_fs++;
-            }
-        }
-        /* Ensure the partition's current dos_type is in the list */
-        {
-            BOOL dup = FALSE;
-            for (k = 0; k < dlg_num_fs; k++)
-                if (dlg_fs_dostypes[k] == pi->dos_type) { dup = TRUE; break; }
-            if (!dup && dlg_num_fs < MAX_DLG_FS - 1) {
-                FormatDosType(pi->dos_type, dlg_fs_names[dlg_num_fs]);
-                dlg_fs_labels[dlg_num_fs]   = dlg_fs_names[dlg_num_fs];
-                dlg_fs_dostypes[dlg_num_fs] = pi->dos_type;
                 dlg_num_fs++;
             }
         }
@@ -1395,6 +1400,7 @@ cleanup:
 #define AFSDLG_BROWSE   3
 #define AFSDLG_OK       4
 #define AFSDLG_CANCEL   5
+#define AFSDLG_HEXDISP  6
 
 static char        fs_strs[MAX_FILESYSTEMS][64];
 static struct Node fs_nodes[MAX_FILESYSTEMS];
@@ -1546,11 +1552,14 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
     struct Gadget *dostype_gad = NULL;
     struct Gadget *file_gad    = NULL;
     struct Window *win         = NULL;
+    struct Gadget *hex_gad     = NULL;
     BOOL           result      = FALSE;
     char           dt_str[20];
+    char           hex_str[16];
     static char    file_str[256];   /* static so ASL path update persists */
 
     FormatDosType(fi->dos_type, dt_str);
+    sprintf(hex_str, "0x%08lX", fi->dos_type);
     if (is_edit) {
         file_str[0] = '\0';   /* empty = keep existing code */
     } else {
@@ -1577,6 +1586,8 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         UWORD browse_w = 70;
         UWORD gad_x    = bor_l + lbl_w;
         UWORD file_w   = inner_w - lbl_w - browse_w - pad * 2;
+        UWORD dt_str_w = 110;                          /* DosType input: "DOS\1" or "0x444F5301" */
+        UWORD dt_hex_w = inner_w - lbl_w - dt_str_w - pad * 2; /* hex readout to the right */
         UWORD gad_w    = inner_w - lbl_w - pad;
         UWORD win_h    = bor_t + pad + row_h + pad + row_h + pad + row_h + pad + bor_b;
         struct NewGadget ng;
@@ -1589,14 +1600,23 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         ng.ng_VisualInfo = vi;
         ng.ng_TextAttr   = scr->Font;
 
-        /* DosType */
+        /* DosType string — narrowed; accepts "DOS\1" or "0x444F5301" */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad);
-        ng.ng_Width=gad_w; ng.ng_Height=row_h;
+        ng.ng_Width=dt_str_w; ng.ng_Height=row_h;
         ng.ng_GadgetText="DosType"; ng.ng_GadgetID=AFSDLG_DOSTYPE;
         ng.ng_Flags=PLACETEXT_LEFT;
         { struct TagItem st[]={{GTST_String,(ULONG)dt_str},{GTST_MaxChars,18},{TAG_DONE,0}};
           dostype_gad=CreateGadgetA(STRING_KIND,gctx,&ng,st);
           if (!dostype_gad) goto fs_add_cleanup; prev=dostype_gad; }
+
+        /* Hex readout — read-only display to the right of DosType */
+        ng.ng_LeftEdge=gad_x+dt_str_w+pad; ng.ng_TopEdge=(WORD)(bor_t+pad);
+        ng.ng_Width=dt_hex_w; ng.ng_Height=row_h;
+        ng.ng_GadgetText=NULL; ng.ng_GadgetID=AFSDLG_HEXDISP;
+        ng.ng_Flags=0;
+        { struct TagItem tt[]={{GTTX_Text,(ULONG)hex_str},{GTTX_Border,TRUE},{TAG_DONE,0}};
+          hex_gad=CreateGadgetA(TEXT_KIND,prev,&ng,tt);
+          if (!hex_gad) goto fs_add_cleanup; prev=hex_gad; }
 
         /* File string (narrower to leave room for Browse button) */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad+row_h+pad);
@@ -1661,6 +1681,16 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                 case IDCMP_GADGETUP:
                     switch (gad->GadgetID) {
                     case AFSDLG_CANCEL: running = FALSE; break;
+
+                    case AFSDLG_DOSTYPE: {
+                        /* Update hex readout when user presses Return in DosType field */
+                        struct StringInfo *si = (struct StringInfo *)dostype_gad->SpecialInfo;
+                        ULONG dt = parse_dostype((char *)si->Buffer);
+                        sprintf(hex_str, "0x%08lX", dt);
+                        { struct TagItem tt[]={{GTTX_Text,(ULONG)hex_str},{TAG_DONE,0}};
+                          GT_SetGadgetAttrsA(hex_gad, win, NULL, tt); }
+                        break;
+                    }
 
                     case AFSDLG_BROWSE:
                         if (AslBase) {

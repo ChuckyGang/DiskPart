@@ -472,23 +472,30 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         }
 
         if (num_lseg > 0) {
-            ULONG alloc_sz = num_lseg * 492UL;  /* 123 longs * 4 bytes = 492 bytes/block */
+            ULONG alloc_sz = num_lseg * 492UL;  /* upper bound — last block may be partial */
             fi->code = (UBYTE *)AllocVec(alloc_sz, MEMF_PUBLIC | MEMF_CLEAR);
             if (fi->code) {
                 ULONG offset = 0;
+                BOOL  ok     = TRUE;
                 lseg_blk = fi->seg_list_blk;
                 while (lseg_blk != RDB_END_MARK && offset < alloc_sz) {
                     struct LoadSegBlock *lsb;
-                    if (!BlockDev_ReadBlock(bd, lseg_blk, buf)) break;
+                    ULONG data_bytes;
+                    if (!BlockDev_ReadBlock(bd, lseg_blk, buf)) { ok = FALSE; break; }
                     lsb = (struct LoadSegBlock *)buf;
-                    if (lsb->lsb_ID != IDNAME_LOADSEG) break;
-                    memcpy(fi->code + offset, lsb->lsb_LoadData, 492);
-                    offset += 492;
+                    if (lsb->lsb_ID != IDNAME_LOADSEG) { ok = FALSE; break; }
+                    /* Respect lsb_SummedLongs — the last block may be partial.
+                       SummedLongs includes 5 header longs; the rest is data.
+                       Clamp to 492 bytes (123 longs) maximum per block. */
+                    data_bytes = (lsb->lsb_SummedLongs > 5UL)
+                                 ? (lsb->lsb_SummedLongs - 5UL) * 4UL : 0UL;
+                    if (data_bytes > 492UL) data_bytes = 492UL;
+                    memcpy(fi->code + offset, lsb->lsb_LoadData, data_bytes);
+                    offset += data_bytes;
                     lseg_blk = lsb->lsb_Next;
                 }
-                /* Only mark as valid if we got all blocks */
-                if (offset == alloc_sz) {
-                    fi->code_size = alloc_sz;
+                if (ok) {
+                    fi->code_size = offset;  /* actual bytes, not padded to 492 */
                 } else {
                     FreeVec(fi->code);
                     fi->code = NULL;
