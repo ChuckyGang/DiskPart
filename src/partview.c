@@ -63,6 +63,10 @@ extern struct Library       *GadToolsBase;
 #define SELECTUP   0xE8
 #endif
 
+#ifndef IEQUALIFIER_DOUBLECLICK
+#define IEQUALIFIER_DOUBLECLICK 0x8000
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Gadget IDs                                                           */
 /* ------------------------------------------------------------------ */
@@ -623,7 +627,7 @@ static void draw_static(struct Window *win, const char *devname, ULONG unit,
 static void refresh_listview(struct Window *win, struct Gadget *lv_gad,
                               struct RDBInfo *rdb, WORD sel)
 {
-    struct TagItem detach[]   = { { GTLV_Labels, TAG_IGNORE        }, { TAG_DONE, 0 } };
+    struct TagItem detach[]   = { { GTLV_Labels, ~0UL              }, { TAG_DONE, 0 } };
     struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&part_list }, { TAG_DONE, 0 } };
     GT_SetGadgetAttrsA(lv_gad, win, NULL, detach);
     build_part_list(rdb, sel);
@@ -709,10 +713,10 @@ static UWORD blocksize_index(ULONG bsz)
 
 /* BufMemType — maps cycle index ↔ MEMF_* value */
 static const char * const bufmem_labels[] = {
-    "Any", "Chip", "Fast", "24-bit DMA", NULL
+    "Any", "Public", "Chip", "Fast", "24-bit DMA", NULL
 };
-static const ULONG bufmem_values[] = { 0UL, 2UL, 4UL, 8UL };
-#define NUM_BUFMEM_TYPES 4
+static const ULONG bufmem_values[] = { 0UL, 1UL, 2UL, 4UL, 8UL };
+#define NUM_BUFMEM_TYPES 5
 
 static UWORD bufmem_index(ULONG val)
 {
@@ -1094,7 +1098,10 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
 
     char locyl_str[16], sizemb_str[16], bootpri_str[16];
     {
-        ULONG bytes_per_cyl = pi->heads * pi->sectors * pi->block_size;
+        ULONG eff_heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
+        ULONG eff_secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+        ULONG eff_bsz   = pi->block_size > 0 ? pi->block_size : 512;
+        ULONG bytes_per_cyl = eff_heads * eff_secs * eff_bsz;
         ULONG cyl_count     = (pi->high_cyl >= pi->low_cyl)
                               ? (pi->high_cyl - pi->low_cyl + 1) : 1;
         UQUAD total_bytes   = (bytes_per_cyl > 0)
@@ -1318,8 +1325,10 @@ static BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         pi->block_size = blocksize_values[cur_bsz];
                         /* Convert Size (MB) to high_cyl */
                         {
-                            ULONG bytes_per_cyl = pi->heads * pi->sectors
-                                                  * pi->block_size;
+                            ULONG eff_heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
+                            ULONG eff_secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+                            ULONG eff_bsz   = pi->block_size > 0 ? pi->block_size : 512;
+                            ULONG bytes_per_cyl = eff_heads * eff_secs * eff_bsz;
                             ULONG max_hi = rdb->hi_cyl;
                             UWORD k;
                             /* clamp to nearest occupied partition above lo_cyl */
@@ -1472,6 +1481,56 @@ static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi
     if (fi->code) FreeVec(fi->code);
     fi->code      = code;
     fi->code_size = (ULONG)fsize;
+    /* Record the source path in fhb_FileSysName (e.g. "L:pfs3aio").
+       Some boot ROMs and expansion firmwares use this field to identify
+       or fall back to loading the handler.  Always preserve it. */
+    {
+        ULONG len = strlen(path);
+        if (len > 83) len = 83;
+        memcpy(fi->fs_name, path, len);
+        fi->fs_name[len] = '\0';
+    }
+    /* Extract version from Resident struct (RT_MATCHWORD = 0x4AFC).
+       AmigaOS convention: fhb_Version = (major << 16) | minor.
+       Scan entire binary for RT_MATCHWORD and read RT_Version at +11. */
+    {
+        ULONG i;
+        UBYTE major = 0, minor = 0;
+        for (i = 0; i + 12 < (ULONG)fsize; i += 2) {
+            if (code[i] == 0x4A && code[i+1] == 0xFC) {
+                major = code[i + 11];
+                /* look for $VER: string to get minor — fall back to 0 */
+                {
+                    ULONG j;
+                    for (j = 0; j + 5 < (ULONG)fsize; j++) {
+                        if (code[j]   == '$' && code[j+1] == 'V' &&
+                            code[j+2] == 'E' && code[j+3] == 'R' &&
+                            code[j+4] == ':') {
+                            /* skip "$VER: name maj.min" — advance past ": " and name */
+                            ULONG k = j + 5;
+                            while (k < (ULONG)fsize && code[k] == ' ') k++;
+                            /* skip name token */
+                            while (k < (ULONG)fsize && code[k] != ' ' && code[k] != '\0') k++;
+                            while (k < (ULONG)fsize && code[k] == ' ') k++;
+                            /* skip major digits */
+                            while (k < (ULONG)fsize && code[k] >= '0' && code[k] <= '9') k++;
+                            if (k < (ULONG)fsize && code[k] == '.') {
+                                k++;
+                                minor = 0;
+                                while (k < (ULONG)fsize && code[k] >= '0' && code[k] <= '9') {
+                                    minor = (UBYTE)(minor * 10 + (code[k] - '0'));
+                                    k++;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        fi->version = ((ULONG)major << 16) | (ULONG)minor;
+    }
     return TRUE;
 }
 
@@ -1810,10 +1869,11 @@ static BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
                         if (rdb->num_fs < MAX_FILESYSTEMS) {
                             struct FSInfo new_fi;
                             memset(&new_fi, 0, sizeof(new_fi));
-                            new_fi.dos_type   = 0x444F5301UL;  /* FFS default */
-                            new_fi.version    = 0;
-                            new_fi.priority   = 5;
-                            new_fi.global_vec = -1L;
+                            new_fi.dos_type    = 0x444F5301UL;  /* FFS default */
+                            new_fi.version     = 0;
+                            new_fi.priority    = 0;
+                            new_fi.global_vec  = -1L;
+                            new_fi.patch_flags = 0x180UL; /* patch SegList + GlobalVec */
                             if (fs_addedit_dialog(&new_fi, FALSE)) {
                                 rdb->filesystems[rdb->num_fs++] = new_fi;
                                 dirty = TRUE;
@@ -2249,7 +2309,7 @@ static void rdb_restore_block(struct Window *win, struct BlockDev *bd)
     Close(fh);
 
     /* Second confirmation — shown after the file is chosen, names the device */
-    { char msg[128];
+    { char msg[160];
       sprintf(msg,
           "LAST CHANCE\n\n"
           "Write backup to block 0 of\n"
@@ -2526,7 +2586,7 @@ static void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
     }
 
     /* Final confirmation */
-    { char msg[128];
+    { char msg[192];
       sprintf(msg,
           "LAST CHANCE\n\n"
           "Write %lu blocks (blocks %lu\x96%lu) to\n"
@@ -4832,6 +4892,7 @@ BOOL partview_run(const char *devname, ULONG unit)
             while ((imsg = GT_GetIMsg(win->UserPort)) != NULL) {
                 ULONG          iclass  = imsg->Class;
                 UWORD          code    = imsg->Code;
+                UWORD          qual    = imsg->Qualifier;
                 WORD           mouse_x = imsg->MouseX;
                 WORD           mouse_y = imsg->MouseY;
                 ULONG          ev_sec  = imsg->Seconds;
@@ -5148,7 +5209,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                         sel = (WORD)code;
                         draw_map(win, rdb, sel, bx, by, bw, bh);
                         /* double-click → open Edit dialog */
-                        if (sel >= 0 && sel < (WORD)rdb->num_parts) {
+                        if ((qual & IEQUALIFIER_DOUBLECLICK) &&
+                            sel >= 0 && sel < (WORD)rdb->num_parts) {
                             if (partition_dialog(&rdb->parts[sel],
                                                  "Edit Partition", rdb)) {
                                 dirty = TRUE;
@@ -5485,8 +5547,12 @@ BOOL partview_run(const char *devname, ULONG unit)
                     struct PartLayout new_lay;
                     UWORD fh = (UWORD)win->WScreen->Font->ta_YSize;
 
-                    /* Cancel any in-progress drag */
-                    drag_part = -1;
+                    /* Cancel any in-progress drag — restore partition to pre-drag state */
+                    if (drag_part >= 0) {
+                        rdb->parts[drag_part].low_cyl  = drag_orig_lo;
+                        rdb->parts[drag_part].high_cyl = drag_orig_hi;
+                        drag_part = -1;
+                    }
 
                     RemoveGList(win, glist, -1);
                     FreeGadgets(glist);

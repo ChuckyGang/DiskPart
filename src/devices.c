@@ -409,11 +409,8 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
             UQUAD total = (UQUAD)rdb->cylinders * rdb->heads *
                           rdb->sectors * 512UL;
             FormatSize(total, sz);
-            if (total >= (UQUAD)1024*1024*1024) {
-                char mb[16];
-                sprintf(mb, " (%lu MB)", (unsigned long)(total / (1024UL*1024UL)));
+            if (total >= (UQUAD)1024*1024*1024)
                 sprintf(sz + strlen(sz), " (%lu MB)", (unsigned long)(total / (1024UL*1024UL)));
-            }
             have_size = TRUE;
 
             if (!have_brand) {

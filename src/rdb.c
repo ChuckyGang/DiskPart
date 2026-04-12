@@ -171,15 +171,19 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
         if (err == 0) return TRUE;
     }
 
-    /* Fall back to CMD_READ */
-    bd->iotd.iotd_Req.io_Command = CMD_READ;
-    bd->iotd.iotd_Req.io_Length  = bd->block_size;
-    bd->iotd.iotd_Req.io_Data    = (APTR)buf;
-    bd->iotd.iotd_Req.io_Offset  = blocknum * bd->block_size;
-    bd->iotd.iotd_Req.io_Actual  = 0;
-    bd->iotd.iotd_Req.io_Flags   = 0;
-    bd->iotd.iotd_Count          = 0;
-    return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    /* Fall back to TD_READ64 — uses iotd_Count as high 32 bits of byte offset,
+       avoiding the 32-bit overflow on disks > 4 GB. */
+    {
+        UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
+        bd->iotd.iotd_Req.io_Command = TD_READ64;
+        bd->iotd.iotd_Req.io_Length  = bd->block_size;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
+        bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -190,16 +194,21 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
 {
     BYTE err;
 
-    /* CMD_WRITE + CMD_UPDATE — this is what HDToolBox does on A3000 scsi.device.
+    /* TD_WRITE64 + CMD_UPDATE — avoids the 32-bit io_Offset overflow on disks
+       > 4 GB.  TD_WRITE64 uses io_Offset as the low 32 bits of the byte offset
+       and iotd_Count as the high 32 bits, giving full 64-bit addressing.
        HD_SCSICMD WRITE causes a 4-byte DMA shift on A3000 with SD card adapters
        and must not be used as a write path. */
-    bd->iotd.iotd_Req.io_Command = CMD_WRITE;
-    bd->iotd.iotd_Req.io_Length  = bd->block_size;
-    bd->iotd.iotd_Req.io_Data    = (APTR)buf;
-    bd->iotd.iotd_Req.io_Offset  = blocknum * bd->block_size;
-    bd->iotd.iotd_Req.io_Actual  = 0;
-    bd->iotd.iotd_Req.io_Flags   = 0;
-    bd->iotd.iotd_Count          = 0;
+    {
+        UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
+        bd->iotd.iotd_Req.io_Command = TD_WRITE64;
+        bd->iotd.iotd_Req.io_Length  = bd->block_size;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
+        bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+    }
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
     if (err != 0) {
         bd->last_io_err = err;
@@ -445,6 +454,8 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         fi->seg_list_blk = (ULONG)fhb->fhb_SegListBlocks;
         fi->code         = NULL;
         fi->code_size    = 0;
+        memcpy(fi->fs_name, fhb->fhb_FileSysName, 84);
+        fi->fs_name[83]  = '\0';
 
         next = fhb->fhb_Next;
 
@@ -475,7 +486,14 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
                     offset += 492;
                     lseg_blk = lsb->lsb_Next;
                 }
-                fi->code_size = alloc_sz;
+                /* Only mark as valid if we got all blocks */
+                if (offset == alloc_sz) {
+                    fi->code_size = alloc_sz;
+                } else {
+                    FreeVec(fi->code);
+                    fi->code = NULL;
+                    fi->code_size = 0;
+                }
             }
         }
 
@@ -588,7 +606,7 @@ void RDB_InitFresh(struct RDBInfo *rdb,
     rdb->hi_cyl       = cylinders - 1;
     rdb->part_list    = RDB_END_MARK;
     rdb->fshdr_list   = RDB_END_MARK;
-    rdb->flags        = 0;
+    rdb->flags        = 0x07UL;  /* RDBFF_LAST|RDBFF_LASTLUN|RDBFF_LASTTID */
     rdb->num_parts    = 0;
     rdb->num_fs       = 0;
 }
@@ -611,14 +629,20 @@ static void fill_lseg_chain(UBYTE *big_buf, ULONG base_blk, ULONG block_size,
         ULONG  chunk    = ((off + 492UL) <= code_size) ? 492UL : (code_size - off);
         ULONG *blk_buf  = (ULONG *)(big_buf + (blk - base_blk) * block_size);
 
+        /* For the last block, SummedLongs = 5 header longs + actual data longs.
+           The boot ROM copies exactly (SummedLongs - 5) * 4 bytes per block.
+           All intermediate blocks use the full 128 longs (= 492 bytes of data). */
+        ULONG data_longs   = (chunk + 3UL) / 4UL;
+        ULONG summed_longs = (i + 1 < num_blocks) ? 128UL : (5UL + data_longs);
+
         memset(blk_buf, 0, block_size);
         blk_buf[0] = IDNAME_LOADSEG;
-        blk_buf[1] = 128;
+        blk_buf[1] = summed_longs;
         blk_buf[2] = 0;
         blk_buf[3] = 7;
         blk_buf[4] = next;
         memcpy((UBYTE *)blk_buf + 20, code + off, chunk);
-        blk_buf[2] = (ULONG)block_checksum(blk_buf, 128);
+        blk_buf[2] = (ULONG)block_checksum(blk_buf, summed_longs);
     }
 }
 
@@ -772,16 +796,17 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         fhb->fhb_Flags        = fi->flags;
         fhb->fhb_DosType      = fi->dos_type;
         fhb->fhb_Version      = fi->version;
-        fhb->fhb_PatchFlags   = fi->patch_flags  ? fi->patch_flags  : 0x180UL;
+        fhb->fhb_PatchFlags   = fi->patch_flags;  /* 0x180 set at Add time for new entries */
         fhb->fhb_Type         = 0;
         fhb->fhb_Task         = 0;
         fhb->fhb_Lock         = 0;
         fhb->fhb_Handler      = 0;
-        fhb->fhb_StackSize    = fi->stack_size   ? fi->stack_size   : 0x2000UL;
+        fhb->fhb_StackSize    = fi->stack_size;
         fhb->fhb_Priority     = fi->priority;
         fhb->fhb_Startup      = 0;
         fhb->fhb_SegListBlocks = (LONG)lseg_starts[i];
         fhb->fhb_GlobalVec    = fi->global_vec   ? fi->global_vec   : -1L;
+        memcpy(fhb->fhb_FileSysName, fi->fs_name, 84);
 
         fhb->fhb_ChkSum = (LONG)block_checksum(buf, 128);
     }
@@ -804,7 +829,7 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
     rdsk->rdb_ChkSum      = 0;
     rdsk->rdb_HostID      = 7;
     rdsk->rdb_BlockBytes  = bd->block_size;
-    rdsk->rdb_Flags       = rdb->flags;
+    rdsk->rdb_Flags       = rdb->flags | 0x07UL; /* always set RDBFF_LAST|RDBFF_LASTLUN|RDBFF_LASTTID */
 
     /* Optional block list heads: 0xFFFFFFFF = none */
     rdsk->rdb_BadBlockList      = RDB_END_MARK;

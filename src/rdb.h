@@ -111,6 +111,7 @@ struct FSInfo {
     ULONG seg_list_blk;   /* first LSEG block, or RDB_END_MARK */
     UBYTE *code;          /* AllocVec'd filesystem binary, NULL if none */
     ULONG  code_size;     /* bytes in code buffer */
+    char   fs_name[84];   /* fhb_FileSysName: path to handler file (e.g. "L:pfs3aio") */
 };
 
 struct RDBInfo {
