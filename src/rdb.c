@@ -235,6 +235,24 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
         bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
         bd->iotd.iotd_Req.io_Actual  = 0;
         bd->iotd.iotd_Req.io_Flags   = 0;
+        if (DoIO((struct IORequest *)&bd->iotd) == 0) return TRUE;
+    }
+
+    /* Last resort: CMD_READ (32-bit byte offset, no 64-bit support).
+       Some older drivers / non-SCSI interfaces only implement CMD_READ.
+       RDB is always in the first 16 blocks so 32-bit addressing is fine here.
+       Do NOT use CMD_READ as the primary path on A3000 scsi.device — it has
+       DMA timing issues with SD card adapters that corrupt data; those devices
+       succeed on the HD_SCSICMD path above and never reach this fallback. */
+    {
+        ULONG byte_off = blocknum * (ULONG)bd->block_size;
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = bd->block_size;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = byte_off;
+        bd->iotd.iotd_Count          = 0;
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
         return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
     }
 }
@@ -246,22 +264,20 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
 BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
 {
     BYTE err;
+    UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
 
-    /* TD_WRITE64 + CMD_UPDATE — avoids the 32-bit io_Offset overflow on disks
-       > 4 GB.  TD_WRITE64 uses io_Offset as the low 32 bits of the byte offset
-       and iotd_Count as the high 32 bits, giving full 64-bit addressing.
-       HD_SCSICMD WRITE causes a 4-byte DMA shift on A3000 with SD card adapters
-       and must not be used as a write path. */
-    {
-        UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
-        bd->iotd.iotd_Req.io_Command = TD_WRITE64;
-        bd->iotd.iotd_Req.io_Length  = bd->block_size;
-        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
-        bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
-        bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
-        bd->iotd.iotd_Req.io_Actual  = 0;
-        bd->iotd.iotd_Req.io_Flags   = 0;
-    }
+    /* TD_WRITE64 + CMD_UPDATE.  CMD_WRITE hangs on cached FFS partition blocks
+       in UAE/Amiberry (it blocks rather than returning an error).  TD_WRITE64
+       bypasses the driver's sector cache and works reliably for all blocks
+       in the RDB/data area.  HD_SCSICMD WRITE causes a 4-byte DMA shift on
+       A3000 SD adapters and must not be used as a write path. */
+    bd->iotd.iotd_Req.io_Command = TD_WRITE64;
+    bd->iotd.iotd_Req.io_Length  = bd->block_size;
+    bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+    bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
+    bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
+    bd->iotd.iotd_Req.io_Actual  = 0;
+    bd->iotd.iotd_Req.io_Flags   = 0;
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
     if (err != 0) {
         bd->last_io_err = err;
@@ -373,18 +389,24 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         if (rdsk->rdb_ID != IDNAME_RIGIDDISK)
             continue;
 
-        /* Validate by checksum — more reliable than geometry field ranges.
-           A random block that happens to start with "RDSK" will almost
-           certainly fail the sum-to-zero test.  Geometry-field range checks
-           were rejecting valid RDBs written by tools that use unusual values
-           (e.g. disks with MBR + RDB, or large drives with non-standard CHS). */
+        /* Validate by checksum when SummedLongs is in a valid range for a
+           512-byte block (2..128 longs).  A random block that starts with
+           "RDSK" will almost certainly fail the sum-to-zero test.
+           When SummedLongs is outside this range the block was written by
+           a non-standard tool (some old formatters store unusual values
+           here, and other fields like rdb_BlockBytes may be non-standard
+           too).  The 4-byte "RDSK" magic is a 1-in-4-billion discriminator
+           on its own — accept the block as-is when the checksum is
+           unverifiable. */
         {
-            const ULONG *lp  = (const ULONG *)buf;
-            ULONG        sum = 0, sl;
-            sl = rdsk->rdb_SummedLongs;
-            if (sl == 0 || sl > 128) sl = 128;
-            { ULONG ci; for (ci = 0; ci < sl; ci++) sum += lp[ci]; }
-            if (sum != 0) continue;   /* checksum mismatch — not a valid RDSK */
+            const ULONG *lp = (const ULONG *)buf;
+            ULONG        sl = rdsk->rdb_SummedLongs;
+            if (sl >= 2 && sl <= 128) {
+                ULONG sum = 0, ci;
+                for (ci = 0; ci < sl; ci++) sum += lp[ci];
+                if (sum != 0) continue;   /* checksum mismatch — not a valid RDSK */
+            }
+            /* sl == 0 or sl > 128: checksum unverifiable; trust the ID */
         }
 
         rdb->valid       = TRUE;
@@ -442,14 +464,17 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         pb = (struct PartitionBlock *)buf;
         if (pb->pb_ID != IDNAME_PARTITION)
             break;
-        /* Checksum-validate the PART block the same way we do RDSK */
+        /* Checksum-validate the PART block — same logic as for RDSK:
+           verify when SummedLongs is in range (2..128), else trust ID. */
         {
             const ULONG *lp = (const ULONG *)buf;
-            ULONG sum = 0, sl, ci;
-            sl = pb->pb_SummedLongs;
-            if (sl == 0 || sl > 128) sl = 128;
-            for (ci = 0; ci < sl; ci++) sum += lp[ci];
-            if (sum != 0) break;   /* checksum mismatch — corrupt or truncated chain */
+            ULONG sl = pb->pb_SummedLongs;
+            if (sl >= 2 && sl <= 128) {
+                ULONG sum = 0, ci;
+                for (ci = 0; ci < sl; ci++) sum += lp[ci];
+                if (sum != 0) break;   /* checksum mismatch — corrupt or truncated chain */
+            }
+            /* sl out of range: non-standard tool; trust the PART ID */
         }
 
         pi = &rdb->parts[rdb->num_parts];
@@ -490,6 +515,19 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         rdb->num_parts++;
     }
 
+    /* Sort partitions by low_cyl (insertion sort — n is small).
+       Ensures display order and written PART-block order both follow
+       cylinder position regardless of the order stored in the RDB link list. */
+    {
+        UWORD n = rdb->num_parts, i, j;
+        for (i = 1; i < n; i++) {
+            struct PartInfo tmp = rdb->parts[i];
+            for (j = i; j > 0 && rdb->parts[j-1].low_cyl > tmp.low_cyl; j--)
+                rdb->parts[j] = rdb->parts[j-1];
+            rdb->parts[j] = tmp;
+        }
+    }
+
     /* Walk FSHD linked list */
     next = rdb->fshdr_list;
     while (next != RDB_END_MARK && rdb->num_fs < MAX_FILESYSTEMS) {
@@ -504,14 +542,16 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         fhb = (struct FileSysHeaderBlock *)buf;
         if (fhb->fhb_ID != IDNAME_FSHEADER)
             break;
-        /* Checksum-validate the FSHD block */
+        /* Checksum-validate the FSHD block — same logic as RDSK/PART. */
         {
             const ULONG *lp = (const ULONG *)buf;
-            ULONG sum = 0, sl, ci;
-            sl = fhb->fhb_SummedLongs;
-            if (sl == 0 || sl > 128) sl = 128;
-            for (ci = 0; ci < sl; ci++) sum += lp[ci];
-            if (sum != 0) break;   /* checksum mismatch — corrupt or truncated chain */
+            ULONG sl = fhb->fhb_SummedLongs;
+            if (sl >= 2 && sl <= 128) {
+                ULONG sum = 0, ci;
+                for (ci = 0; ci < sl; ci++) sum += lp[ci];
+                if (sum != 0) break;   /* checksum mismatch — corrupt or truncated chain */
+            }
+            /* sl out of range: non-standard tool; trust the FSHD ID */
         }
 
         fi = &rdb->filesystems[rdb->num_fs];
@@ -545,9 +585,11 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             if (lsb->lsb_ID != IDNAME_LOADSEG) break;
             lp = (const ULONG *)buf;
             sl = lsb->lsb_SummedLongs;
-            if (sl == 0 || sl > 128) sl = 128;
-            sum = 0; for (ci = 0; ci < sl; ci++) sum += lp[ci];
-            if (sum != 0) break;   /* checksum mismatch */
+            if (sl >= 2 && sl <= 128) {
+                sum = 0; for (ci = 0; ci < sl; ci++) sum += lp[ci];
+                if (sum != 0) break;   /* checksum mismatch */
+            }
+            /* sl out of range: non-standard tool; trust the LSEG ID */
             num_lseg++;
             lseg_blk = lsb->lsb_Next;
         }
@@ -569,9 +611,11 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
                     if (lsb->lsb_ID != IDNAME_LOADSEG) { ok = FALSE; break; }
                     lp = (const ULONG *)buf;
                     sl = lsb->lsb_SummedLongs;
-                    if (sl == 0 || sl > 128) sl = 128;
-                    sum = 0; for (ci = 0; ci < sl; ci++) sum += lp[ci];
-                    if (sum != 0) { ok = FALSE; break; }
+                    if (sl >= 2 && sl <= 128) {
+                        sum = 0; for (ci = 0; ci < sl; ci++) sum += lp[ci];
+                        if (sum != 0) { ok = FALSE; break; }
+                    }
+                    /* sl out of range: non-standard tool; trust the LSEG ID */
                     /* Respect lsb_SummedLongs — the last block may be partial.
                        SummedLongs includes 5 header longs; the rest is data.
                        Clamp to 492 bytes (123 longs) maximum per block. */

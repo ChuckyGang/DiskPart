@@ -43,6 +43,7 @@
 #include "rdb.h"
 #include "partview.h"
 #include "version.h"
+#include "ffsresize.h"
 
 /* ------------------------------------------------------------------ */
 /* External library bases (defined in main.c)                          */
@@ -94,23 +95,154 @@ static const UBYTE PART_B[NUM_PART_COLORS]={0xD9,0x22,0x60,0xAD,0x3C,0x85,0x12,0
 #define C32(b) (((ULONG)(b)<<24)|((ULONG)(b)<<16)|((ULONG)(b)<<8)|(ULONG)(b))
 
 /* ------------------------------------------------------------------ */
-/* Partition list strings (columnar, monospace-friendly)               */
+/* Partition listview — proportional-font column renderer              */
 /* ------------------------------------------------------------------ */
 
-/* Column header drawn just above the listview gadget.
-   Must match the sprintf format in build_part_list exactly:
-   "%c %-7s %9lu %9lu  %-12s  %9s   %4ld"
-   Col:  0    1   2-8   9  10-18  19  20-28  29-30  31-42  43-44  45-53  54-56  57-60
-         mk   sp  Drv   sp  LoCyl  sp  HiCyl   sp    FS     sp     Size    sp    Boot
-   LoCyl/HiCyl/Size right-aligned; FileSystem/Boot left-aligned.
-   Size header shifted 3 left of its data field for visual spacing.            */
-static const char PART_HDR[] =
-/*  0         1         2         3         4         5         6    */
-/*  0123456789012345678901234567890123456789012345678901234567890123456789 */
-    "  Drive      Lo Cyl    Hi Cyl  FileSystem      Size      Boot";
+/* Column indices */
+#define LVCOL_MARK  0   /* '>' selection marker        */
+#define LVCOL_DRIVE 1   /* drive name (left-aligned)   */
+#define LVCOL_LOCYL 2   /* lo cylinder (right-aligned) */
+#define LVCOL_HICYL 3   /* hi cylinder (right-aligned) */
+#define LVCOL_FS    4   /* filesystem type             */
+#define LVCOL_SIZE  5   /* size (right-aligned)        */
+#define LVCOL_BOOT  6   /* boot priority               */
+#define LVCOL_COUNT 7
 
+/* Column pixel layout — computed in build_gadgets from the actual font */
+static struct {
+    UWORD x;    /* left edge of column */
+    UWORD w;    /* column width (for right-align) */
+} lv_cols[LVCOL_COUNT];
+
+/* Header labels — match order of LVCOL_* */
+static const char * const lv_hdr[LVCOL_COUNT] = {
+    "", "Drive", "Lo Cyl", "Hi Cyl", "FileSystem", "Size", "Boot"
+};
+
+/* Pointer to current RDB (set whenever rdb is live) — used by render hook */
+static const struct RDBInfo *lv_rdb;
+
+/* Forward declarations needed by lv_render (defined later in file) */
+static void FriendlyDosType(ULONG dostype, char *buf);
 static char        part_strs[MAX_PARTITIONS][80];
 static struct Node part_nodes[MAX_PARTITIONS];
+
+/* Render hook — AmigaOS calls h_Entry with a0=hook, a1=msg, a2=node.
+   Register variables capture those values before GCC can use the regs.
+   a0/a1 are caller-saved so GCC never touches them in the prologue;
+   a2 is callee-saved so GCC may push it — but PUSH doesn't change the
+   register, so the captured value is always the original incoming one. */
+static ULONG lv_render(void)
+{
+    register struct Hook      *h    __asm__("a0");
+    register struct LVDrawMsg *msg  __asm__("a1");
+    register struct Node      *node __asm__("a2");
+    struct Hook      *_h    = h;    /* capture before GCC reuses registers */
+    struct LVDrawMsg *_msg  = msg;
+    struct Node      *_node = node;
+    (void)_h;
+#define h    _h
+#define msg  _msg
+#define node _node
+
+    struct RastPort  *rp;
+    struct Rectangle *b;
+    BOOL   sel;
+    UWORD  bg_pen, fg_pen;
+    WORD   idx;
+    const  struct PartInfo *pi;
+    WORD   base_y;
+    char   tmp[24];
+
+    if (msg->lvdm_MethodID != LV_DRAW) return LVCB_OK;
+
+    idx = (WORD)(node - part_nodes);
+    if (!lv_rdb || idx < 0 || idx >= (WORD)lv_rdb->num_parts)
+        return LVCB_OK;
+
+    pi  = &lv_rdb->parts[idx];
+    rp  = msg->lvdm_RastPort;
+    b   = &msg->lvdm_Bounds;
+    sel = (msg->lvdm_State == LVR_SELECTED ||
+           msg->lvdm_State == LVR_SELECTEDDISABLED);
+
+    bg_pen = sel ? (UWORD)msg->lvdm_DrawInfo->dri_Pens[FILLPEN]
+                 : (UWORD)msg->lvdm_DrawInfo->dri_Pens[BACKGROUNDPEN];
+    fg_pen = sel ? (UWORD)msg->lvdm_DrawInfo->dri_Pens[FILLTEXTPEN]
+                 : (UWORD)msg->lvdm_DrawInfo->dri_Pens[TEXTPEN];
+
+    /* Fill background */
+    SetAPen(rp, (LONG)bg_pen);
+    SetDrMd(rp, JAM2);
+    RectFill(rp, b->MinX, b->MinY, b->MaxX, b->MaxY);
+
+    SetAPen(rp, (LONG)fg_pen);
+    SetDrMd(rp, JAM1);
+    base_y = b->MinY + (WORD)rp->TxBaseline;
+
+#define LV_TEXT(col, str, len) do { \
+    Move(rp, (WORD)(b->MinX + (WORD)lv_cols[(col)].x), base_y); \
+    Text(rp, (str), (UWORD)(len)); } while(0)
+
+#define LV_RIGHT(col, str, len) do { \
+    WORD _tw = (WORD)TextLength(rp, (str), (UWORD)(len)); \
+    WORD _rx = (WORD)(b->MinX + (WORD)lv_cols[(col)].x + \
+                      (WORD)lv_cols[(col)].w - _tw); \
+    Move(rp, _rx, base_y); \
+    Text(rp, (str), (UWORD)(len)); } while(0)
+
+    /* Selection marker */
+    if (sel) { tmp[0] = '>'; LV_TEXT(LVCOL_MARK, tmp, 1); }
+
+    /* Drive name */
+    {
+        const char *nm = pi->drive_name[0] ? pi->drive_name : "(none)";
+        LV_TEXT(LVCOL_DRIVE, nm, strlen(nm));
+    }
+
+    /* Lo Cyl */
+    sprintf(tmp, "%lu", (unsigned long)pi->low_cyl);
+    LV_RIGHT(LVCOL_LOCYL, tmp, strlen(tmp));
+
+    /* Hi Cyl */
+    sprintf(tmp, "%lu", (unsigned long)pi->high_cyl);
+    LV_RIGHT(LVCOL_HICYL, tmp, strlen(tmp));
+
+    /* Filesystem */
+    {
+        char dt[16];
+        FriendlyDosType(pi->dos_type, dt);
+        LV_TEXT(LVCOL_FS, dt, strlen(dt));
+    }
+
+    /* Size (right-aligned) */
+    {
+        char sz[16];
+        ULONG cyls  = (pi->high_cyl >= pi->low_cyl)
+                      ? pi->high_cyl - pi->low_cyl + 1 : 0;
+        ULONG heads = pi->heads   > 0 ? pi->heads   : (lv_rdb ? lv_rdb->heads   : 1);
+        ULONG secs  = pi->sectors > 0 ? pi->sectors : (lv_rdb ? lv_rdb->sectors : 1);
+        ULONG bsz   = pi->block_size > 0 ? pi->block_size : 512;
+        UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
+        FormatSize(bytes, sz);
+        LV_RIGHT(LVCOL_SIZE, sz, strlen(sz));
+    }
+
+    /* Boot priority */
+    sprintf(tmp, "%ld", (long)pi->boot_pri);
+    LV_TEXT(LVCOL_BOOT, tmp, strlen(tmp));
+
+#undef LV_TEXT
+#undef LV_RIGHT
+
+#undef h
+#undef msg
+#undef node
+    return LVCB_OK;
+}
+
+static struct Hook lv_hook;   /* h_Entry set to lv_render in build_gadgets */
+
 static struct List part_list;
 
 static void list_init(struct List *l)
@@ -120,11 +252,10 @@ static void list_init(struct List *l)
     l->lh_TailPred = (struct Node *)&l->lh_Head;
 }
 
-static void FriendlyDosType(ULONG dostype, char *buf);  /* defined after builtin_fs[] */
-
 static void build_part_list(struct RDBInfo *rdb, WORD sel)
 {
     UWORD i;
+    lv_rdb = rdb;   /* render hook needs access to partition data */
     list_init(&part_list);
     if (!rdb || !rdb->valid || rdb->num_parts == 0) return;
 
@@ -618,10 +749,7 @@ static void draw_col_header(struct Window *win, WORD hx, WORD hy, UWORD hw)
     struct RastPort *rp  = win->RPort;
     WORD  fb  = rp->TxBaseline;
     WORD  fh  = rp->TxHeight;
-    UWORD len = strlen(PART_HDR);
-    WORD  txw = rp->TxWidth ? (WORD)rp->TxWidth : 8;
-    UWORD max_c = (UWORD)((hw - 4) / (UWORD)txw);
-    if (len > max_c) len = max_c;
+    UWORD i;
 
     /* Background strip */
     SetAPen(rp, 2);
@@ -630,8 +758,22 @@ static void draw_col_header(struct Window *win, WORD hx, WORD hy, UWORD hw)
 
     SetAPen(rp, 1);
     SetDrMd(rp, JAM1);
-    Move(rp, hx + 4, hy + fb);
-    Text(rp, PART_HDR, len);
+
+    /* Draw each column label at its computed pixel position */
+    for (i = LVCOL_MARK + 1; i < LVCOL_COUNT; i++) {
+        const char *label = lv_hdr[i];
+        UWORD llen = strlen(label);
+        WORD  lx   = hx + (WORD)lv_cols[i].x;
+        /* Skip if column starts beyond the available width */
+        if ((WORD)lv_cols[i].x >= (WORD)hw - 4) break;
+        /* For right-aligned data columns, right-align the header label too */
+        if (i == LVCOL_LOCYL || i == LVCOL_HICYL || i == LVCOL_SIZE) {
+            WORD tw = (WORD)TextLength(rp, label, llen);
+            lx += (WORD)lv_cols[i].w - tw;
+        }
+        Move(rp, lx, hy + fb);
+        Text(rp, label, llen);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2228,6 +2370,60 @@ static BOOL build_gadgets(APTR vi,
              ? (btn_y - pad - lv_top) : row_h * 2;
     lv_h   = (lv_h / row_h) * row_h;   /* snap to whole rows */
 
+    /* Compute pixel column positions from the actual font metrics.
+       Opens font_ta temporarily to measure text widths. */
+    {
+        struct TextFont *tf = OpenFont(font_ta);
+        if (tf) {
+            struct RastPort rp;
+            UWORD gap = 6;  /* inter-column gap in pixels */
+            UWORD cx  = 4;  /* left margin */
+            /* Helper: max of two text widths */
+#define MAXW(a,al,b,bl) \
+    (TextLength(&rp,(a),(al)) > TextLength(&rp,(b),(bl)) \
+     ? (UWORD)TextLength(&rp,(a),(al)) : (UWORD)TextLength(&rp,(b),(bl)))
+
+            InitRastPort(&rp);
+            SetFont(&rp, tf);
+
+            lv_cols[LVCOL_MARK].x = cx;
+            lv_cols[LVCOL_MARK].w = (UWORD)TextLength(&rp, ">", 1);
+            cx += lv_cols[LVCOL_MARK].w + gap;
+
+            lv_cols[LVCOL_DRIVE].x = cx;
+            lv_cols[LVCOL_DRIVE].w = MAXW("DH10    ", 8, "Drive", 5);
+            cx += lv_cols[LVCOL_DRIVE].w + gap;
+
+            lv_cols[LVCOL_LOCYL].x = cx;
+            lv_cols[LVCOL_LOCYL].w = MAXW("9999999", 7, "Lo Cyl", 6);
+            cx += lv_cols[LVCOL_LOCYL].w + gap;
+
+            lv_cols[LVCOL_HICYL].x = cx;
+            lv_cols[LVCOL_HICYL].w = MAXW("9999999", 7, "Hi Cyl", 6);
+            cx += lv_cols[LVCOL_HICYL].w + gap;
+
+            lv_cols[LVCOL_FS].x = cx;
+            lv_cols[LVCOL_FS].w = MAXW("FFS+IntlOFS ", 12, "FileSystem", 10);
+            cx += lv_cols[LVCOL_FS].w + gap;
+
+            lv_cols[LVCOL_SIZE].x = cx;
+            lv_cols[LVCOL_SIZE].w = MAXW("1000.0 MB", 9, "Size", 4);
+            cx += lv_cols[LVCOL_SIZE].w + gap + 8;
+
+            lv_cols[LVCOL_BOOT].x = cx;
+            lv_cols[LVCOL_BOOT].w = MAXW("-128", 4, "Boot", 4);
+
+#undef MAXW
+            CloseFont(tf);
+        }
+    }
+
+    /* Set up the render hook — lv_render() captures a0/a1/a2 via
+       register-variable declarations at function entry */
+    lv_hook.h_Entry    = (HOOKFUNC)lv_render;
+    lv_hook.h_SubEntry = NULL;
+    lv_hook.h_Data     = NULL;
+
     gctx = CreateContext(&glist);
     if (!gctx) return FALSE;
 
@@ -2235,10 +2431,12 @@ static BOOL build_gadgets(APTR vi,
     ng.ng_VisualInfo = vi;
     ng.ng_TextAttr   = font_ta;
 
-    /* Partition listview */
+    /* Partition listview — render hook draws columns at computed pixel positions */
     {
         struct TagItem lt[] = {
-            { GTLV_Labels, (ULONG)&part_list }, { TAG_DONE, 0 }
+            { GTLV_Labels,   (ULONG)&part_list  },
+            { GTLV_CallBack, (ULONG)&lv_hook    },
+            { TAG_DONE, 0 }
         };
         ng.ng_LeftEdge   = bor_l + pad;
         ng.ng_TopEdge    = (WORD)lv_top;
@@ -4222,7 +4420,7 @@ static void raw_disk_read(struct Window *win, struct BlockDev *bd)
         summed_longs = lp[1];
         csum_stored  = (ULONG)((LONG)lp[2]);
 
-        /* Compute checksum */
+        /* Compute checksum (only when SummedLongs is in valid range) */
         csum_calc = 0;
         if (summed_longs >= 2 && summed_longs <= 128)
             for (i = 0; i < summed_longs; i++) csum_calc += lp[i];
@@ -4235,8 +4433,10 @@ static void raw_disk_read(struct Window *win, struct BlockDev *bd)
           }
           idtxt[4] = '\0'; }
 
-        sprintf(line, "Block %2lu  ID=%08lX (%s)  sum=%s",
+        sprintf(line, "Block %2lu  ID=%08lX (%s)  SL=%lu  csum=%s",
                 (unsigned long)blk, (unsigned long)id, idtxt,
+                (unsigned long)summed_longs,
+                (summed_longs < 2 || summed_longs > 128) ? "?(SL out of range)" :
                 (csum_calc == 0) ? "OK" : "BAD");
         vrdb_add(line);
 
@@ -4874,22 +5074,255 @@ geom_cleanup:
 /* ------------------------------------------------------------------ */
 
 static struct NewMenu partview_menu_def[] = {
+    /* Menu 0 — application */
     { NM_TITLE, DISKPART_VERTITLE,        NULL,         0, 0, NULL },
-    { NM_ITEM,  "About...",              NULL,         0, 0, NULL },
+    { NM_ITEM,  "About...",              NULL,         0, 0, NULL },  /* ITEM 0 */
+    /* Menu 1 — Advanced: backup / restore operations */
     { NM_TITLE, "Advanced",              NULL,         0, 0, NULL },
+    { NM_ITEM,  "Backup RDB Block",      NULL,         0, 0, NULL },  /* ITEM 0 */
+    { NM_ITEM,  "Restore RDB Block",     NULL,         0, 0, NULL },  /* ITEM 1 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 2 */
+    { NM_ITEM,  "Extended Backup...",    NULL,         0, 0, NULL },  /* ITEM 3 */
+    { NM_ITEM,  "Extended Restore...",   NULL,         0, 0, NULL },  /* ITEM 4 */
+    /* Menu 2 — Debug: low-level inspection tools */
+    { NM_TITLE, "Debug",                 NULL,         0, 0, NULL },
     { NM_ITEM,  "View RDB Block",        NULL,         0, 0, NULL },  /* ITEM 0 */
     { NM_ITEM,  "Raw Block Scan...",     NULL,         0, 0, NULL },  /* ITEM 1 */
     { NM_ITEM,  "Hex Dump Blocks...",    NULL,         0, 0, NULL },  /* ITEM 2 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 3 */
-    { NM_ITEM,  "Backup RDB Block",      NULL,         0, 0, NULL },  /* ITEM 4 */
-    { NM_ITEM,  "Restore RDB Block",     NULL,         0, 0, NULL },  /* ITEM 5 */
-    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 6 */
-    { NM_ITEM,  "Extended Backup...",    NULL,         0, 0, NULL },  /* ITEM 7 */
-    { NM_ITEM,  "Extended Restore...",   NULL,         0, 0, NULL },  /* ITEM 8 */
-    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 9 */
-    { NM_ITEM,  "Raw Disk Read...",      NULL,         0, 0, NULL },  /* ITEM 10 */
+    { NM_ITEM,  "Raw Disk Read...",      NULL,         0, 0, NULL },  /* ITEM 4 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 5 */
+    { NM_ITEM,  "Check FFS Root...",     NULL,         0, 0, NULL },  /* ITEM 6 */
     { NM_END,   NULL,                    NULL,         0, 0, NULL },
 };
+
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* check_ffs_root — show what FFS would find at the expected root      */
+/* block position for the selected partition.  Useful post-reboot to   */
+/* verify the grown filesystem structure is intact on disk.            */
+/* ------------------------------------------------------------------ */
+static void check_ffs_root(struct Window *win, struct BlockDev *bd,
+                            const struct RDBInfo *rdb, WORD sel)
+{
+    struct EasyStruct es;
+    static char msg[640];
+    ULONG *buf = NULL;
+
+    es.es_StructSize   = sizeof(es);
+    es.es_Flags        = 0;
+    es.es_Title        = (UBYTE *)"Check FFS Root";
+    es.es_GadgetFormat = (UBYTE *)"OK";
+
+    if (!bd) {
+        es.es_TextFormat = (UBYTE *)"No device open.";
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+    if (!rdb || sel < 0 || (ULONG)sel >= rdb->num_parts) {
+        es.es_TextFormat = (UBYTE *)"No partition selected.\nSelect a partition from the list first.";
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+
+    const struct PartInfo *pi = &rdb->parts[sel];
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+
+    if (heads == 0 || sectors == 0) {
+        es.es_TextFormat = (UBYTE *)"Cannot check: partition geometry\nhas heads=0 or sectors=0.";
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+
+    buf = (ULONG *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!buf) {
+        es.es_TextFormat = (UBYTE *)"Out of memory.";
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+
+    ULONG part_abs   = pi->low_cyl * heads * sectors;
+    ULONG num_blocks = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
+    ULONG root       = num_blocks / 2;
+    ULONG root_abs   = part_abs + root;
+
+    if (!BlockDev_ReadBlock(bd, root_abs, buf)) {
+        sprintf(msg,
+                "Partition %s\n"
+                "part_abs=%lu  num_blks=%lu\n"
+                "Expected root: rel=%lu abs=%lu\n\n"
+                "READ FAILED at abs %lu",
+                pi->drive_name,
+                (unsigned long)part_abs,
+                (unsigned long)num_blocks,
+                (unsigned long)root,
+                (unsigned long)root_abs,
+                (unsigned long)root_abs);
+        es.es_TextFormat = (UBYTE *)msg;
+        EasyRequest(win, &es, NULL);
+        FreeVec(buf);
+        return;
+    }
+
+    /* Verify checksum: sum of all 128 longs must be 0 */
+    ULONG sum = 0;
+    for (ULONG i = 0; i < 128; i++) sum += buf[i];
+    BOOL cs_ok     = (sum == 0);
+    BOOL type_ok   = (buf[0] == 2);          /* T_SHORT */
+    BOOL sec_ok    = (buf[127] == 1);        /* ST_ROOT */
+    BOOL own_ok    = (buf[1] == root);
+    BOOL bm_valid  = (buf[78] == 0xFFFFFFFFUL);
+    /* FFS does NOT validate own_key — confirmed: KS 3.1 accepts own_key=0 on
+       live partitions. own_ok is informational only. */
+    BOOL looks_ok  = type_ok && sec_ok && cs_ok && bm_valid;
+
+    /* Also read boot block to show bb[2] */
+    ULONG bb2 = 0;
+    {
+        ULONG *bb = (ULONG *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+        if (bb) {
+            if (BlockDev_ReadBlock(bd, part_abs, bb))
+                bb2 = bb[2];
+            FreeVec(bb);
+        }
+    }
+
+    /* disk_size (L[4]) = total partition blocks; root should be at disk_size/2 */
+    ULONG disk_size   = buf[4];
+    BOOL  dsz_ok      = (disk_size == num_blocks);
+
+    sprintf(msg,
+            "Partition %s  heads=%lu secs=%lu\n"
+            "Expected root: rel=%lu abs=%lu\n"
+            "Boot bb[2]=%lu  (0=use num_blks/2)\n\n"
+            "L[0]  type    =0x%lX  (%s)\n"
+            "L[1]  own_key =%lu  (expect %lu)%s\n"
+            "L[4]  disk_sz =%lu  (expect %lu)%s\n"
+            "L[5]  chksum  ok=%s\n"
+            "L[78] bm_flag =0x%lX  (%s)\n"
+            "L[127]sec_type=0x%lX  (%s)\n"
+            "L[79] bm[0]   =%lu\n"
+            "L[104]bm_ext  =%lu\n\n"
+            "%s",
+            pi->drive_name, (unsigned long)heads, (unsigned long)sectors,
+            (unsigned long)root, (unsigned long)root_abs,
+            (unsigned long)bb2,
+            (unsigned long)buf[0],  type_ok ? "ok" : "WRONG,expect 2",
+            (unsigned long)buf[1],  (unsigned long)root,
+                own_ok ? "" : " (FFS ignores)",
+            (unsigned long)disk_size, (unsigned long)num_blocks,
+                dsz_ok ? "" : " MISMATCH",
+            cs_ok ? "YES" : "NO",
+            (unsigned long)buf[78], bm_valid ? "valid" : "INVALID",
+            (unsigned long)buf[127], sec_ok ? "ok" : "WRONG,expect 1",
+            (unsigned long)buf[79],
+            (unsigned long)buf[104],
+            looks_ok ? "==> ROOT IS VALID" : "==> ROOT IS INVALID");
+
+    es.es_TextFormat = (UBYTE *)msg;
+    EasyRequest(win, &es, NULL);
+    FreeVec(buf);
+}
+
+/* ------------------------------------------------------------------ */
+/* Offer to grow an FFS/OFS filesystem after a partition was extended.  */
+/* Called from all three "edit partition" code paths.                   */
+/* ------------------------------------------------------------------ */
+static void ffs_grow_progress(void *ud, const char *msg)
+{
+    struct Window *pw = (struct Window *)ud;
+    struct RastPort *rp;
+    WORD x1, y1, x2, y2;
+    UWORD len;
+
+    if (!pw) return;
+    rp = pw->RPort;
+    x1 = pw->BorderLeft;
+    y1 = pw->BorderTop;
+    x2 = (WORD)(pw->Width  - 1 - pw->BorderRight);
+    y2 = (WORD)(pw->Height - 1 - pw->BorderBottom);
+    SetAPen(rp, 0);
+    RectFill(rp, x1, y1, x2, y2);
+    SetAPen(rp, 1);
+    Move(rp, (WORD)(x1 + 6), (WORD)(y1 + 4 + rp->TxBaseline));
+    for (len = 0; msg[len]; len++) {}
+    Text(rp, (STRPTR)msg, (WORD)len);
+}
+
+static void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
+                           const struct RDBInfo *rdb, struct PartInfo *pi,
+                           ULONG old_hi)
+{
+    struct EasyStruct es;
+    char errbuf[256];  /* must hold FFS_GrowPartition diagnostic — keep in sync */
+
+    if (pi->high_cyl <= old_hi) return;
+    if (!FFS_IsSupportedType(pi->dos_type)) return;
+    if (!bd) return;
+
+    es.es_StructSize   = sizeof(es);
+    es.es_Flags        = 0;
+    es.es_Title        = (UBYTE *)"EXPERIMENTAL: Grow Filesystem";
+    es.es_TextFormat   = (UBYTE *)
+        "This will write FFS bitmap blocks directly to disk.\n"
+        "This feature is EXPERIMENTAL and may corrupt data.\n"
+        "Always have a backup before proceeding.\n\n"
+        "Grow FFS filesystem on partition %s?";
+    es.es_GadgetFormat = (UBYTE *)"Grow Filesystem|Skip";
+
+    if (EasyRequest(win, &es, NULL, pi->drive_name) == 1) {
+        /* Open a small progress window so the user can see what is happening.
+           The grow operation is synchronous; the progress window shows the
+           current phase in its interior via the ffs_grow_progress callback. */
+        struct Screen *scr = win->WScreen;
+        UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
+        UWORD bor_t  = (UWORD)(scr->WBorTop + font_h + 1);
+        UWORD pw_w   = 360;
+        UWORD pw_h   = (UWORD)(bor_t + scr->WBorBottom + font_h + 10);
+        struct TagItem prog_tags[] = {
+            { WA_Left,      (ULONG)((scr->Width  - pw_w) / 2) },
+            { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
+            { WA_Width,     (ULONG)pw_w  },
+            { WA_Height,    (ULONG)pw_h  },
+            { WA_Title,     (ULONG)"Growing FFS Filesystem..." },
+            { WA_PubScreen, (ULONG)scr   },
+            { WA_Flags,     (ULONG)WFLG_DRAGBAR },
+            { WA_IDCMP,     0             },
+            { TAG_END,      0             }
+        };
+        struct Window *prog_win = OpenWindowTagList(NULL, prog_tags);
+
+        BOOL result = FFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
+                                        ffs_grow_progress, prog_win);
+        if (prog_win) CloseWindow(prog_win);
+        if (result) {
+            struct EasyStruct ok_es;
+            static char ok_msg[512];
+            sprintf(ok_msg,
+                    "FFS filesystem on %%s grown successfully.\n"
+                    "Write RDB to disk, then REBOOT to use the new space.\n"
+                    "(FFS picks up the new cylinder range only after reboot.)\n\n"
+                    "Diagnostic: %s", errbuf);
+            ok_es.es_StructSize   = sizeof(ok_es);
+            ok_es.es_Flags        = 0;
+            ok_es.es_Title        = (UBYTE *)"Filesystem Grown";
+            ok_es.es_TextFormat   = (UBYTE *)ok_msg;
+            ok_es.es_GadgetFormat = (UBYTE *)"OK";
+            EasyRequest(win, &ok_es, NULL, pi->drive_name);
+        } else {
+            struct EasyStruct err_es;
+            static char full_msg[384];
+            sprintf(full_msg, "FFS grow failed:\n%s", errbuf);
+            err_es.es_StructSize   = sizeof(err_es);
+            err_es.es_Flags        = 0;
+            err_es.es_Title        = (UBYTE *)"Filesystem Grow Failed";
+            err_es.es_TextFormat   = (UBYTE *)full_msg;
+            err_es.es_GadgetFormat = (UBYTE *)"OK";
+            EasyRequest(win, &err_es, NULL);
+        }
+    }
+}
 
 BOOL partview_run(const char *devname, ULONG unit)
 {
@@ -5127,22 +5560,26 @@ BOOL partview_run(const char *devname, ULONG unit)
                         if (!it) break;
                         if (MENUNUM(mcode) == 0 && ITEMNUM(mcode) == 0)
                             show_about(win);
+                        /* Advanced menu */
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 0)
-                            rdb_view_block(win, bd, rdb);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 1)
-                            rdb_raw_scan(win, bd);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 2)
-                            raw_hex_dump(win, bd);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 4)
                             rdb_backup_block(win, bd, rdb);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 5)
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 1)
                             rdb_restore_block(win, bd);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 7)
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 3)
                             rdb_backup_extended(win, bd, rdb);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 8)
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 4)
                             rdb_restore_extended(win, bd);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 10)
+                        /* Debug menu */
+                        else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 0)
+                            rdb_view_block(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 1)
+                            rdb_raw_scan(win, bd);
+                        else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 2)
+                            raw_hex_dump(win, bd);
+                        else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 4)
                             raw_disk_read(win, bd);
+                        else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 6)
+                            check_ffs_root(win, bd, rdb, sel);
                         mcode = it->NextSelect;
                     }
                     break;
@@ -5243,13 +5680,18 @@ BOOL partview_run(const char *devname, ULONG unit)
                                         sel = blk;
                                         refresh_listview(win, lv_gad, rdb, sel);
                                         dbl_part = -1;
-                                        if (partition_dialog(&rdb->parts[sel],
-                                                             "Edit Partition", rdb)) {
-                                            dirty = TRUE;
-                                            refresh_listview(win, lv_gad, rdb, sel);
-                                            draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
-                                                        ix, iy, iw, bx, by, bw, bh,
-                                                        hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                        {
+                                            ULONG old_hi = rdb->parts[sel].high_cyl;
+                                            if (partition_dialog(&rdb->parts[sel],
+                                                                 "Edit Partition", rdb)) {
+                                                offer_ffs_grow(win, bd, rdb,
+                                                               &rdb->parts[sel], old_hi);
+                                                dirty = TRUE;
+                                                refresh_listview(win, lv_gad, rdb, sel);
+                                                draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                                            ix, iy, iw, bx, by, bw, bh,
+                                                            hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                            }
                                         }
                                     } else {
                                         /* Single click: select partition */
@@ -5322,6 +5764,9 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 es.es_GadgetFormat = (UBYTE *)"Yes|No";
                                 if (EasyRequest(win, &es, NULL) == 1) {
                                     dirty = TRUE; needs_reboot = TRUE;
+                                    offer_ffs_grow(win, bd, rdb,
+                                                   &rdb->parts[confirmed_part],
+                                                   drag_orig_hi);
                                 } else {
                                     /* Revert */
                                     rdb->parts[confirmed_part].low_cyl  = drag_orig_lo;
@@ -5428,8 +5873,11 @@ BOOL partview_run(const char *devname, ULONG unit)
                         /* double-click → open Edit dialog */
                         if ((qual & IEQUALIFIER_DOUBLECLICK) &&
                             sel >= 0 && sel < (WORD)rdb->num_parts) {
+                            ULONG old_hi = rdb->parts[sel].high_cyl;
                             if (partition_dialog(&rdb->parts[sel],
                                                  "Edit Partition", rdb)) {
+                                offer_ffs_grow(win, bd, rdb,
+                                               &rdb->parts[sel], old_hi);
                                 dirty = TRUE;
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
@@ -5641,8 +6089,11 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                     case GID_EDIT:
                         if (sel >= 0 && sel < (WORD)rdb->num_parts) {
+                            ULONG old_hi = rdb->parts[sel].high_cyl;
                             if (partition_dialog(&rdb->parts[sel],
                                                  "Edit Partition", rdb)) {
+                                offer_ffs_grow(win, bd, rdb,
+                                               &rdb->parts[sel], old_hi);
                                 dirty = TRUE;
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
