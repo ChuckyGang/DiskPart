@@ -148,7 +148,5 @@ void RDB_FreeCode (struct RDBInfo *rdb);  /* free all FSInfo.code buffers */
 void FormatDosType(ULONG dostype, char *buf);   /* buf >= 16 bytes */
 void FormatSize   (UQUAD bytes,   char *buf);   /* buf >= 16 bytes */
 
-/* Reads blocks 0-3, reports what was found.  buf >= 256 bytes. */
-void RDB_ScanDiag (struct BlockDev *bd, char *buf);
 
 #endif /* RDB_H */

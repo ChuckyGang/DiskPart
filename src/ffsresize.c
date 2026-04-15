@@ -149,6 +149,21 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
        incorrectly flagged as free (FFS then clobbers it on first write). */
     ULONG reserved = (pi->reserved_blks > 0) ? pi->reserved_blks : 2UL;
 
+    if (old_blocks <= reserved) {
+        sprintf(err_buf,
+                "Partition is too small to contain a valid FFS filesystem\n"
+                "(old_blocks=%lu <= reserved=%lu).",
+                (unsigned long)old_blocks, (unsigned long)reserved);
+        goto done;
+    }
+    if (new_blocks <= reserved) {
+        sprintf(err_buf,
+                "New partition size is too small for FFS\n"
+                "(new_blocks=%lu <= reserved=%lu).",
+                (unsigned long)new_blocks, (unsigned long)reserved);
+        goto done;
+    }
+
     /* FFS BitmapCount formula (from init.asm):
        BitmapCount = (BlocksPerBM - 1 + HighestBlock - Reserved) / BlocksPerBM
        where HighestBlock = blocks - 1, all integer (floor) division. */

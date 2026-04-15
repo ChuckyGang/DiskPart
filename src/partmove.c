@@ -34,6 +34,7 @@
 #include "rdb.h"
 #include "partmove.h"
 #include "sfsresize.h"   /* SFS_IsSupportedType */
+#include "sfs_util.h"
 
 /* ------------------------------------------------------------------ */
 /* Multi-block I/O                                                      */
@@ -49,7 +50,7 @@ static BOOL move_read_blocks(struct BlockDev *bd,
 {
     UQUAD byte_off = (UQUAD)start * bd->block_size;
     bd->iotd.iotd_Req.io_Command = TD_READ64;
-    bd->iotd.iotd_Req.io_Length  = count * bd->block_size;
+    bd->iotd.iotd_Req.io_Length  = (ULONG)((UQUAD)count * bd->block_size);
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
     bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
     bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
@@ -65,7 +66,7 @@ static BOOL move_write_blocks(struct BlockDev *bd,
 {
     UQUAD byte_off = (UQUAD)start * bd->block_size;
     bd->iotd.iotd_Req.io_Command = TD_WRITE64;
-    bd->iotd.iotd_Req.io_Length  = count * bd->block_size;
+    bd->iotd.iotd_Req.io_Length  = (ULONG)((UQUAD)count * bd->block_size);
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
     bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
     bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
@@ -75,7 +76,7 @@ static BOOL move_write_blocks(struct BlockDev *bd,
 }
 
 /* ------------------------------------------------------------------ */
-/* SFS root block helpers (local offsets — mirrors sfsresize.c)        */
+/* SFS root block field offsets                                        */
 /* ------------------------------------------------------------------ */
 #define SFS_ROOT_ID     0x53465300UL
 #define SFS_RB_ID           0
@@ -90,34 +91,8 @@ static BOOL move_write_blocks(struct BlockDev *bd,
 #define SFS_RB_LASTBYTE     44
 #define SFS_RB_TOTALBLOCKS  48
 
-static ULONG sfs_getl(const UBYTE *b, ULONG o)
-{
-    return ((ULONG)b[o]<<24)|((ULONG)b[o+1]<<16)|((ULONG)b[o+2]<<8)|b[o+3];
-}
-static UWORD sfs_getw(const UBYTE *b, ULONG o)
-{
-    return (UWORD)(((UWORD)b[o]<<8)|b[o+1]);
-}
-static void sfs_setl(UBYTE *b, ULONG o, ULONG v)
-{
-    b[o]=(UBYTE)(v>>24); b[o+1]=(UBYTE)(v>>16);
-    b[o+2]=(UBYTE)(v>>8); b[o+3]=(UBYTE)v;
-}
-static void sfs_set_checksum(UBYTE *block, ULONG blocksize)
-{
-    ULONG *data = (ULONG *)block;
-    ULONG n = blocksize / 4, i, acc = 1;
-    data[1] = 0;
-    for (i = 0; i < n; i++) acc += data[i];
-    data[1] = (ULONG)(-(LONG)acc);
-}
-static BOOL sfs_verify_checksum(const UBYTE *block, ULONG blocksize)
-{
-    const ULONG *data = (const ULONG *)block;
-    ULONG n = blocksize / 4, i, acc = 1;
-    for (i = 0; i < n; i++) acc += data[i];
-    return acc == 0 ? TRUE : FALSE;
-}
+/* sfs_getl, sfs_getw, sfs_setl, sfs_set_checksum, sfs_verify_checksum
+   are in sfs_util.c / sfs_util.h */
 
 /* Read one multi-sector SFS block (sfs_phys physical sectors) at SFS
    block number sfs_blk relative to new_phys_base. */
@@ -394,8 +369,27 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
             sfs_setl(sfs_root_buf, SFS_RB_LASTBYTEH,  (ULONG)(new_lb >> 32));
             sfs_setl(sfs_root_buf, SFS_RB_LASTBYTE,   (ULONG)(new_lb & 0xFFFFFFFFUL));
             sfs_set_checksum(sfs_root_buf, sfs_blocksize);
-            sfs_write_root(bd, phys_base_new, root_blks[r],
-                           sfs_phys, sfs_root_buf);
+            if (!sfs_write_root(bd, phys_base_new, root_blks[r],
+                                sfs_phys, sfs_root_buf)) {
+                if (r == 0) {
+                    /* Primary root write failed — volume will be unmountable. */
+                    sprintf(err_buf,
+                            "SFS: failed to write primary root block after move.\n"
+                            "Data was copied but SFS location metadata not updated.\n"
+                            "Run SFScheck %s: after reboot.",
+                            pi->drive_name);
+                    goto done_label;
+                } else {
+                    /* Backup root write failed — primary is correct, warn only. */
+                    sprintf(err_buf,
+                            "SFS: backup root write failed (block %lu).\n"
+                            "Primary root is correct; volume should mount.\n"
+                            "Run SFScheck %s: after reboot to repair backup.",
+                            (unsigned long)root_blks[1],
+                            pi->drive_name);
+                    /* Continue — ok will be set to TRUE below. */
+                }
+            }
         }
     }
 
@@ -405,6 +399,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
     pi->low_cyl  = new_low_cyl;
     pi->high_cyl = new_high_cyl;
 
+    if (err_buf[0] == '\0')
     sprintf(err_buf,
             "Moved %lu cylinders of data.\n"
             "cyl %lu-%lu -> %lu-%lu\n"

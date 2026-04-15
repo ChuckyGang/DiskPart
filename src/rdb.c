@@ -360,6 +360,23 @@ void FormatSize(UQUAD bytes, char *buf)
 }
 
 /* ------------------------------------------------------------------ */
+/* chain_seen — cycle detection for RDB linked-list walks             */
+/* Records each visited block number; returns TRUE if already seen.   */
+/* seen[] must be zeroed before the walk begins.                      */
+/* ------------------------------------------------------------------ */
+#define CHAIN_SEEN_MAX 128
+
+static BOOL chain_seen(ULONG *seen, UWORD *count, ULONG blk)
+{
+    UWORD i;
+    for (i = 0; i < *count; i++)
+        if (seen[i] == blk) return TRUE;
+    if (*count < CHAIN_SEEN_MAX)
+        seen[(*count)++] = blk;
+    return FALSE;
+}
+
+/* ------------------------------------------------------------------ */
 /* RDB_Read                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -447,6 +464,9 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
     }
 
     /* Walk partition linked list */
+    {
+    ULONG part_seen[CHAIN_SEEN_MAX]; UWORD part_seen_n = 0;
+    memset(part_seen, 0, sizeof(part_seen));
     next = rdb->part_list;
     while (next != RDB_END_MARK && rdb->num_parts < MAX_PARTITIONS) {
         ULONG *env;
@@ -455,6 +475,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         struct PartInfo *pi;
 
         if (next == 0 || next == rdb->block_num) break;  /* sanity: skip MBR/RDSK blocks */
+        if (chain_seen(part_seen, &part_seen_n, next))   break;  /* cycle detected */
         if (!BlockDev_ReadBlock(bd, next, buf))
             break;
         pb = (struct PartitionBlock *)buf;
@@ -523,8 +544,12 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             rdb->parts[j] = tmp;
         }
     }
+    } /* end PART walk scope */
 
     /* Walk FSHD linked list */
+    {
+    ULONG fshd_seen[CHAIN_SEEN_MAX]; UWORD fshd_seen_n = 0;
+    memset(fshd_seen, 0, sizeof(fshd_seen));
     next = rdb->fshdr_list;
     while (next != RDB_END_MARK && rdb->num_fs < MAX_FILESYSTEMS) {
         struct FileSysHeaderBlock *fhb;
@@ -533,6 +558,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         ULONG num_lseg;
 
         if (next == 0 || next == rdb->block_num) break;  /* sanity: skip MBR/RDSK blocks */
+        if (chain_seen(fshd_seen, &fshd_seen_n, next))   break;  /* cycle detected */
         if (!BlockDev_ReadBlock(bd, next, buf))
             break;
         fhb = (struct FileSysHeaderBlock *)buf;
@@ -569,6 +595,9 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         next = fhb->fhb_Next;
 
         /* Count LSEG blocks to allocate exact buffer */
+        {
+        ULONG lseg_seen[CHAIN_SEEN_MAX]; UWORD lseg_seen_n = 0;
+        memset(lseg_seen, 0, sizeof(lseg_seen));
         num_lseg = 0;
         lseg_blk = fi->seg_list_blk;
         while (lseg_blk != RDB_END_MARK) {
@@ -576,6 +605,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             const ULONG *lp;
             ULONG sum, sl, ci;
             if (lseg_blk == 0) break;  /* sanity: block 0 is MBR */
+            if (chain_seen(lseg_seen, &lseg_seen_n, lseg_blk)) break; /* cycle */
             if (!BlockDev_ReadBlock(bd, lseg_blk, buf)) break;
             lsb = (struct LoadSegBlock *)buf;
             if (lsb->lsb_ID != IDNAME_LOADSEG) break;
@@ -589,19 +619,23 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             num_lseg++;
             lseg_blk = lsb->lsb_Next;
         }
+        } /* end LSEG count scope */
 
         if (num_lseg > 0) {
             ULONG alloc_sz = num_lseg * 492UL;  /* upper bound — last block may be partial */
             fi->code = (UBYTE *)AllocVec(alloc_sz, MEMF_PUBLIC | MEMF_CLEAR);
             if (fi->code) {
+                ULONG lseg_seen2[CHAIN_SEEN_MAX]; UWORD lseg_seen2_n = 0;
                 ULONG offset = 0;
                 BOOL  ok     = TRUE;
+                memset(lseg_seen2, 0, sizeof(lseg_seen2));
                 lseg_blk = fi->seg_list_blk;
                 while (lseg_blk != RDB_END_MARK && offset < alloc_sz) {
                     struct LoadSegBlock *lsb;
                     const ULONG *lp;
                     ULONG data_bytes, sum, sl, ci;
                     if (lseg_blk == 0) { ok = FALSE; break; }
+                    if (chain_seen(lseg_seen2, &lseg_seen2_n, lseg_blk)) { ok = FALSE; break; }
                     if (!BlockDev_ReadBlock(bd, lseg_blk, buf)) { ok = FALSE; break; }
                     lsb = (struct LoadSegBlock *)buf;
                     if (lsb->lsb_ID != IDNAME_LOADSEG) { ok = FALSE; break; }
@@ -634,63 +668,12 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
 
         rdb->num_fs++;
     }
+    } /* end FSHD walk scope */
 
     FreeVec(buf);
     return TRUE;
 }
 
-/* ------------------------------------------------------------------ */
-/* RDB_ScanDiag — diagnostic: read blocks 0-3 and describe contents   */
-/* ------------------------------------------------------------------ */
-
-void RDB_ScanDiag(struct BlockDev *bd, char *out)
-{
-    UBYTE *buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
-    char  *p   = out;
-    ULONG  blk;
-
-    if (!buf) {
-        sprintf(out, "AllocVec(CHIP) failed");
-        return;
-    }
-
-    /* Block 0: show RDB geometry fields */
-    if (BlockDev_ReadBlock(bd, 0, buf)) {
-        /* rdb_Cylinders @+64, rdb_Sectors @+68, rdb_Heads @+72 (longs 16,17,18) */
-        const ULONG *lp = (const ULONG *)buf;
-        sprintf(p, "RDB: cyls=%lu heads=%lu secs=%lu\n",
-                lp[16], lp[18], lp[17]);
-    } else {
-        sprintf(p, "RDB: read error\n");
-    }
-    while (*p) p++;
-
-    /* Block 1: show PART drive name and DosEnvec */
-    if (BlockDev_ReadBlock(bd, 1, buf)) {
-        /* pb_DriveName is at offset 36 (BSTR: buf[36]=len, buf[37..]=chars) */
-        UBYTE  namelen = buf[36];
-        UBYTE  nc      = (namelen < 8) ? namelen : 8;
-        char   name[9];
-        ULONG  i;
-        /* pb_Environment at offset 128; env[1]=SizeBlock env[3]=Heads
-           env[5]=BlksPerTrack env[9]=LowCyl env[10]=HighCyl */
-        const ULONG *env = (const ULONG *)(buf + 128);
-        for (i = 0; i < nc; i++) name[i] = (char)buf[37 + i];
-        name[nc] = '\0';
-        sprintf(p,
-            "PART: namelen=%lu name=%s\n"
-            "SB=%lu H=%lu SPT=%lu\n"
-            "lo=%lu hi=%lu\n",
-            (unsigned long)namelen, name,
-            env[1], env[3], env[5],
-            env[9], env[10]);
-    } else {
-        sprintf(p, "PART: read error\n");
-    }
-    while (*p) p++;
-
-    FreeVec(buf);
-}
 
 /* ------------------------------------------------------------------ */
 /* RDB_FreeCode — free all AllocVec'd filesystem code buffers          */
@@ -729,6 +712,10 @@ static LONG block_checksum(const ULONG *buf, ULONG num_longs)
 void RDB_InitFresh(struct RDBInfo *rdb,
                    ULONG cylinders, ULONG heads, ULONG sectors)
 {
+    if (cylinders == 0) cylinders = 1;
+    if (heads     == 0) heads     = 1;
+    if (sectors   == 0) sectors   = 1;
+
     memset(rdb, 0, sizeof(*rdb));
     rdb->valid        = TRUE;
     rdb->cylinders    = cylinders;
@@ -834,6 +821,18 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         last_used_blk = part_blk + rdb->num_parts - 1;
     else
         last_used_blk = rdb->rdb_block_lo;
+
+    /* Guard: ensure metadata does not spill into the first partition cylinder.
+       The reserved area is blocks 0 .. (lo_cyl * heads * sectors) - 1.
+       If last_used_blk reaches or exceeds that boundary the write would
+       silently overwrite partition data. */
+    if (rdb->heads > 0 && rdb->sectors > 0 && rdb->lo_cyl > 0) {
+        ULONG reserved_end = rdb->lo_cyl * rdb->heads * rdb->sectors;
+        if (last_used_blk >= reserved_end) {
+            /* Do not write anything — return FALSE so caller can report. */
+            return FALSE;
+        }
+    }
 
     /* Single contiguous buffer — all blocks filled in-memory first, then
        written one block at a time. */
