@@ -54,6 +54,12 @@ make TOOLCHAIN=bebbo       # force Bebbo
 make TOOLCHAIN=bartman     # force Bartman
 ```
 
+Or build with the Bebbo toolchain via Docker (no host install required):
+
+```sh
+./docker.sh
+```
+
 Output: `out/DiskPart.exe`
 
 ---
