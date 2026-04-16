@@ -43,10 +43,15 @@ Run `DiskPart` from the Shell or double-click from Workbench.
 
 ## Building
 
-Requires the Bartman/Abyss m68k-amigaos ELF toolchain.
+Supports two m68k toolchains, auto-detected by `make`:
+
+- **Bebbo** (`m68k-amigaos-gcc`, default `/opt/amiga`)
+- **Bartman/Abyss** (`m68k-amiga-elf-gcc`)
 
 ```sh
-make
+make                       # auto-detect (prefers Bebbo if /opt/amiga exists)
+make TOOLCHAIN=bebbo       # force Bebbo
+make TOOLCHAIN=bartman     # force Bartman
 ```
 
 Output: `out/DiskPart.exe`
