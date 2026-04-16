@@ -137,11 +137,40 @@ ULONG parse_dostype(const char *s)
 
     while (*s == ' ') s++;
 
-    /* Hex if starts with 0x/0X or is all hex digits (8 chars) */
+    /* Hex: 0xNNNNNNNN */
     if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
         return parse_num(s);
 
-    /* String encoding: parse up to 4 characters */
+    /*
+     * Quoted: "PFS3" — take bytes literally (ASCII '3' = 0x33).
+     * Useful when you actually want the ASCII digit in the dostype.
+     */
+    if (s[0] == '"') {
+        s++;
+        nb = 0;
+        while (*s && *s != '"' && nb < 4)
+            bytes[nb++] = (UBYTE)*s++;
+        for (i = nb; i < 4; i++) bytes[i] = 0;
+        return ((ULONG)bytes[0] << 24) | ((ULONG)bytes[1] << 16) |
+               ((ULONG)bytes[2] <<  8) |  (ULONG)bytes[3];
+    }
+
+    /*
+     * Short name with trailing digit: PFS3, DOS3, SFS0 etc.
+     * If the string is exactly 4 chars and the last is 0-9, treat
+     * the digit as a binary byte (PFS3 → 0x50465303, not 0x50465333).
+     * This matches what PFS\3 / DOS\3 notation means.
+     * Use quotes ("PFS3") to force literal ASCII bytes instead.
+     */
+    if (s[0] && s[1] && s[2] &&
+        s[3] >= '0' && s[3] <= '9' && s[4] == '\0') {
+        return ((ULONG)(UBYTE)s[0] << 24) |
+               ((ULONG)(UBYTE)s[1] << 16) |
+               ((ULONG)(UBYTE)s[2] <<  8) |
+                (ULONG)(s[3] - '0');
+    }
+
+    /* General string encoding: up to 4 chars, \N escape for binary byte */
     nb = 0;
     while (*s && nb < 4) {
         if (s[0] == '\\' && s[1] >= '0' && s[1] <= '9') {
@@ -151,7 +180,6 @@ ULONG parse_dostype(const char *s)
             bytes[nb++] = (UBYTE)*s++;
         }
     }
-    /* Pad remaining bytes with 0 */
     for (i = nb; i < 4; i++) bytes[i] = 0;
 
     val = ((ULONG)bytes[0] << 24) | ((ULONG)bytes[1] << 16) |
