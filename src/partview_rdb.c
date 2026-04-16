@@ -2384,7 +2384,7 @@ static const struct { UBYTE id; const char *name; } smart_names[] = {
     { 181, "Program Fail Ct Total"  },
     { 182, "Erase Fail Ct Total"    },
     { 183, "Runtime Bad Block"      },
-    { 187, "Reported Uncorrect"     },
+    { 187, "Reported Incorrect"     },
     { 188, "Command Timeout"        },
     { 189, "High Fly Writes"        },
     { 190, "Airflow Temperature"    },
