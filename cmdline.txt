@@ -92,6 +92,81 @@ FORCE
   Global switch.  Auto-answers Y to all Y/N safety questions.
   Useful for scripting or when you are certain of the operation.
 
+INFO
+  Read and display the RDB, partition table, and filesystem drivers.
+  Read-only — does not modify the disk.
+
+  Example:  DiskPart DEV uaehf.device:3 INFO
+
+SMART
+  Read ATA SMART attribute data from the drive via SCSI ATA
+  PASS-THROUGH (12).  Displays all active attributes:
+
+    ID  Attribute                 Cur Wst Raw
+    --- ------------------------- --- --- ----------
+      1 Read Error Rate           100 100          0
+      9 Power-On Hours            100  97       1234
+    194 Temperature (C)            35   0         35
+    197 Current Pending Sectors   200 200          0
+
+  Cur = current normalised value (1-253, higher is usually better).
+  Wst = worst recorded value.
+  Raw = vendor raw counter (interpretation varies by attribute).
+  PRE-FAIL tag is shown when the attribute is flagged as pre-failure
+  type (as opposed to advisory).
+
+  Requires an ATA drive accessible via HD_SCSICMD.  USB and
+  pure-SCSI targets typically will not respond.
+
+  Example:  DiskPart DEV uaehf.device:0 SMART
+            DiskPart DEV uaehf.device:0 SMART >ram:smart.txt
+
+BACKUP <file>
+  Read the RDSK block and save it as a raw 512-byte backup file.
+  Safe — read-only operation.
+
+  Example:  DiskPart DEV uaehf.device:3 BACKUP ram:rdb.bak
+
+RESTORE <file>
+  Restore a single-block backup to block 0.  Two Y/N questions
+  are asked before writing (FORCE auto-answers both).
+
+  Example:  DiskPart DEV uaehf.device:3 RESTORE ram:rdb.bak
+            DiskPart DEV uaehf.device:3 RESTORE ram:rdb.bak FORCE
+
+BACKUPEXT <file>
+  Save all RDB blocks (RDSK through rdb_HighRDSKBlock) to an
+  extended backup file (ERDB format — same as the GUI).
+  Includes all PART, FSHD and LSEG blocks.  Read-only.
+
+  Example:  DiskPart DEV uaehf.device:3 BACKUPEXT ram:rdb_ext.bak
+
+RESTOREEXT <file>
+  Restore an extended backup (ERDB format).  Validates magic,
+  version and block-size before writing.  Two Y/N questions
+  (FORCE auto-answers both).
+
+  Example:  DiskPart DEV uaehf.device:3 RESTOREEXT ram:rdb_ext.bak
+            DiskPart DEV uaehf.device:3 RESTOREEXT ram:rdb_ext.bak FORCE
+
+ADDPART NAME=<n> LOW=<cyl|START|NEXT> HIGH=<cyl|END|+size>
+         [TYPE=<dostype>] [BOOTPRI=<n>] [BOOTABLE]
+  Add a partition to the existing RDB, then ask Y/N before writing.
+  FORCE skips the write question.  See SCRIPT COMMANDS for full
+  description of LOW/HIGH/TYPE syntax.
+
+  Examples:
+    DiskPart DEV uaehf.device:3 ADDPART NAME=DH0 LOW=START HIGH=+100M TYPE=PFS3 BOOTABLE
+    DiskPart DEV uaehf.device:3 ADDPART NAME=DH1 LOW=START HIGH=END   TYPE=PFS3 FORCE
+
+ADDFS TYPE=<dostype> [FILE=<path>] [VERSION=<hex>] [STACKSIZE=<n>]
+  Add a filesystem driver entry to the existing RDB, then ask Y/N
+  before writing.  FORCE skips the write question.
+
+  Examples:
+    DiskPart DEV uaehf.device:3 ADDFS TYPE=PFS3 FILE=L:pfs3aio
+    DiskPart DEV uaehf.device:3 ADDFS TYPE=PFS3 FILE=L:pfs3aio FORCE
+
 SCRIPT <file> [DRYRUN] [FORCE]
   Read and execute commands from a text file, one per line.
   Comments start with # or ;.  Blank lines are ignored.

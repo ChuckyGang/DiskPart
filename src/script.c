@@ -475,12 +475,12 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     if (v && !parse_dostype(v, &dostype))
         { sc_err(ln, "ADDPART: unrecognised TYPE."); return RETURN_ERROR; }
 
-    /* BOOTPRI (optional) */
+    /* BOOTPRI (optional) — implies BOOTABLE */
     v = kwarg(tok, ntok, "BOOTPRI");
-    if (v) bootpri = strtol(v, NULL, 10);
+    if (v) { bootpri = strtol(v, NULL, 10); bootable = TRUE; }
 
-    /* BOOTABLE flag (optional) */
-    bootable = has_flag(tok, ntok, "BOOTABLE");
+    /* BOOTABLE flag (optional) — can also be set independently */
+    if (has_flag(tok, ntok, "BOOTABLE")) bootable = TRUE;
 
     /* Validate range */
     if (low > high)
