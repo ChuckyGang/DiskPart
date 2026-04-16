@@ -60,7 +60,7 @@ Or build with the Bebbo toolchain via Docker (no host install required):
 ./docker.sh
 ```
 
-Output: `out/DiskPart.exe`
+Output: `out/DiskPart`
 
 ---
 

@@ -76,13 +76,13 @@ objects := $(src_obj) $(TC_SUPPORT_OBJ)
 
 .PHONY: all clean
 
-all: $(program).exe
+all: $(program)
 
 ifeq ($(NEED_ELF2HUNK),1)
 
-$(program).exe: $(program).elf
+$(program): $(program).elf
 	$(info Elf2Hunk $@)
-	@$(ELF2HUNK) $(program).elf $(program).exe
+	@$(ELF2HUNK) $(program).elf $(program)
 
 $(program).elf: $(objects)
 	$(info Linking $@)
@@ -92,7 +92,7 @@ $(program).elf: $(objects)
 
 else
 
-$(program).exe: $(objects)
+$(program): $(objects)
 	$(info Linking $@)
 	@$(CC) $(CCFLAGS) $(LDFLAGS) $(objects) -o $@
 	@$(OBJDUMP) --disassemble --no-show-raw-ins \
