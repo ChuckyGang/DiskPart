@@ -2,8 +2,7 @@
 """
 Generate DiskPart.info — Amiga WBTool icon.
 
-Converts hdicon.png (expected next to this script or at repo root)
-to a 36x40, 2-bitplane Amiga .info file.
+Converts hdicon.png (in support/) to a 36x40, 2-bitplane Amiga .info file.
 
 Colour mapping (Workbench 3.x default palette):
   0 = grey  (Workbench background — used for transparent/outer area)
@@ -11,8 +10,8 @@ Colour mapping (Workbench 3.x default palette):
   2 = white (light pixels from source image)
   3 = blue  (selection highlight — used for selected state background)
 
-Usage:  python3 support/make_icon.py
-Output: DiskPart.info  (repo root)
+Usage:  python3 support/make_icon.py [output_path]
+Output: out/DiskPart.info  (default), or the path passed as the first arg.
 """
 
 import struct, os, sys
@@ -23,9 +22,9 @@ W, H   = 36, 40
 DEPTH  = 2
 WPL    = (W + 15) // 16   # words per line = 3
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_PNG   = os.path.join(REPO_ROOT, 'support', 'hdicon.png')
-OUT_INFO  = os.path.join(REPO_ROOT, 'DiskPart.info')
+REPO_ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_PNG         = os.path.join(REPO_ROOT, 'support', 'hdicon.png')
+DEFAULT_OUTPUT  = os.path.join(REPO_ROOT, 'out', 'DiskPart.info')
 
 
 # --- Image conversion -------------------------------------------------
@@ -146,11 +145,16 @@ if __name__ == '__main__':
         print(f"Source PNG not found: {src}", file=sys.stderr)
         sys.exit(1)
 
+    out_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUTPUT
+    out_dir  = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
     default_grid = load_grid(src, W, H)
     select_grid  = invert_grid(default_grid)
     data         = build_info(default_grid, select_grid)
 
-    with open(OUT_INFO, 'wb') as f:
+    with open(out_path, 'wb') as f:
         f.write(data)
 
-    print(f"Written {OUT_INFO} ({len(data)} bytes, {W}x{H} px, {DEPTH} planes)")
+    print(f"Written {out_path} ({len(data)} bytes, {W}x{H} px, {DEPTH} planes)")
