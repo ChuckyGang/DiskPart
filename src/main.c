@@ -21,6 +21,7 @@
 #include <graphics/text.h>
 #include <libraries/gadtools.h>
 #include <devices/inputevent.h>
+#include <libraries/asl.h>
 #ifndef IEQUALIFIER_DOUBLECLICK
 #define IEQUALIFIER_DOUBLECLICK 0x8000
 #endif
@@ -29,11 +30,13 @@
 #include <proto/intuition.h>
 #include <proto/graphics.h>
 #include <proto/gadtools.h>
+#include <proto/asl.h>
 
 #include "cli.h"
 #include "clib.h"
 #include "devices.h"
 #include "partview.h"
+#include "rdb.h"
 #include "version.h"
 
 static const char diskpart_ver[] = "$VER: DiskPart 0.1 (2026)";
@@ -53,13 +56,20 @@ struct Library       *AslBase        = NULL;
 /* Gadget IDs                                                           */
 /* ------------------------------------------------------------------ */
 
-#define GID_LIST    1
-#define GID_SELECT  2
-#define GID_SHOWALL 3
-#define GID_QUIT    4
-#define GID_MANUAL  5
+#define GID_LIST     1
+#define GID_SELECT   2
+#define GID_SHOWALL  3
+#define GID_QUIT     4
+#define GID_MANUAL   5
+#define GID_USEIMAGE 6
 
 #define RESULT_MANUAL (-3)
+#define RESULT_IMAGE  (-4)
+
+/* Gadget IDs for image-size dialog */
+#define GID_SZ_STR  10
+#define GID_SZ_OK   11
+#define GID_SZ_CANC 12
 
 /* ------------------------------------------------------------------ */
 /* Static data (too large for stack)                                   */
@@ -68,6 +78,10 @@ struct Library       *AslBase        = NULL;
 static struct DevNameList dev_names;
 static struct UnitList    unit_list;
 static char               manual_devname[64];
+/* Holds "FILE:<path>" form for an image-file backend chosen via "Use Image". */
+static char               image_devname[256];
+/* Plain path (without "FILE:" prefix), used for existence checks and creation. */
+static char               image_path[256];
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                              */
@@ -217,8 +231,8 @@ static WORD run_devname_window(void)
         UWORD str_y   = bor_t + pad + lv_h + pad + lbl_h; /* room for label above */
         UWORD btn_y   = str_y + btn_h + pad;
         UWORD win_h   = btn_y + btn_h + pad + bor_b;
-        /* Three buttons: [Select] [Show All] [Quit] */
-        UWORD btn_w   = (inner_w - pad * 2 - pad * 2) / 3;
+        /* Four buttons: [Select] [Show All] [Use Image] [Quit] */
+        UWORD btn_w   = (inner_w - pad * 2 - pad * 3) / 4;
 
         gctx = CreateContext(&glist);
         if (!gctx) goto cleanup;
@@ -278,9 +292,15 @@ static WORD run_devname_window(void)
             if (!showall_gad) goto cleanup;
 
             ng.ng_LeftEdge   = bor_l + pad + (btn_w + pad) * 2;
+            ng.ng_GadgetText = "Use Image";
+            ng.ng_GadgetID   = GID_USEIMAGE;
+            prev = CreateGadgetA(BUTTON_KIND, showall_gad, &ng, bt);
+            if (!prev) goto cleanup;
+
+            ng.ng_LeftEdge   = bor_l + pad + (btn_w + pad) * 3;
             ng.ng_GadgetText = "Quit";
             ng.ng_GadgetID   = GID_QUIT;
-            prev = CreateGadgetA(BUTTON_KIND, showall_gad, &ng, bt);
+            prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
             if (!prev) goto cleanup;
         }
 
@@ -360,6 +380,10 @@ static WORD run_devname_window(void)
                         sel = -1;
                         break;
                     }
+                    case GID_USEIMAGE:
+                        result  = RESULT_IMAGE;
+                        running = FALSE;
+                        break;
                     case GID_QUIT:
                         running = FALSE;
                         break;
@@ -728,6 +752,312 @@ cleanup:
 /* main                                                                 */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Image-file backend: picker + size dialog + create-if-missing       */
+/* ------------------------------------------------------------------ */
+
+/* Parse a size string like "100M", "2G", "536870912". */
+static UQUAD parse_size_bytes_gui(const char *s)
+{
+    UQUAD val = 0;
+    if (!s) return 0;
+    while (*s == ' ' || *s == '\t') s++;
+    while (*s >= '0' && *s <= '9') val = val * 10 + (UQUAD)(*s++ - '0');
+    if      (*s == 'K' || *s == 'k') val *= 1024UL;
+    else if (*s == 'M' || *s == 'm') val *= 1024UL * 1024UL;
+    else if (*s == 'G' || *s == 'g') val *= 1024UL * 1024UL * 1024UL;
+    return val;
+}
+
+/* Open ASL file requester in DoSaveMode (so the user may type a name that
+ * doesn't yet exist). Joins fr_Drawer + fr_File into out (size outsz).
+ * Returns TRUE if the user picked a path. */
+static BOOL pick_image_path(char *out, ULONG outsz)
+{
+    struct FileRequester *fr;
+    BOOL chosen = FALSE;
+
+    if (!AslBase) {
+        struct EasyStruct es;
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)"DiskPart";
+        es.es_TextFormat   = (UBYTE *)"asl.library not available.\n"
+                                       "Cannot open file requester.";
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequestArgs(NULL, &es, NULL, NULL);
+        return FALSE;
+    }
+
+    {
+        struct TagItem asl_tags[] = {
+            { ASLFR_TitleText,    (ULONG)"Select or name an image file" },
+            { ASLFR_DoSaveMode,   TRUE },
+            { ASLFR_InitialDrawer,(ULONG)"" },
+            { ASLFR_InitialFile,  (ULONG)"" },
+            { TAG_DONE, 0 }
+        };
+        fr = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, asl_tags);
+    }
+    if (!fr) return FALSE;
+
+    if (AslRequest(fr, NULL) && fr->fr_File && fr->fr_File[0]) {
+        strncpy(out, fr->fr_Drawer ? fr->fr_Drawer : "", outsz - 1);
+        out[outsz - 1] = '\0';
+        AddPart((UBYTE *)out, (UBYTE *)fr->fr_File, outsz);
+        chosen = TRUE;
+    }
+    FreeAslRequest(fr);
+    return chosen;
+}
+
+/* Returns TRUE if path refers to an existing file (not a directory). */
+static BOOL file_exists(const char *path)
+{
+    BPTR lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+    if (!lock) return FALSE;
+    {
+        struct FileInfoBlock *fib =
+            (struct FileInfoBlock *)AllocVec(sizeof(*fib), MEMF_PUBLIC | MEMF_CLEAR);
+        BOOL is_file = FALSE;
+        if (fib) {
+            if (Examine(lock, fib))
+                is_file = (fib->fib_DirEntryType < 0);
+            FreeVec(fib);
+        }
+        UnLock(lock);
+        return is_file;
+    }
+}
+
+/* Helper for image_size_dialog: fetch the font baseline from the open window. */
+static UWORD scr_font_baseline(struct Window *win)
+{
+    if (win && win->RPort && win->RPort->Font)
+        return win->RPort->Font->tf_Baseline;
+    return 8;
+}
+
+/* Modal dialog: asks for an image-file size. Pre-fills "100M".
+ * Returns TRUE and writes the typed string into out (size outsz)
+ * when the user clicks OK. Returns FALSE on Cancel / close. */
+static BOOL image_size_dialog(const char *path, char *out, ULONG outsz)
+{
+    struct Screen  *scr   = NULL;
+    APTR            vi    = NULL;
+    struct Gadget  *glist = NULL, *gctx = NULL, *str_gad = NULL, *prev;
+    struct Window  *win   = NULL;
+    BOOL            ok    = FALSE;
+    static char     prompt[300];
+
+    sprintf(prompt, "File \"%s\" does not exist.\nEnter size for the new image:",
+            path);
+
+    scr = LockPubScreen(NULL);
+    if (!scr) return FALSE;
+    vi = GetVisualInfoA(scr, NULL);
+    if (!vi) { UnlockPubScreen(NULL, scr); return FALSE; }
+
+    {
+        UWORD font_h = scr->Font->ta_YSize;
+        UWORD font_x = scr->RastPort.Font ? (UWORD)scr->RastPort.Font->tf_XSize : 8;
+        UWORD bor_l  = (UWORD)scr->WBorLeft;
+        UWORD bor_t  = (UWORD)scr->WBorTop + font_h + 1;
+        UWORD bor_r  = (UWORD)scr->WBorRight;
+        UWORD bor_b  = (UWORD)scr->WBorBottom;
+        UWORD pad    = 6;
+        UWORD btn_h  = font_h + 6;
+        UWORD lbl_h  = font_h + 2;
+        UWORD prompt_h = lbl_h * 2;       /* two-line prompt */
+        UWORD win_w  = 480;
+        UWORD inner_w = win_w - bor_l - bor_r;
+        UWORD str_y  = bor_t + pad + prompt_h + pad;
+        UWORD btn_y  = str_y + btn_h + pad;
+        UWORD win_h  = btn_y + btn_h + pad + bor_b;
+        UWORD btn_w  = (inner_w - pad * 2 - pad) / 2;
+
+        gctx = CreateContext(&glist);
+        if (!gctx) goto done;
+
+        {
+            struct NewGadget ng;
+            struct TagItem bt[]       = { { TAG_DONE, 0 } };
+            struct TagItem str_tags[] = {
+                { GTST_MaxChars, 31 },
+                { GTST_String,   (ULONG)"100M" },
+                { TAG_DONE,      0 }
+            };
+            (void)font_x;
+
+            memset(&ng, 0, sizeof(ng));
+            ng.ng_VisualInfo = vi;
+            ng.ng_TextAttr   = scr->Font;
+
+            ng.ng_LeftEdge   = bor_l + pad;
+            ng.ng_TopEdge    = str_y;
+            ng.ng_Width      = inner_w - pad * 2;
+            ng.ng_Height     = btn_h;
+            ng.ng_GadgetText = "Size (e.g. 100M, 2G):";
+            ng.ng_GadgetID   = GID_SZ_STR;
+            ng.ng_Flags      = PLACETEXT_ABOVE;
+            str_gad = CreateGadgetA(STRING_KIND, gctx, &ng, str_tags);
+            if (!str_gad) goto done;
+            ng.ng_Flags = 0;
+
+            ng.ng_TopEdge    = btn_y;
+            ng.ng_Height     = btn_h;
+            ng.ng_Width      = btn_w;
+
+            ng.ng_LeftEdge   = bor_l + pad;
+            ng.ng_GadgetText = "Create";
+            ng.ng_GadgetID   = GID_SZ_OK;
+            prev = CreateGadgetA(BUTTON_KIND, str_gad, &ng, bt);
+            if (!prev) goto done;
+
+            ng.ng_LeftEdge   = bor_l + pad + btn_w + pad;
+            ng.ng_GadgetText = "Cancel";
+            ng.ng_GadgetID   = GID_SZ_CANC;
+            prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
+            if (!prev) goto done;
+        }
+
+        {
+            struct TagItem win_tags[] = {
+                { WA_Left,      (ULONG)((scr->Width  - win_w) / 2) },
+                { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
+                { WA_Width,     win_w },
+                { WA_Height,    win_h },
+                { WA_Title,     (ULONG)"DiskPart - New Image" },
+                { WA_Gadgets,   (ULONG)glist },
+                { WA_PubScreen, (ULONG)scr },
+                { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
+                                IDCMP_REFRESHWINDOW },
+                { WA_Flags,     WFLG_DRAGBAR | WFLG_DEPTHGADGET |
+                                WFLG_CLOSEGADGET | WFLG_ACTIVATE |
+                                WFLG_SIMPLE_REFRESH },
+                { TAG_DONE,     0 }
+            };
+            win = OpenWindowTagList(NULL, win_tags);
+        }
+
+        UnlockPubScreen(NULL, scr);
+        scr = NULL;
+        if (!win) goto done;
+
+        GT_RefreshWindow(win, NULL);
+
+        /* Draw the prompt text inside the window above the string gadget. */
+        {
+            const char *p = prompt;
+            UWORD       y = bor_t + pad + scr_font_baseline(win);
+            UWORD       x = bor_l + pad;
+            char        line[160];
+            UWORD       li;
+            SetAPen(win->RPort, 1);
+            while (*p) {
+                li = 0;
+                while (*p && *p != '\n' && li < sizeof(line) - 1)
+                    line[li++] = *p++;
+                line[li] = '\0';
+                if (*p == '\n') p++;
+                Move(win->RPort, x, y);
+                Text(win->RPort, line, strlen(line));
+                y += lbl_h;
+            }
+        }
+
+        {
+            BOOL running = TRUE;
+            while (running) {
+                struct IntuiMessage *imsg;
+                WaitPort(win->UserPort);
+                while ((imsg = GT_GetIMsg(win->UserPort)) != NULL) {
+                    ULONG          iclass = imsg->Class;
+                    struct Gadget *gad    = (struct Gadget *)imsg->IAddress;
+                    GT_ReplyIMsg(imsg);
+                    switch (iclass) {
+                    case IDCMP_CLOSEWINDOW:
+                        running = FALSE;
+                        break;
+                    case IDCMP_GADGETUP:
+                        switch (gad->GadgetID) {
+                        case GID_SZ_OK:
+                        case GID_SZ_STR:    /* Enter pressed in string gadget */
+                        {
+                            const char *typed =
+                                ((struct StringInfo *)str_gad->SpecialInfo)->Buffer;
+                            strncpy(out, typed, outsz - 1);
+                            out[outsz - 1] = '\0';
+                            ok = TRUE;
+                            running = FALSE;
+                            break;
+                        }
+                        case GID_SZ_CANC:
+                            running = FALSE;
+                            break;
+                        }
+                        break;
+                    case IDCMP_REFRESHWINDOW:
+                        GT_BeginRefresh(win);
+                        GT_EndRefresh(win, TRUE);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+done:
+    if (win)   { RemoveGList(win, glist, -1); CloseWindow(win); }
+    if (glist)   FreeGadgets(glist);
+    if (vi)      FreeVisualInfo(vi);
+    if (scr)     UnlockPubScreen(NULL, scr);
+    return ok;
+}
+
+/* If path doesn't exist, ask the user for a size and create the file.
+ * Returns TRUE if path is now ready to open as an image, FALSE on
+ * cancel or any error. */
+static BOOL prepare_image(const char *path)
+{
+    char  size_str[32];
+    UQUAD size_bytes;
+    struct BlockDev *bd;
+
+    if (file_exists(path)) return TRUE;
+
+    if (!image_size_dialog(path, size_str, sizeof(size_str)))
+        return FALSE;
+
+    size_bytes = parse_size_bytes_gui(size_str);
+    if (size_bytes < 512) {
+        struct EasyStruct es;
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)"DiskPart";
+        es.es_TextFormat   = (UBYTE *)"Size must be at least 512 bytes.";
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequestArgs(NULL, &es, NULL, NULL);
+        return FALSE;
+    }
+
+    bd = BlockDev_CreateFile(path, size_bytes);
+    if (!bd) {
+        struct EasyStruct es;
+        static char       body[300];
+        sprintf(body, "Failed to create image file:\n%s", path);
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)"DiskPart";
+        es.es_TextFormat   = (UBYTE *)body;
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequestArgs(NULL, &es, NULL, NULL);
+        return FALSE;
+    }
+    BlockDev_Close(bd);
+    return TRUE;
+}
+
 int main(void)
 {
     int result = 0;
@@ -796,11 +1126,26 @@ int main(void)
         WORD name_idx;
         while ((name_idx = run_devname_window()) != -1 &&
                name_idx != RESULT_EXIT) {
-            const char *devname = (name_idx == RESULT_MANUAL)
-                                  ? manual_devname
-                                  : dev_names.names[name_idx];
+            const char *devname;
             WORD unit_idx;
             BOOL quit = FALSE;
+
+            /* Image-file backend — skip device probe and unit selection;
+             * after the editor closes, return to the device-selection window. */
+            if (name_idx == RESULT_IMAGE) {
+                if (!pick_image_path(image_path, sizeof(image_path)))
+                    continue;
+                if (!prepare_image(image_path))
+                    continue;
+                sprintf(image_devname, "FILE:%s", image_path);
+                if (partview_run(image_devname, 0))
+                    break;
+                continue;
+            }
+
+            devname = (name_idx == RESULT_MANUAL)
+                      ? manual_devname
+                      : dev_names.names[name_idx];
 
             {
                 static struct ProbeWin pw;

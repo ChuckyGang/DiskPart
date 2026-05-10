@@ -65,6 +65,55 @@ DEV <device>:<unit>
 
   Example:  DiskPart DEV uaehf.device:3 INIT NEW
 
+IMAGE <path>
+  Use an image file as the target instead of an exec.device unit.
+  The file is treated as a 512-byte-block disk; geometry is derived
+  as 16 heads x 63 sectors with cylinders = filesize / (512*16*63).
+  Most commands that accept DEV also accept IMAGE.
+
+  Image files are limited to ~2 GB by AmigaOS dos.library Seek().
+
+  Example:  DiskPart IMAGE test.hdf INFO
+            DiskPart IMAGE test.hdf INIT NEW
+
+CREATE SIZE=<n>[K|M|G]
+  Create a new image file of the given size, then open it.
+  Must be combined with IMAGE=<path>.  Uses SetFileSize() — sparse on
+  filesystems that support it (SFS, PFS), pre-allocated on FFS.
+
+  CREATE may stand alone (just create the file) or be combined with
+  INIT NEW etc. on the same line to also write a fresh RDB.
+
+  Example:  DiskPart IMAGE fresh.hdf CREATE SIZE=100M
+            DiskPart IMAGE fresh.hdf CREATE SIZE=100M INIT NEW
+
+IMAGEOUT <path>
+  Dump the open target (DEV or IMAGE) to a new image file at <path>.
+  Every block of the target from block 0 onward is copied byte-for-byte.
+  Existing file at <path> is overwritten.
+
+  Output is purely sequential (no Seek), so files larger than 2 GB are
+  fine PROVIDED the destination filesystem supports them (SFS, PFS3,
+  FFS-NSD, FFS post-OS3.5).  Older FFS will fail with a write error
+  near the 2 GB mark.  A warning is printed up front for sources >2 GB.
+
+  Progress prints every 5% (or every 50 MB when total is unknown).
+  Press Ctrl+C to cancel; the partial output file is left on disk.
+
+  Example:  DiskPart DEV uaehf.device:0 IMAGEOUT=ram:disk.hdf
+            DiskPart IMAGE fresh.hdf IMAGEOUT=ram:fresh.copy
+
+IMAGEIN <path>
+  Restore an image file at <path> back onto the open target.
+  The image is read sequentially until EOF (no Seek), so files larger
+  than 2 GB are fine if the SOURCE filesystem supports them.
+  Each Read result must be a multiple of the device block size, and
+  total blocks must fit within the target.
+  DESTRUCTIVE: prompts for Y/N confirmation unless FORCE is given.
+  Press Ctrl+C to cancel; the destination is left in a partial state.
+
+  Example:  DiskPart DEV uaehf.device:0 IMAGEIN=ram:disk.hdf FORCE
+
 INIT NEW
   Create a fresh RDB on the specified device, auto-detecting geometry
   from TD_GETGEOMETRY.  Writes immediately (no separate WRITE step
@@ -199,6 +248,35 @@ These commands are only valid inside a script file.
 OPEN <device> <unit>
   Open a block device for subsequent commands.
   Example:  OPEN uaehf.device 3
+
+OPEN FILE <path>
+  Open an image file as the block device for subsequent commands.
+  The file is treated as a 512-byte-block disk (16 heads x 63 sectors).
+  Image files are limited to ~2 GB by AmigaOS Seek().
+  Example:  OPEN FILE work:images/test.hdf
+
+CREATE FILE <path> SIZE=<n>[K|M|G]
+  Create a new image file of the given size and open it.
+  Existing file with the same name is overwritten.
+  Subsequent commands (INIT NEW, ADDPART, ...) operate on the new file.
+  Example:  CREATE FILE work:images/fresh.hdf SIZE=100M
+
+IMAGEOUT FILE=<path>
+  Dump the currently-open target to a new image file at <path>.
+  Block-for-block copy from block 0 to end of target.
+  Sequential write — files >2 GB work if destination filesystem supports
+  it (SFS, PFS3, FFS-NSD, FFS post-OS3.5).
+  Honours DRYRUN (no file is created).
+  Example:  IMAGEOUT FILE=ram:disk.hdf
+
+IMAGEIN FILE=<path>
+  Restore an image file at <path> back onto the currently-open target.
+  Streamed read until EOF — files >2 GB work if the source filesystem
+  supports it.  Each chunk must be block-aligned; total must fit.
+  DESTRUCTIVE: prompts Y/N (auto-yes if script run with FORCE).
+  Re-reads the RDB after the restore so subsequent INFO is accurate.
+  Honours DRYRUN.
+  Example:  IMAGEIN FILE=ram:disk.hdf
 
 INFO
   Read and display the RDB and partition table.  Read-only.

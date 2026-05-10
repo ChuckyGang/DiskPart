@@ -11,6 +11,7 @@
 #include <exec/ports.h>
 #include <devices/trackdisk.h>
 #include <devices/hardblocks.h>
+#include <dos/dos.h>
 #include <dos/filehandler.h>
 
 #ifndef UQUAD
@@ -45,9 +46,14 @@ typedef unsigned long long UQUAD;
 /* Open block device handle                                            */
 /* ------------------------------------------------------------------ */
 
+/* Backend kind for BlockDev — selects between exec.device I/O
+ * (uaehf.device, scsi.device, ...) and dos.library file I/O for image files. */
+#define BD_DEVICE   0
+#define BD_FILE     1
+
 struct BlockDev {
-    struct MsgPort  *port;
-    struct IOExtTD   iotd;
+    struct MsgPort  *port;          /* NULL when backend == BD_FILE */
+    struct IOExtTD   iotd;          /* unused when backend == BD_FILE */
     BOOL             open;
     ULONG            block_size;    /* bytes per block, usually 512   */
     UQUAD            total_bytes;   /* total disk capacity            */
@@ -64,10 +70,25 @@ struct BlockDev {
     UQUAD            td_total_bytes;      /* capacity from TD_GETGEOMETRY        */
     ULONG            rc_total_blocks;     /* READ CAPACITY(10) total blocks (0=unavail) */
     ULONG            rc_block_size;       /* READ CAPACITY(10) bytes per block   */
+    UBYTE            backend;             /* BD_DEVICE or BD_FILE */
+    BPTR             fh;                  /* file handle, BD_FILE only (0 otherwise) */
+    char             filepath[108];       /* image path,  BD_FILE only */
 };
 
-/* Open/close a block device for probing or RDB I/O. */
-struct BlockDev *BlockDev_Open(const char *devname, ULONG unit);
+/* Open/close a block device for probing or RDB I/O.
+ *
+ * BlockDev_Open: when devname starts with "FILE:" it forwards to
+ * BlockDev_OpenFile(devname+5) and ignores the unit argument; otherwise it
+ * opens the named exec.device unit. */
+struct BlockDev *BlockDev_Open    (const char *devname, ULONG unit);
+struct BlockDev *BlockDev_OpenFile(const char *path);
+
+/* Create a new image file of exactly size_bytes (rounded up to a 512-byte
+ * boundary) using MODE_NEWFILE + SetFileSize, then open it for I/O.
+ * Geometry is derived as 16 heads x 63 sectors with cylinders = size/(512*16*63).
+ * Returns NULL on failure (caller can check IoErr()). */
+struct BlockDev *BlockDev_CreateFile(const char *path, UQUAD size_bytes);
+
 void             BlockDev_Close(struct BlockDev *bd);
 
 /* Read/write a single block. */

@@ -16,9 +16,12 @@
 #include <devices/trackdisk.h>
 #include <devices/scsidisk.h>
 #include <devices/hardblocks.h>
+#include <dos/dos.h>
+#include <dos/dosextens.h>
 #include <dos/filehandler.h>
 #include <exec/errors.h>
 #include <proto/exec.h>
+#include <proto/dos.h>
 
 #include "clib.h"
 #include "rdb.h"
@@ -116,6 +119,87 @@ static BOOL try_read_capacity(struct BlockDev *bd,
 }
 
 /* ------------------------------------------------------------------ */
+/* BlockDev_OpenFile / BlockDev_CreateFile                             */
+/*                                                                     */
+/* File backend: treat a host file as a 512-byte-block disk image.    */
+/* Used for HDF/RDB image files (uaehf-style images, etc.) so DiskPart */
+/* can edit them directly without going through a mounted device.     */
+/* ------------------------------------------------------------------ */
+
+struct BlockDev *BlockDev_OpenFile(const char *path)
+{
+    struct BlockDev *bd;
+    BPTR             fh;
+    LONG             size;
+
+    if (!path || !*path) return NULL;
+
+    fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    if (!fh) return NULL;
+
+    /* Determine size via Seek(end)/Seek(start). Seek returns the previous
+     * position, so the second Seek's return value equals the file size. */
+    if (Seek(fh, 0, OFFSET_END) < 0) { Close(fh); return NULL; }
+    size = Seek(fh, 0, OFFSET_BEGINNING);
+    if (size < 0) { Close(fh); return NULL; }
+
+    bd = (struct BlockDev *)AllocVec(sizeof(*bd), MEMF_PUBLIC | MEMF_CLEAR);
+    if (!bd) { Close(fh); return NULL; }
+
+    bd->backend     = BD_FILE;
+    bd->fh          = fh;
+    bd->open        = TRUE;
+    bd->block_size  = 512;
+    bd->total_bytes = (UQUAD)(ULONG)size;
+    bd->td_total_bytes  = bd->total_bytes;
+    bd->rc_total_blocks = (ULONG)(bd->total_bytes / 512);
+    bd->rc_block_size   = 512;
+
+    strncpy(bd->filepath, path, sizeof(bd->filepath) - 1);
+    /* Mirror full FILE:<path> form into devname so callers that look at
+     * bd->devname (titles, error messages) see something sensible. */
+    sprintf(bd->devname, "FILE:%.58s", path);
+    bd->unit = 0;
+    strncpy(bd->disk_brand, "Image File", sizeof(bd->disk_brand) - 1);
+
+    return bd;
+}
+
+struct BlockDev *BlockDev_CreateFile(const char *path, UQUAD size_bytes)
+{
+    BPTR  fh;
+    ULONG sz;
+    LONG  res;
+
+    if (!path || !*path || size_bytes < 512) return NULL;
+
+    /* Round up to a 512-byte block boundary. */
+    sz = (ULONG)((size_bytes + 511) & ~(UQUAD)511);
+    if (sz == 0) return NULL;   /* overflow guard */
+
+    fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    if (!fh) return NULL;
+
+    /* SetFileSize is dos.library v37; main.c already opens dos v37.
+     * On filesystems that support sparse files (SFS, PFS) this is instant
+     * and uses no disk space until written. On FFS it allocates fully. */
+    res = SetFileSize(fh, (LONG)sz, OFFSET_BEGINNING);
+    if (res != 0) {
+        /* Fallback: write a single byte at the end to extend the file. */
+        UBYTE zero = 0;
+        if (Seek(fh, (LONG)(sz - 1), OFFSET_BEGINNING) < 0 ||
+            Write(fh, &zero, 1) != 1) {
+            Close(fh);
+            DeleteFile((CONST_STRPTR)path);
+            return NULL;
+        }
+    }
+    Close(fh);
+
+    return BlockDev_OpenFile(path);
+}
+
+/* ------------------------------------------------------------------ */
 /* BlockDev_Open                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -125,9 +209,20 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
     struct DriveGeometry geom;
     LONG err;
 
+    /* "FILE:<path>" alias so all existing call sites can transparently open
+     * an image file by passing the marker as devname. */
+    if (devname &&
+        (devname[0]=='F'||devname[0]=='f') &&
+        (devname[1]=='I'||devname[1]=='i') &&
+        (devname[2]=='L'||devname[2]=='l') &&
+        (devname[3]=='E'||devname[3]=='e') &&
+         devname[4]==':')
+        return BlockDev_OpenFile(devname + 5);
+
     bd = (struct BlockDev *)AllocVec(sizeof(*bd), MEMF_PUBLIC | MEMF_CLEAR);
     if (!bd) return NULL;
 
+    bd->backend = BD_DEVICE;
     strncpy(bd->devname, devname, sizeof(bd->devname) - 1);
     bd->unit = unit;
 
@@ -236,8 +331,12 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
 void BlockDev_Close(struct BlockDev *bd)
 {
     if (!bd) return;
-    if (bd->open) CloseDevice((struct IORequest *)&bd->iotd);
-    local_delete_port(bd->port);
+    if (bd->backend == BD_FILE) {
+        if (bd->fh) Close(bd->fh);
+    } else {
+        if (bd->open) CloseDevice((struct IORequest *)&bd->iotd);
+        local_delete_port(bd->port);
+    }
     FreeVec(bd);
 }
 
@@ -247,6 +346,14 @@ void BlockDev_Close(struct BlockDev *bd)
 
 BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
 {
+    /* File backend: dos.library Seek + Read.
+     * AmigaOS Seek uses LONG offset, so image files are limited to ~2 GB. */
+    if (bd->backend == BD_FILE) {
+        LONG off = (LONG)(blocknum * bd->block_size);
+        if (Seek(bd->fh, off, OFFSET_BEGINNING) < 0) return FALSE;
+        return (Read(bd->fh, buf, bd->block_size) == (LONG)bd->block_size);
+    }
+
     /* Try HD_SCSICMD (SCSI READ(10)) first.
        Falls back to CMD_READ for devices that don't support HD_SCSICMD
        (e.g. UAE uaehf.device, older non-SCSI drivers). */
@@ -326,6 +433,20 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
     BYTE err;
     UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
 
+    /* File backend: dos.library Seek + Write. */
+    if (bd->backend == BD_FILE) {
+        LONG off = (LONG)(blocknum * bd->block_size);
+        if (Seek(bd->fh, off, OFFSET_BEGINNING) < 0) {
+            bd->last_io_err = (BYTE)IoErr();
+            return FALSE;
+        }
+        if (Write(bd->fh, (APTR)buf, bd->block_size) != (LONG)bd->block_size) {
+            bd->last_io_err = (BYTE)IoErr();
+            return FALSE;
+        }
+        return TRUE;
+    }
+
     /* TD_WRITE64.  CMD_WRITE and CMD_UPDATE both hang on cached filesystem
        partition blocks in UAE/Amiberry — they block waiting for the
        filesystem handler to flush its cache, which can deadlock if the
@@ -359,6 +480,17 @@ BOOL BlockDev_GetGeometry(struct BlockDev *bd,
 {
     struct DriveGeometry geom;
     BOOL td_ok;
+
+    /* File backend: derive CHS from filesize using the conventional
+     * HDF default of 16 heads x 63 sectors (matches what UAE/Amiberry
+     * and most HDF tools assume). The user can still override via the
+     * Manual Geometry dialog (GUI) or NEWGEO (CLI). */
+    if (bd->backend == BD_FILE) {
+        *heads   = 16;
+        *sectors = 63;
+        *cyls    = (ULONG)(bd->total_bytes / (UQUAD)(512UL * 16UL * 63UL));
+        return (*cyls > 0);
+    }
 
     memset(&geom, 0, sizeof(geom));
     bd->iotd.iotd_Req.io_Command = TD_GETGEOMETRY;

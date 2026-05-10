@@ -1281,6 +1281,9 @@ static struct NewMenu partview_menu_def[] = {
     { NM_ITEM,  "Verify Extended...",    NULL,         0, 0, NULL },  /* ITEM 7 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 8 */
     { NM_ITEM,  "RDB Integrity Check",   NULL,         0, 0, NULL },  /* ITEM 9 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 10 */
+    { NM_ITEM,  "Dump Disk to Image...", NULL,         0, 0, NULL },  /* ITEM 11 */
+    { NM_ITEM,  "Restore Image to Disk...",NULL,       0, 0, NULL },  /* ITEM 12 */
     /* Menu 2 — Health: disk diagnostics */
     { NM_TITLE, "Health",                NULL,         0, 0, NULL },
     { NM_ITEM,  "SMART Status",          NULL,         0, 0, NULL },  /* ITEM 0 */
@@ -1559,6 +1562,10 @@ BOOL partview_run(const char *devname, ULONG unit)
                             rdb_verify_extended(win, bd);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 9)
                             rdb_integrity_check(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 11)
+                            image_dump_disk(win, bd);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 12)
+                            image_restore_disk(win, bd);
                         /* Health menu */
                         else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 0)
                             smart_status(win, bd);

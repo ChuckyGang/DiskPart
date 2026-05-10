@@ -23,6 +23,7 @@
 #include "clib.h"
 #include "devices.h"
 #include "rdb.h"
+#include "imagecopy.h"
 #include "script.h"
 #include "cli.h"
 
@@ -44,7 +45,9 @@ extern struct DosLibrary *DOSBase;
     "VERIFY/K,VERIFYEXT/K,"                                       \
     "ADDPART/S,ADDFS/S,DELPART/S,CHECK/S,"                        \
     "NAME/K,LOW/K,HIGH/K,TYPE/K,BOOTPRI/K,BOOTABLE/S,"           \
-    "FILE/K,VERSION/K,STACKSIZE/K"
+    "FILE/K,VERSION/K,STACKSIZE/K,"                               \
+    "IMAGE/K,CREATE/S,SIZE/K,"                                    \
+    "IMAGEOUT/K,IMAGEIN/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -75,6 +78,11 @@ enum {
     ARG_FILE,
     ARG_VERSION,
     ARG_STACKSIZE,
+    ARG_IMAGE,
+    ARG_CREATE,
+    ARG_SIZE,
+    ARG_IMAGEOUT,
+    ARG_IMAGEIN,
     ARG_COUNT
 };
 
@@ -111,6 +119,101 @@ static BOOL parse_dev(const char *str, char *devname, ULONG *unit)
     devname[len] = '\0';
     *unit = (*p == ':') ? strtoul(p + 1, NULL, 10) : 0;
     return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* parse_size_bytes — bare number or n[KMG] suffix → byte count        */
+/* ------------------------------------------------------------------ */
+
+static UQUAD parse_size_bytes(const char *s)
+{
+    UQUAD val = 0;
+    if (!s) return 0;
+    while (*s >= '0' && *s <= '9') val = val * 10 + (UQUAD)(*s++ - '0');
+    if      (*s == 'K' || *s == 'k') val *= 1024UL;
+    else if (*s == 'M' || *s == 'm') val *= 1024UL * 1024UL;
+    else if (*s == 'G' || *s == 'g') val *= 1024UL * 1024UL * 1024UL;
+    return val;
+}
+
+/* ------------------------------------------------------------------ */
+/* resolve_target — resolve DEV= / IMAGE= into BlockDev_Open args.    */
+/* When IMAGE= is set, synthesises devname = "FILE:<path>", unit=0    */
+/* so all cmd_* functions can call BlockDev_Open(devname, unit)       */
+/* without needing to know which backend is in use.                   */
+/* Returns TRUE on success, FALSE on bad/missing args (already        */
+/* printed an error message in that case).                            */
+/* ------------------------------------------------------------------ */
+
+static BOOL resolve_target(LONG *args, char *devname, ULONG *unit)
+{
+    if (args[ARG_IMAGE]) {
+        const char *path = (const char *)args[ARG_IMAGE];
+        ULONG len = 0;
+        while (path[len]) len++;
+        if (len == 0 || len > 58) {
+            cli_puts("ERROR: IMAGE path is empty or too long.\n");
+            return FALSE;
+        }
+        sprintf(devname, "FILE:%s", path);
+        *unit = 0;
+        return TRUE;
+    }
+    if (!args[ARG_DEV]) {
+        cli_puts("This command requires DEV <device>:<unit> or IMAGE <path>.\n");
+        return FALSE;
+    }
+    if (!parse_dev((const char *)args[ARG_DEV], devname, unit)) {
+        cli_puts("ERROR: DEV format must be <device>:<unit> "
+                 "(e.g. uaehf.device:3).\n");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* maybe_create_image — handle IMAGE=<path> CREATE SIZE=<n> up-front. */
+/* Creates the file, immediately closes it, and prints a status line. */
+/* Subsequent commands open the now-existing file via FILE: dispatch. */
+/* Returns RETURN_OK (created or no-op), or RETURN_ERROR.             */
+/* ------------------------------------------------------------------ */
+
+static LONG maybe_create_image(LONG *args)
+{
+    const char     *path;
+    UQUAD           size_bytes;
+    struct BlockDev *bd;
+    char            szbuf[20];
+
+    if (!args[ARG_CREATE]) return RETURN_OK;
+
+    if (!args[ARG_IMAGE]) {
+        cli_puts("ERROR: CREATE requires IMAGE=<path>.\n");
+        return RETURN_ERROR;
+    }
+    if (!args[ARG_SIZE]) {
+        cli_puts("ERROR: CREATE requires SIZE=<n>[K|M|G].\n");
+        return RETURN_ERROR;
+    }
+
+    path       = (const char *)args[ARG_IMAGE];
+    size_bytes = parse_size_bytes((const char *)args[ARG_SIZE]);
+    if (size_bytes < 512) {
+        cli_puts("ERROR: SIZE must be at least 512 bytes.\n");
+        return RETURN_ERROR;
+    }
+
+    FormatSize(size_bytes, szbuf);
+    sprintf(outbuf, "Creating image \"%s\" (%s)...\n", path, szbuf);
+    cli_puts(outbuf);
+
+    bd = BlockDev_CreateFile(path, size_bytes);
+    if (!bd) {
+        cli_puts("ERROR: failed to create image file.\n");
+        return RETURN_ERROR;
+    }
+    BlockDev_Close(bd);
+    return RETURN_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1583,6 +1686,144 @@ static LONG cmd_init(const char *devname, ULONG unit,
 }
 
 /* ------------------------------------------------------------------ */
+/* IMAGEOUT — dump current target to a new image file                 */
+/* IMAGEIN  — write an image file back to current target              */
+/* ------------------------------------------------------------------ */
+
+/* CLI progress callback: prints percentage every 5% when total is known,
+ * or one line per ~50 MB of data when total is unknown. Also checks
+ * Ctrl+C between batches and returns FALSE to cancel the copy. */
+struct CliProg {
+    ULONG last_pct;
+    ULONG last_blocks;
+};
+
+static BOOL cli_prog_cb(void *ud, ULONG cur, ULONG total)
+{
+    struct CliProg *p = (struct CliProg *)ud;
+
+    /* Ctrl+C check — SetSignal(0,...) returns the previous mask and
+     * clears the bits we passed in. */
+    if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
+        cli_puts("\n** Cancelled.\n");
+        return FALSE;
+    }
+
+    if (total > 0) {
+        ULONG pct = (cur * 100UL) / total;
+        if (cur != total && pct < p->last_pct + 5) return TRUE;
+        p->last_pct = pct;
+        sprintf(outbuf, "  %lu%% (%lu / %lu blocks)\n",
+                (unsigned long)pct,
+                (unsigned long)cur, (unsigned long)total);
+    } else {
+        if (cur < p->last_blocks + 102400) return TRUE;   /* every 50 MB */
+        p->last_blocks = cur;
+        sprintf(outbuf, "  %lu blocks copied\n", (unsigned long)cur);
+    }
+    cli_puts(outbuf);
+    Flush(Output());
+    return TRUE;
+}
+
+static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
+{
+    struct BlockDev *bd;
+    char  errbuf[80];
+    char  szbuf[20];
+    BOOL  ok;
+    struct CliProg prog;
+
+    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    cli_puts(outbuf);
+
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+
+    if (bd->total_bytes > IMAGE_LARGE_THRESHOLD) {
+        FormatSize(bd->total_bytes, szbuf);
+        sprintf(outbuf,
+            "WARNING: source is %s (>2 GB).\n"
+            "  Destination filesystem must support large files\n"
+            "  (SFS, PFS3, FFS-NSD or FFS post-OS3.5) — older\n"
+            "  FFS will fail near the 2 GB mark.\n", szbuf);
+        cli_puts(outbuf);
+    }
+
+    FormatSize(bd->total_bytes, szbuf);
+    sprintf(outbuf, "Source size: %s\n", szbuf);
+    cli_puts(outbuf);
+    sprintf(outbuf, "Writing image to: %s\n", path);
+    cli_puts(outbuf);
+
+    prog.last_pct = 0;
+    prog.last_blocks = 0;
+    errbuf[0] = '\0';
+    ok = ImageCopy_DiskToFile(bd, path, 0,
+                              cli_prog_cb, &prog,
+                              errbuf, sizeof(errbuf));
+
+    BlockDev_Close(bd);
+
+    if (!ok) {
+        sprintf(outbuf, "ERROR: dump failed: %s\n",
+                errbuf[0] ? errbuf : "(unknown)");
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+    cli_puts("Done.\n");
+    return RETURN_OK;
+}
+
+static LONG cmd_imagein(const char *devname, ULONG unit,
+                        const char *path, BOOL force)
+{
+    struct BlockDev *bd;
+    char  errbuf[80];
+    BOOL  ok;
+    struct CliProg prog;
+
+    cli_puts("WARNING: This will OVERWRITE the destination from block 0.\n"
+             "All existing partitions and data on the target will be lost.\n\n");
+    if (!ask_yn("Are you sure you want to restore?", force))
+        return RETURN_OK;
+
+    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    cli_puts(outbuf);
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+
+    sprintf(outbuf, "Reading image from: %s\n", path);
+    cli_puts(outbuf);
+
+    prog.last_pct = 0;
+    prog.last_blocks = 0;
+    errbuf[0] = '\0';
+    ok = ImageCopy_FileToDisk(bd, path,
+                              cli_prog_cb, &prog,
+                              errbuf, sizeof(errbuf));
+
+    BlockDev_Close(bd);
+
+    if (!ok) {
+        sprintf(outbuf, "ERROR: restore failed: %s\n",
+                errbuf[0] ? errbuf : "(unknown)");
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+    cli_puts("Done. A reboot may be required for the new layout.\n");
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* cli_run — parse and dispatch                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1600,13 +1841,15 @@ LONG cli_run(void)
         return RETURN_ERROR;
     }
 
-    /* No recognised command → empty command line, caller opens GUI */
+    /* No recognised command → empty command line, caller opens GUI.
+     * CREATE counts as a command on its own (creates the image and exits). */
     if (!args[ARG_LISTDEV] && !args[ARG_INIT]         && !args[ARG_SCRIPT]  &&
         !args[ARG_INFO]    && !args[ARG_SMART]         && !args[ARG_BACKUP] &&
         !args[ARG_RESTORE] && !args[ARG_BACKUPEXT]     && !args[ARG_RESTOREEXT] &&
         !args[ARG_VERIFY]  && !args[ARG_VERIFYEXT]    &&
         !args[ARG_ADDPART] && !args[ARG_ADDFS] && !args[ARG_DELPART] &&
-        !args[ARG_CHECK]) {
+        !args[ARG_CHECK]   && !args[ARG_CREATE]   &&
+        !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -1614,23 +1857,20 @@ LONG cli_run(void)
     if (args[ARG_LISTDEV])
         rc = cmd_listdev((BOOL)args[ARG_UNITS]);
 
+    /* CREATE IMAGE=<path> SIZE=<n> — runs first so subsequent commands
+     * (INIT, ADDPART, ...) on the same line operate on the new file. */
+    if (rc == RETURN_OK && args[ARG_CREATE])
+        rc = maybe_create_image(args);
+
     if (rc == RETURN_OK && args[ARG_INIT]) {
-        if (!args[ARG_DEV]) {
-            cli_puts("INIT requires DEV <device>:<unit>  "
-                     "(e.g. DEV uaehf.device:3).\n");
+        char  devname[64];
+        ULONG unit;
+        if (!resolve_target(args, devname, &unit)) {
             rc = RETURN_WARN;
         } else {
-            char  devname[64];
-            ULONG unit;
-            if (!parse_dev((const char *)args[ARG_DEV], devname, &unit)) {
-                cli_puts("ERROR: DEV format must be <device>:<unit> "
-                         "(e.g. uaehf.device:3).\n");
-                rc = RETURN_WARN;
-            } else {
-                rc = cmd_init(devname, unit,
-                              (const char *)args[ARG_INIT],
-                              (BOOL)args[ARG_FORCE]);
-            }
+            rc = cmd_init(devname, unit,
+                          (const char *)args[ARG_INIT],
+                          (BOOL)args[ARG_FORCE]);
         }
     }
 
@@ -1639,23 +1879,20 @@ LONG cli_run(void)
                         (BOOL)args[ARG_DRYRUN],
                         (BOOL)args[ARG_FORCE]);
 
-    /* Commands that all require DEV */
+    /* Commands that all require a target (DEV or IMAGE) */
     if (rc == RETURN_OK &&
         (args[ARG_INFO]      || args[ARG_SMART]      ||
          args[ARG_BACKUP]    || args[ARG_RESTORE]    ||
          args[ARG_BACKUPEXT] || args[ARG_RESTOREEXT] ||
          args[ARG_VERIFY]    || args[ARG_VERIFYEXT] ||
          args[ARG_ADDPART]   || args[ARG_ADDFS]   ||
-         args[ARG_DELPART]   || args[ARG_CHECK])) {
+         args[ARG_DELPART]   || args[ARG_CHECK]   ||
+         args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN])) {
 
         char  devname[64];
         ULONG unit;
 
-        if (!args[ARG_DEV]) {
-            cli_puts("This command requires DEV <device>:<unit>.\n");
-            rc = RETURN_WARN;
-        } else if (!parse_dev((const char *)args[ARG_DEV], devname, &unit)) {
-            cli_puts("ERROR: DEV format must be <device>:<unit> (e.g. uaehf.device:3).\n");
+        if (!resolve_target(args, devname, &unit)) {
             rc = RETURN_WARN;
         } else {
             BOOL force = (BOOL)args[ARG_FORCE];
@@ -1710,6 +1947,14 @@ LONG cli_run(void)
 
             if (rc == RETURN_OK && args[ARG_CHECK])
                 rc = cmd_check(devname, unit);
+
+            if (rc == RETURN_OK && args[ARG_IMAGEOUT])
+                rc = cmd_imageout(devname, unit,
+                                  (const char *)args[ARG_IMAGEOUT]);
+
+            if (rc == RETURN_OK && args[ARG_IMAGEIN])
+                rc = cmd_imagein(devname, unit,
+                                 (const char *)args[ARG_IMAGEIN], force);
         }
     }
 

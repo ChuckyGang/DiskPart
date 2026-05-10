@@ -30,6 +30,7 @@
 
 #include "clib.h"
 #include "rdb.h"
+#include "imagecopy.h"
 #include "script.h"
 
 extern struct ExecBase   *SysBase;
@@ -283,36 +284,24 @@ static BOOL parse_high(const char *s, ULONG low, ULONG hi_cyl,
     return TRUE;
 }
 
-/* ------------------------------------------------------------------ */
-/* OPEN                                                                */
-/* ------------------------------------------------------------------ */
-
-static LONG do_open(ULONG ln, char **tok, UWORD ntok)
+/* parse_size_bytes — accept a bare number or n[KMG] suffix as a byte count.
+ * Returns 0 on failure (since 0-byte images are also invalid). */
+static UQUAD parse_size_bytes(const char *s)
 {
-    const char *devname;
-    ULONG       unit;
-    char        szbuf[20];
+    UQUAD val = 0;
+    if (!s) return 0;
+    while (*s >= '0' && *s <= '9') val = val * 10 + (UQUAD)(*s++ - '0');
+    if      (*s == 'K' || *s == 'k') val *= 1024UL;
+    else if (*s == 'M' || *s == 'm') val *= 1024UL * 1024UL;
+    else if (*s == 'G' || *s == 'g') val *= 1024UL * 1024UL * 1024UL;
+    return val;
+}
 
-    if (ntok < 3) {
-        sc_err(ln, "OPEN requires <device> <unit>");
-        return RETURN_ERROR;
-    }
-    devname = tok[1];
-    unit    = strtoul(tok[2], NULL, 10);
-
-    if (s_st.bd) {
-        if (s_st.dirty)
-            sc_warn(ln, "Previous device had unsaved changes.");
-        RDB_FreeCode(&s_st.rdb);
-        BlockDev_Close(s_st.bd);
-        s_st.bd = NULL; s_st.rdb_ready = FALSE; s_st.dirty = FALSE;
-    }
-
-    sprintf(s_msg, "Opening %s unit %lu...\n", devname, unit);
-    sc_puts(s_msg);
-
-    s_st.bd = BlockDev_Open(devname, unit);
-    if (!s_st.bd) { sc_err(ln, "Cannot open device."); return RETURN_ERROR; }
+/* Shared post-open: print size + RDB summary, set s_st bookkeeping. */
+static void open_finish(ULONG ln)
+{
+    char szbuf[20];
+    (void)ln;
 
     FormatSize(s_st.bd->total_bytes, szbuf);
     if (s_st.bd->disk_brand[0])
@@ -336,6 +325,97 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
 
     s_st.rdb_ready = TRUE;
     s_st.dirty     = FALSE;
+}
+
+/* Close any currently-open device before a fresh OPEN/CREATE. */
+static void open_close_existing(ULONG ln)
+{
+    if (s_st.bd) {
+        if (s_st.dirty)
+            sc_warn(ln, "Previous device had unsaved changes.");
+        RDB_FreeCode(&s_st.rdb);
+        BlockDev_Close(s_st.bd);
+        s_st.bd = NULL; s_st.rdb_ready = FALSE; s_st.dirty = FALSE;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* OPEN                                                                */
+/*   OPEN <device> <unit>     — exec.device backend                   */
+/*   OPEN FILE   <path>       — image file backend                    */
+/* ------------------------------------------------------------------ */
+
+static LONG do_open(ULONG ln, char **tok, UWORD ntok)
+{
+    /* OPEN FILE <path> form */
+    if (ntok >= 3 && ci_eq(tok[1], "FILE")) {
+        const char *path = tok[2];
+        open_close_existing(ln);
+        sprintf(s_msg, "Opening image file \"%s\"...\n", path);
+        sc_puts(s_msg);
+        s_st.bd = BlockDev_OpenFile(path);
+        if (!s_st.bd) { sc_err(ln, "Cannot open image file."); return RETURN_ERROR; }
+        open_finish(ln);
+        return RETURN_OK;
+    }
+
+    if (ntok < 3) {
+        sc_err(ln, "OPEN requires <device> <unit> or FILE <path>");
+        return RETURN_ERROR;
+    }
+
+    {
+        const char *devname = tok[1];
+        ULONG unit = strtoul(tok[2], NULL, 10);
+
+        open_close_existing(ln);
+
+        sprintf(s_msg, "Opening %s unit %lu...\n", devname, unit);
+        sc_puts(s_msg);
+
+        s_st.bd = BlockDev_Open(devname, unit);
+        if (!s_st.bd) { sc_err(ln, "Cannot open device."); return RETURN_ERROR; }
+        open_finish(ln);
+        return RETURN_OK;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* CREATE                                                              */
+/*   CREATE FILE <path> SIZE=<n>[K|M|G]                                */
+/* Creates a new image file of the given size and opens it.            */
+/* ------------------------------------------------------------------ */
+
+static LONG do_create(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *path;
+    const char *sz_s;
+    UQUAD       size_bytes;
+    char        szbuf[20];
+
+    if (ntok < 3 || !ci_eq(tok[1], "FILE")) {
+        sc_err(ln, "CREATE requires FILE <path> SIZE=<n>[K|M|G]");
+        return RETURN_ERROR;
+    }
+    path = tok[2];
+
+    sz_s = kwarg(tok, ntok, "SIZE");
+    if (!sz_s) { sc_err(ln, "CREATE requires SIZE=<n>[K|M|G]"); return RETURN_ERROR; }
+    size_bytes = parse_size_bytes(sz_s);
+    if (size_bytes < 512) {
+        sc_err(ln, "CREATE SIZE must be at least 512 bytes.");
+        return RETURN_ERROR;
+    }
+
+    open_close_existing(ln);
+
+    FormatSize(size_bytes, szbuf);
+    sprintf(s_msg, "Creating image file \"%s\" (%s)...\n", path, szbuf);
+    sc_puts(s_msg);
+
+    s_st.bd = BlockDev_CreateFile(path, size_bytes);
+    if (!s_st.bd) { sc_err(ln, "Cannot create image file."); return RETURN_ERROR; }
+    open_finish(ln);
     return RETURN_OK;
 }
 
@@ -938,6 +1018,117 @@ static LONG do_write(ULONG ln)
 }
 
 /* ------------------------------------------------------------------ */
+/* IMAGEOUT FILE=<path>  — dump open device to a new image file       */
+/* IMAGEIN  FILE=<path>  — write image file back to open device       */
+/* ------------------------------------------------------------------ */
+
+static ULONG s_prog_pct;
+static ULONG s_prog_blocks;
+
+static BOOL script_prog_cb(void *ud, ULONG cur, ULONG total)
+{
+    (void)ud;
+
+    if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
+        sc_puts("\n** Cancelled.\n");
+        return FALSE;
+    }
+
+    if (total > 0) {
+        ULONG pct = (cur * 100UL) / total;
+        if (cur != total && pct < s_prog_pct + 5) return TRUE;
+        s_prog_pct = pct;
+        sprintf(s_msg, "  %lu%% (%lu / %lu blocks)\n",
+                (unsigned long)pct,
+                (unsigned long)cur, (unsigned long)total);
+    } else {
+        if (cur < s_prog_blocks + 102400) return TRUE;   /* every 50 MB */
+        s_prog_blocks = cur;
+        sprintf(s_msg, "  %lu blocks copied\n", (unsigned long)cur);
+    }
+    sc_puts(s_msg);
+    Flush(Output());
+    return TRUE;
+}
+
+static LONG do_imageout(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *path;
+    char  errbuf[80];
+    BOOL  ok;
+
+    if (!s_st.bd) { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+    path = kwarg(tok, ntok, "FILE");
+    if (!path) { sc_err(ln, "IMAGEOUT requires FILE=<path>."); return RETURN_ERROR; }
+
+    if (s_st.dryrun) {
+        sprintf(s_msg, "DRYRUN: would dump device to \"%s\".\n", path);
+        sc_puts(s_msg);
+        return RETURN_OK;
+    }
+
+    sprintf(s_msg, "Writing image to: %s\n", path);
+    sc_puts(s_msg);
+    s_prog_pct = 0;
+    s_prog_blocks = 0;
+    errbuf[0] = '\0';
+    ok = ImageCopy_DiskToFile(s_st.bd, path, 0,
+                              script_prog_cb, NULL,
+                              errbuf, sizeof(errbuf));
+    if (!ok) {
+        sprintf(s_msg, "Dump failed: %s\n", errbuf[0] ? errbuf : "(unknown)");
+        sc_err(ln, s_msg);
+        return RETURN_ERROR;
+    }
+    sc_puts("Done.\n");
+    return RETURN_OK;
+}
+
+static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *path;
+    char  errbuf[80];
+    BOOL  ok;
+
+    if (!s_st.bd) { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+    path = kwarg(tok, ntok, "FILE");
+    if (!path) { sc_err(ln, "IMAGEIN requires FILE=<path>."); return RETURN_ERROR; }
+
+    if (s_st.dryrun) {
+        sprintf(s_msg, "DRYRUN: would restore image \"%s\" to device.\n", path);
+        sc_puts(s_msg);
+        return RETURN_OK;
+    }
+
+    sc_puts("WARNING: this will OVERWRITE the open device from block 0.\n");
+    if (!sc_ask_yn("Are you sure you want to restore?")) {
+        sc_puts("Aborted.\n");
+        return RETURN_OK;
+    }
+
+    sprintf(s_msg, "Reading image from: %s\n", path);
+    sc_puts(s_msg);
+    s_prog_pct = 0;
+    s_prog_blocks = 0;
+    errbuf[0] = '\0';
+    ok = ImageCopy_FileToDisk(s_st.bd, path,
+                              script_prog_cb, NULL,
+                              errbuf, sizeof(errbuf));
+    if (!ok) {
+        sprintf(s_msg, "Restore failed: %s\n", errbuf[0] ? errbuf : "(unknown)");
+        sc_err(ln, s_msg);
+        return RETURN_ERROR;
+    }
+    sc_puts("Done.\n");
+    /* Re-read RDB so subsequent INFO/etc. reflect what was just written. */
+    RDB_FreeCode(&s_st.rdb);
+    memset(&s_st.rdb, 0, sizeof(s_st.rdb));
+    if (RDB_Read(s_st.bd, &s_st.rdb) && s_st.rdb.valid)
+        s_st.rdb_ready = TRUE;
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* INFO                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1072,6 +1263,7 @@ static LONG run_line(char *line, ULONG ln)
 
     if (ntok == 0)                return RETURN_OK;
     if (ci_eq(tok[0], "OPEN"))    return do_open(ln, tok, ntok);
+    if (ci_eq(tok[0], "CREATE"))  return do_create(ln, tok, ntok);
     if (ci_eq(tok[0], "INIT"))    return do_init(ln, tok, ntok);
     if (ci_eq(tok[0], "ADDPART")) return do_addpart(ln, tok, ntok);
     if (ci_eq(tok[0], "DELPART"))   return do_delpart(ln, tok, ntok);
@@ -1081,6 +1273,8 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "ADDFS"))    return do_addfs(ln, tok, ntok);
     if (ci_eq(tok[0], "WRITE"))   return do_write(ln);
     if (ci_eq(tok[0], "INFO"))    return do_info(ln);
+    if (ci_eq(tok[0], "IMAGEOUT"))return do_imageout(ln, tok, ntok);
+    if (ci_eq(tok[0], "IMAGEIN")) return do_imagein(ln, tok, ntok);
     if (ci_eq(tok[0], "CLOSE"))   return do_close(ln);
     if (ci_eq(tok[0], "REBOOT"))  return do_reboot(ln);
 

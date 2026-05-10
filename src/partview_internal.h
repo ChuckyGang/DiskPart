@@ -76,6 +76,13 @@ void  rdb_verify_block   (struct Window *win, struct BlockDev *bd,
 void  rdb_verify_extended(struct Window *win, struct BlockDev *bd);
 
 /* ------------------------------------------------------------------ */
+/* partview_image.c                                                     */
+/* ------------------------------------------------------------------ */
+
+void  image_dump_disk    (struct Window *win, struct BlockDev *bd);
+void  image_restore_disk (struct Window *win, struct BlockDev *bd);
+
+/* ------------------------------------------------------------------ */
 /* partview_move.c                                                      */
 /* ------------------------------------------------------------------ */
 
