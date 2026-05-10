@@ -5,7 +5,7 @@
  * Level 2: list of units for the chosen driver, showing disk name/size.
  * Level 3: partition editor (partview.c).
  *
- * AmigaOS 3.1+ (Kickstart v37+), m68k-amiga-elf-gcc (Bartman toolchain).
+ * AmigaOS 2.x+ (Kickstart v37+), m68k-amiga-elf-gcc (Bartman toolchain).
  * GadTools UI — no MUI, no external library dependencies.
  */
 

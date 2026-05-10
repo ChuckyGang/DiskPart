@@ -799,7 +799,7 @@ void show_about(struct Window *win)
     sprintf(body,
         "DiskPart %s\n"
         "Built: %s\n"
-        "AmigaOS 3.x RDB Hard Disk Partition Editor\n"
+        "AmigaOS 2.x RDB Hard Disk Partition Editor\n"
         "\n"
         "A native GadTools application with full RDB support.\n"
         "No external library dependencies beyond the ROM.\n"

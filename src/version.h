@@ -1,7 +1,7 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define DISKPART_VERSION  "V0.2"
+#define DISKPART_VERSION  "V0.3"
 #define DISKPART_VERTITLE "DiskPart " DISKPART_VERSION
 
 /* Defined in build.c, recompiled on every build (see Makefile). */

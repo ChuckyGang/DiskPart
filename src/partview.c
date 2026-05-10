@@ -335,26 +335,52 @@ static LONG part_pens[NUM_PART_COLORS];
 static LONG bg_pen;      /* dark navy background for the map  */
 static LONG rdb_pen;     /* muted gray for RDB reserved area  */
 
+/* Fallback pen indices used on graphics.library < V39, where ObtainBestPenA
+ * does not exist (it was added in V39 / KS 3.0).  These are well-known
+ * Workbench palette slots that exist on a default 4- or 8-colour screen. */
+static const UBYTE FALLBACK_PART_PENS[NUM_PART_COLORS] =
+    { 1, 2, 3, 4, 5, 6, 7, 1 };
+#define FALLBACK_BG_PEN  0
+#define FALLBACK_RDB_PEN 2
+
+static BOOL gfx_has_obtainbestpen(void)
+{
+    return (BOOL)(((struct Library *)GfxBase)->lib_Version >= 39);
+}
+
 static void alloc_pens(struct Screen *scr)
 {
-    struct ColorMap *cm = scr->ViewPort.ColorMap;
-    struct TagItem   nt[] = { { TAG_DONE, 0 } };
     UWORD i;
-    for (i = 0; i < NUM_PART_COLORS; i++)
-        part_pens[i] = ObtainBestPenA(cm,
-            C32(PART_R[i]), C32(PART_G[i]), C32(PART_B[i]), nt);
-    bg_pen  = ObtainBestPenA(cm, C32(0x2a), C32(0x2a), C32(0x3a), nt);
-    rdb_pen = ObtainBestPenA(cm, C32(0x55), C32(0x55), C32(0x66), nt);
+    if (gfx_has_obtainbestpen()) {
+        struct ColorMap *cm = scr->ViewPort.ColorMap;
+        struct TagItem   nt[] = { { TAG_DONE, 0 } };
+        for (i = 0; i < NUM_PART_COLORS; i++)
+            part_pens[i] = ObtainBestPenA(cm,
+                C32(PART_R[i]), C32(PART_G[i]), C32(PART_B[i]), nt);
+        bg_pen  = ObtainBestPenA(cm, C32(0x2a), C32(0x2a), C32(0x3a), nt);
+        rdb_pen = ObtainBestPenA(cm, C32(0x55), C32(0x55), C32(0x66), nt);
+    } else {
+        /* V37/V38 — use fixed Workbench palette pens. No allocation needed. */
+        for (i = 0; i < NUM_PART_COLORS; i++)
+            part_pens[i] = (LONG)FALLBACK_PART_PENS[i];
+        bg_pen  = FALLBACK_BG_PEN;
+        rdb_pen = FALLBACK_RDB_PEN;
+    }
 }
 
 static void free_pens(struct Screen *scr)
 {
-    struct ColorMap *cm = scr->ViewPort.ColorMap;
     UWORD i;
-    for (i = 0; i < NUM_PART_COLORS; i++)
-        if (part_pens[i] >= 0) { ReleasePen(cm,(ULONG)part_pens[i]); part_pens[i]=-1; }
-    if (bg_pen  >= 0) { ReleasePen(cm,(ULONG)bg_pen);  bg_pen  = -1; }
-    if (rdb_pen >= 0) { ReleasePen(cm,(ULONG)rdb_pen); rdb_pen = -1; }
+    if (gfx_has_obtainbestpen()) {
+        struct ColorMap *cm = scr->ViewPort.ColorMap;
+        for (i = 0; i < NUM_PART_COLORS; i++)
+            if (part_pens[i] >= 0) { ReleasePen(cm,(ULONG)part_pens[i]); part_pens[i]=-1; }
+        if (bg_pen  >= 0) { ReleasePen(cm,(ULONG)bg_pen);  bg_pen  = -1; }
+        if (rdb_pen >= 0) { ReleasePen(cm,(ULONG)rdb_pen); rdb_pen = -1; }
+    } else {
+        for (i = 0; i < NUM_PART_COLORS; i++) part_pens[i] = -1;
+        bg_pen = rdb_pen = -1;
+    }
 }
 
 /* ------------------------------------------------------------------ */

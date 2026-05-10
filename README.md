@@ -1,6 +1,6 @@
 # DiskPart
 
-A native AmigaOS 3.x hard disk partition editor with full RDB (Rigid Disk Block) support.
+A native AmigaOS 2.x hard disk partition editor with full RDB (Rigid Disk Block) support.
 
 ## Download
 
@@ -10,7 +10,7 @@ A native AmigaOS 3.x hard disk partition editor with full RDB (Rigid Disk Block)
 
 ## About
 
-DiskPart is a partition management tool for the Amiga, built as a clean GadTools application that runs directly on Kickstart 3.x with no external library dependencies beyond the ROM. It was created out of a simple conviction: the Amiga deserves a good, modern partition editor — and it is better to have one now than never.
+DiskPart is a partition management tool for the Amiga, built as a clean GadTools application that runs directly on Kickstart 2.x with no external library dependencies beyond the ROM. It was created out of a simple conviction: the Amiga deserves a good, modern partition editor — and it is better to have one now than never.
 
 > *"Vibecoded software might be argued with, but this is an experiment in what AI-assisted development can produce when given a clear goal and a demanding user."*
 
@@ -22,7 +22,7 @@ DiskPart is a partition management tool for the Amiga, built as a clean GadTools
 
 ## Requirements
 
-- AmigaOS 3.x (Kickstart 3.1 or later recommended)
+- AmigaOS 2.x (Kickstart 2.04 or later)
 - Intuition, GadTools, DOS libraries (all standard ROM)
 - ASL library optional (enables the Browse file requester in the filesystem driver dialog)
 

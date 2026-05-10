@@ -1,5 +1,5 @@
 # DiskPart Makefile
-# AmigaOS 3.1+ GadTools hard-drive selector
+# AmigaOS 2.x+ GadTools hard-drive selector
 # Toolchain: m68k-amiga-elf-gcc (Bartman/Abyss), -nostdlib
 
 BARTMAN = /home/john/.vscode/extensions/bartmanabyss.amiga-debug-1.8.2/bin/linux
@@ -48,7 +48,8 @@ $(program).elf: $(objects)
 
 clean:
 	$(info Cleaning...)
-	@rm -f obj/* out/*
+	@rm -f obj/*.o obj/*.d
+	@rm -f $(program) $(program).exe $(program).elf $(program).map $(program).s
 
 -include $(src_obj:.o=.d) obj/gcc8_c_support.d
 
