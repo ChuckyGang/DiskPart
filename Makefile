@@ -2,7 +2,7 @@
 # AmigaOS 3.1+ GadTools hard-drive selector
 # Toolchain: m68k-amiga-elf-gcc (Bartman/Abyss), -nostdlib
 
-BARTMAN = /home/john/.vscode/extensions/bartmanabyss.amiga-debug-1.7.9/bin/linux
+BARTMAN = /home/john/.vscode/extensions/bartmanabyss.amiga-debug-1.8.2/bin/linux
 
 program  = out/DiskPart
 CC       = $(BARTMAN)/opt/bin/m68k-amiga-elf-gcc
@@ -27,9 +27,14 @@ src_obj := $(addprefix obj/,$(patsubst src/%.c,%.o,$(src_c)))
 sup_obj := obj/gcc8_c_support.o obj/gcc8_a_support.o
 objects := $(src_obj) $(sup_obj)
 
-.PHONY: all clean
+.PHONY: all clean FORCE
 
 all: $(program).exe
+
+# build.o embeds __DATE__/__TIME__ via build.c — force-rebuild every
+# invocation so the stamp matches the current build.
+obj/build.o: FORCE
+FORCE:
 
 $(program).exe: $(program).elf
 	$(info Elf2Hunk $@)

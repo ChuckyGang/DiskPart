@@ -1603,24 +1603,44 @@ BOOL partview_run(const char *devname, ULONG unit)
                             WORD  mx2   = bx + 1;
                             UWORD mw2   = bw - 2;
                             ULONG total = rdb->hi_cyl + 1;
-                            WORD  edge  = 0;
-                            WORD  part  = hit_test_edge(rdb, mx2, mw2, total,
-                                                         mouse_x, &edge);
-                            if (part >= 0) {
-                                if (edge == 0) {
-                                    /* Left-edge drag: not supported — inform user */
-                                    struct EasyStruct es;
-                                    es.es_StructSize   = sizeof(es);
-                                    es.es_Flags        = 0;
-                                    es.es_Title        = (UBYTE *)"Cannot Resize From Start";
-                                    es.es_TextFormat   = (UBYTE *)
-                                        "Filesystem resize is only possible when\n"
-                                        "the start cylinder is left unchanged.\n\n"
-                                        "To grow a partition, drag the right edge instead.";
-                                    es.es_GadgetFormat = (UBYTE *)"OK";
-                                    EasyRequest(win, &es, NULL);
-                                } else {
-                                /* On an edge — start drag, save originals */
+
+                            /* Decide intent. Priority:
+                             *   click inside partition near right edge → resize
+                             *   click inside partition near left edge  → "can't resize from start" dialog
+                             *   click inside partition middle           → move (or double-click → edit)
+                             *   click outside any partition near a right edge → resize that partition
+                             *   click in free space                     → new-partition drag
+                             * The inside-partition check uses an edge zone of max(DRAG_TOL, width/8)
+                             * so wide partitions get a generously sized resize handle. */
+                            WORD blk_in     = hit_test_partition(rdb, mx2, mw2, total, mouse_x);
+                            WORD resize_part = -1;
+                            WORD left_dlg_part = -1;
+                            WORD move_blk   = -1;
+
+                            if (blk_in >= 0) {
+                                WORD lx_p = (WORD)(mx2 + (WORD)((UQUAD)rdb->parts[blk_in].low_cyl       * mw2 / total));
+                                WORD rx_p = (WORD)(mx2 + (WORD)((UQUAD)(rdb->parts[blk_in].high_cyl + 1) * mw2 / total));
+                                WORD d_left  = (WORD)(mouse_x - lx_p);
+                                WORD d_right = (WORD)((rx_p - 1) - mouse_x);
+                                WORD ezone   = (WORD)((rx_p - lx_p) / 8);
+                                if (d_left  < 0) d_left  = 0;
+                                if (d_right < 0) d_right = 0;
+                                if (ezone < DRAG_TOL) ezone = DRAG_TOL;
+                                if (d_right <= ezone)      resize_part   = blk_in;
+                                else if (d_left  <= ezone) left_dlg_part = blk_in;
+                                else                       move_blk      = blk_in;
+                            } else {
+                                /* Outside any partition — only honour right-edge proximity for resize.
+                                 * Left-edge proximity here usually means the click landed in adjacent
+                                 * partition territory, which is already handled by the inside path. */
+                                WORD ee = 0;
+                                WORD ep = hit_test_edge(rdb, mx2, mw2, total, mouse_x, &ee);
+                                if (ep >= 0 && ee == 1) resize_part = ep;
+                            }
+
+                            if (resize_part >= 0) {
+                                /* On the right edge — start resize drag, save originals */
+                                WORD  part        = resize_part;
                                 ULONG left_end    = rdb->lo_cyl;   /* first usable cyl */
                                 ULONG right_start = rdb->hi_cyl + 1;
                                 UWORD kk;
@@ -1639,116 +1659,124 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 }
 
                                 drag_part      = part;
-                                drag_edge      = edge;
+                                drag_edge      = 1;
                                 drag_orig_lo   = rdb->parts[part].low_cyl;
                                 drag_orig_hi   = rdb->parts[part].high_cyl;
                                 drag_move_part = -1;
                                 dbl_part       = -1;
                                 drag_min = rdb->parts[part].low_cyl;
                                 drag_max = right_start > 0 ? right_start - 1 : 0;
-                                } /* edge == 1 */
-                            } else {
-                                /* Inside a partition block — check double-click */
-                                WORD blk = hit_test_partition(rdb, mx2, mw2,
-                                                               total, mouse_x);
-                                if (blk >= 0) {
-                                    if (blk == dbl_part &&
-                                        DoubleClick(dbl_sec, dbl_mic,
-                                                    ev_sec,  ev_mic)) {
-                                        /* Double-click: open Edit dialog */
-                                        sel = blk;
-                                        refresh_listview(win, lv_gad, rdb, sel);
-                                        dbl_part = -1;
-                                        {
-                                            ULONG old_hi = rdb->parts[sel].high_cyl;
-                                            if (partition_dialog(&rdb->parts[sel],
-                                                                 "Edit Partition", rdb, FALSE)) {
-                                                offer_ffs_grow(win, bd, rdb,
-                                                               &rdb->parts[sel], old_hi);
-                                                offer_pfs_grow(win, bd, rdb,
-                                                               &rdb->parts[sel], old_hi);
-                                                offer_sfs_grow(win, bd, rdb,
-                                                               &rdb->parts[sel], old_hi);
-                                                dirty = TRUE;
-                                                refresh_listview(win, lv_gad, rdb, sel);
-                                                draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
-                                                            ix, iy, iw, bx, by, bw, bh,
-                                                            hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
-                                            }
+                            } else if (left_dlg_part >= 0) {
+                                /* Left-edge drag: not supported — inform user */
+                                struct EasyStruct es;
+                                es.es_StructSize   = sizeof(es);
+                                es.es_Flags        = 0;
+                                es.es_Title        = (UBYTE *)"Cannot Resize From Start";
+                                es.es_TextFormat   = (UBYTE *)
+                                    "Filesystem resize is only possible when\n"
+                                    "the start cylinder is left unchanged.\n\n"
+                                    "To grow a partition, drag the right edge instead.";
+                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                EasyRequest(win, &es, NULL);
+                            } else if (move_blk >= 0) {
+                                /* Inside a partition block (middle) — check double-click */
+                                WORD blk = move_blk;
+                                if (blk == dbl_part &&
+                                    DoubleClick(dbl_sec, dbl_mic,
+                                                ev_sec,  ev_mic)) {
+                                    /* Double-click: open Edit dialog */
+                                    sel = blk;
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    dbl_part = -1;
+                                    {
+                                        ULONG old_hi = rdb->parts[sel].high_cyl;
+                                        if (partition_dialog(&rdb->parts[sel],
+                                                             "Edit Partition", rdb, FALSE)) {
+                                            offer_ffs_grow(win, bd, rdb,
+                                                           &rdb->parts[sel], old_hi);
+                                            offer_pfs_grow(win, bd, rdb,
+                                                           &rdb->parts[sel], old_hi);
+                                            offer_sfs_grow(win, bd, rdb,
+                                                           &rdb->parts[sel], old_hi);
+                                            dirty = TRUE;
+                                            refresh_listview(win, lv_gad, rdb, sel);
+                                            draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                                        ix, iy, iw, bx, by, bw, bh,
+                                                        hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
                                         }
-                                    } else {
-                                        /* Single click: select + start drag-move */
-                                        ULONG left_end2   = rdb->lo_cyl;
-                                        ULONG right_start2 = rdb->hi_cyl + 1;
-                                        ULONG width2;
-                                        UWORD kk2;
-                                        sel      = blk;
-                                        dbl_part = blk;
-                                        dbl_sec  = ev_sec;
-                                        dbl_mic  = ev_mic;
-                                        refresh_listview(win, lv_gad, rdb, sel);
-                                        draw_map(win, rdb, sel, bx, by, bw, bh);
+                                    }
+                                } else {
+                                    /* Single click: select + start drag-move */
+                                    ULONG left_end2   = rdb->lo_cyl;
+                                    ULONG right_start2 = rdb->hi_cyl + 1;
+                                    ULONG width2;
+                                    UWORD kk2;
+                                    sel      = blk;
+                                    dbl_part = blk;
+                                    dbl_sec  = ev_sec;
+                                    dbl_mic  = ev_mic;
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    draw_map(win, rdb, sel, bx, by, bw, bh);
 
-                                        /* Compute free space bounds for drag */
-                                        for (kk2 = 0; kk2 < rdb->num_parts; kk2++) {
-                                            if (kk2 == (UWORD)blk) continue;
-                                            if (rdb->parts[kk2].high_cyl < rdb->parts[blk].low_cyl) {
-                                                if (rdb->parts[kk2].high_cyl + 1 > left_end2)
-                                                    left_end2 = rdb->parts[kk2].high_cyl + 1;
-                                            }
-                                            if (rdb->parts[kk2].low_cyl > rdb->parts[blk].high_cyl) {
-                                                if (rdb->parts[kk2].low_cyl < right_start2)
-                                                    right_start2 = rdb->parts[kk2].low_cyl;
-                                            }
+                                    /* Compute free space bounds for drag */
+                                    for (kk2 = 0; kk2 < rdb->num_parts; kk2++) {
+                                        if (kk2 == (UWORD)blk) continue;
+                                        if (rdb->parts[kk2].high_cyl < rdb->parts[blk].low_cyl) {
+                                            if (rdb->parts[kk2].high_cyl + 1 > left_end2)
+                                                left_end2 = rdb->parts[kk2].high_cyl + 1;
                                         }
-                                        width2 = rdb->parts[blk].high_cyl - rdb->parts[blk].low_cyl;
-                                        drag_move_part      = blk;
-                                        drag_move_orig_lo   = rdb->parts[blk].low_cyl;
-                                        drag_move_orig_hi   = rdb->parts[blk].high_cyl;
-                                        drag_move_width     = width2;
-                                        drag_move_min_lo    = left_end2;
-                                        drag_move_max_lo    = (right_start2 > width2)
-                                                              ? right_start2 - 1 - width2
-                                                              : left_end2;
-                                        drag_move_anchor_x   = mouse_x;
-                                        drag_move_anchor_cyl = rdb->parts[blk].low_cyl;
+                                        if (rdb->parts[kk2].low_cyl > rdb->parts[blk].high_cyl) {
+                                            if (rdb->parts[kk2].low_cyl < right_start2)
+                                                right_start2 = rdb->parts[kk2].low_cyl;
+                                        }
                                     }
-                                } else if (rdb->num_parts < MAX_PARTITIONS &&
-                                           rdb->heads > 0 && rdb->sectors > 0) {
-                                    /* Empty space — start new-partition drag */
-                                    LONG  dx = (LONG)(mouse_x - (WORD)mx2);
-                                    ULONG start_cyl;
-                                    UWORD kk;
-                                    if (dx < 0) dx = 0;
-                                    if (dx >= (LONG)mw2) dx = (LONG)(mw2 - 1);
-                                    start_cyl = (ULONG)((UQUAD)(ULONG)dx * total / (ULONG)mw2);
-                                    if (start_cyl < rdb->lo_cyl) start_cyl = rdb->lo_cyl;
-                                    if (start_cyl > rdb->hi_cyl) start_cyl = rdb->hi_cyl;
-                                    /* Find free gap containing start_cyl */
-                                    drag_new_min = rdb->lo_cyl;
-                                    drag_new_max = rdb->hi_cyl;
-                                    for (kk = 0; kk < rdb->num_parts; kk++) {
-                                        if (rdb->parts[kk].high_cyl < start_cyl &&
-                                            rdb->parts[kk].high_cyl + 1 > drag_new_min)
-                                            drag_new_min = rdb->parts[kk].high_cyl + 1;
-                                        if (rdb->parts[kk].low_cyl > start_cyl &&
-                                            rdb->parts[kk].low_cyl - 1 < drag_new_max)
-                                            drag_new_max = rdb->parts[kk].low_cyl - 1;
-                                    }
-                                    if (drag_new_min <= drag_new_max) {
-                                        ULONG ini_hi = start_cyl;
-                                        if (ini_hi < drag_new_min) ini_hi = drag_new_min;
-                                        if (ini_hi > drag_new_max) ini_hi = drag_new_max;
-                                        drag_new       = TRUE;
-                                        drag_new_start = drag_new_min;  /* unused but keep tidy */
-                                        drag_new_lo    = drag_new_min;
-                                        drag_new_hi    = ini_hi;
-                                        dbl_part       = -1;
-                                        /* Show initial preview immediately */
-                                        draw_map(win, rdb, sel, bx, by, bw, bh);
-                                        draw_new_part_overlay(win, drag_new_lo, drag_new_hi,
-                                                              rdb, bx, by, bw, bh);
-                                    }
+                                    width2 = rdb->parts[blk].high_cyl - rdb->parts[blk].low_cyl;
+                                    drag_move_part      = blk;
+                                    drag_move_orig_lo   = rdb->parts[blk].low_cyl;
+                                    drag_move_orig_hi   = rdb->parts[blk].high_cyl;
+                                    drag_move_width     = width2;
+                                    drag_move_min_lo    = left_end2;
+                                    drag_move_max_lo    = (right_start2 > width2)
+                                                          ? right_start2 - 1 - width2
+                                                          : left_end2;
+                                    drag_move_anchor_x   = mouse_x;
+                                    drag_move_anchor_cyl = rdb->parts[blk].low_cyl;
+                                }
+                            } else if (rdb->num_parts < MAX_PARTITIONS &&
+                                       rdb->heads > 0 && rdb->sectors > 0) {
+                                /* Empty space — start new-partition drag */
+                                LONG  dx = (LONG)(mouse_x - (WORD)mx2);
+                                ULONG start_cyl;
+                                UWORD kk;
+                                if (dx < 0) dx = 0;
+                                if (dx >= (LONG)mw2) dx = (LONG)(mw2 - 1);
+                                start_cyl = (ULONG)((UQUAD)(ULONG)dx * total / (ULONG)mw2);
+                                if (start_cyl < rdb->lo_cyl) start_cyl = rdb->lo_cyl;
+                                if (start_cyl > rdb->hi_cyl) start_cyl = rdb->hi_cyl;
+                                /* Find free gap containing start_cyl */
+                                drag_new_min = rdb->lo_cyl;
+                                drag_new_max = rdb->hi_cyl;
+                                for (kk = 0; kk < rdb->num_parts; kk++) {
+                                    if (rdb->parts[kk].high_cyl < start_cyl &&
+                                        rdb->parts[kk].high_cyl + 1 > drag_new_min)
+                                        drag_new_min = rdb->parts[kk].high_cyl + 1;
+                                    if (rdb->parts[kk].low_cyl > start_cyl &&
+                                        rdb->parts[kk].low_cyl - 1 < drag_new_max)
+                                        drag_new_max = rdb->parts[kk].low_cyl - 1;
+                                }
+                                if (drag_new_min <= drag_new_max) {
+                                    ULONG ini_hi = start_cyl;
+                                    if (ini_hi < drag_new_min) ini_hi = drag_new_min;
+                                    if (ini_hi > drag_new_max) ini_hi = drag_new_max;
+                                    drag_new       = TRUE;
+                                    drag_new_start = drag_new_min;  /* unused but keep tidy */
+                                    drag_new_lo    = drag_new_min;
+                                    drag_new_hi    = ini_hi;
+                                    dbl_part       = -1;
+                                    /* Show initial preview immediately */
+                                    draw_map(win, rdb, sel, bx, by, bw, bh);
+                                    draw_new_part_overlay(win, drag_new_lo, drag_new_hi,
+                                                          rdb, bx, by, bw, bh);
                                 }
                             }
                         }
@@ -1925,15 +1953,39 @@ BOOL partview_run(const char *devname, ULONG unit)
                         draw_new_part_overlay(win, drag_new_lo, drag_new_hi,
                                               rdb, bx, by, bw, bh);
                     } else {
-                        /* Idle hover — update pointer when entering/leaving map */
+                        /* Idle hover — show resize pointer only over a right-edge resize zone,
+                         * matching the SELECTDOWN hit-test so the cursor advertises actual intent. */
                         if (ptr_chip) {
-                            BOOL in_map = (rdb && rdb->valid &&
-                                           mouse_x >= bx && mouse_x < bx + (WORD)bw &&
-                                           mouse_y >= by && mouse_y < by + (WORD)bh);
-                            if (in_map && !ptr_custom) {
-                                SetPointer(win, ptr_chip, 7, 16, 7, 3);
+                            BOOL want_resize = FALSE;
+                            if (rdb && rdb->valid &&
+                                mouse_x >= bx && mouse_x < bx + (WORD)bw &&
+                                mouse_y >= by && mouse_y < by + (WORD)bh)
+                            {
+                                WORD  mx2   = bx + 1;
+                                UWORD mw2   = bw - 2;
+                                ULONG total = rdb->hi_cyl + 1;
+                                WORD  blk_in = hit_test_partition(rdb, mx2, mw2, total, mouse_x);
+                                if (blk_in >= 0) {
+                                    WORD lx_p = (WORD)(mx2 + (WORD)((UQUAD)rdb->parts[blk_in].low_cyl       * mw2 / total));
+                                    WORD rx_p = (WORD)(mx2 + (WORD)((UQUAD)(rdb->parts[blk_in].high_cyl + 1) * mw2 / total));
+                                    WORD d_right = (WORD)((rx_p - 1) - mouse_x);
+                                    WORD ezone   = (WORD)((rx_p - lx_p) / 8);
+                                    if (d_right < 0) d_right = 0;
+                                    if (ezone < DRAG_TOL) ezone = DRAG_TOL;
+                                    if (d_right <= ezone) want_resize = TRUE;
+                                } else {
+                                    WORD ee = 0;
+                                    WORD ep = hit_test_edge(rdb, mx2, mw2, total, mouse_x, &ee);
+                                    if (ep >= 0 && ee == 1) want_resize = TRUE;
+                                }
+                            }
+                            if (want_resize && !ptr_custom) {
+                                /* Negative offsets place the sprite up-and-left of
+                                 * the mouse so the hot spot (col 7, row 3) lands on
+                                 * the actual cursor position. */
+                                SetPointer(win, ptr_chip, 7, 16, -7, -3);
                                 ptr_custom = TRUE;
-                            } else if (!in_map && ptr_custom) {
+                            } else if (!want_resize && ptr_custom) {
                                 ClearPointer(win);
                                 ptr_custom = FALSE;
                             }

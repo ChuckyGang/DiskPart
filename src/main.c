@@ -766,18 +766,23 @@ int main(void)
     /* Startup warning — shown before the slow device scan */
     {
         struct EasyStruct es;
-        es.es_StructSize   = sizeof(es);
-        es.es_Flags        = 0;
-        es.es_Title        = (UBYTE *)"DiskPart - WARNING";
-        es.es_TextFormat   = (UBYTE *)
-            "EXPERIMENTAL SOFTWARE\n\n"
+        char body[512];
+        sprintf(body,
+            "EXPERIMENTAL SOFTWARE\n"
+            "DiskPart %s  (built %s)\n\n"
             "DiskPart can modify the partition table\n"
             "of your hard drive or other block device.\n\n"
             "Incorrect use WILL cause permanent data loss.\n\n"
             "Make sure you have a FULL BACKUP of any disk\n"
             "you intend to work with before proceeding.\n\n"
             "The author accepts NO responsibility for\n"
-            "any loss of data caused by this software.";
+            "any loss of data caused by this software.",
+            DISKPART_VERSION, DiskPart_BuildStamp);
+
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)"DiskPart - WARNING";
+        es.es_TextFormat   = (UBYTE *)body;
         es.es_GadgetFormat = (UBYTE *)"I have a backup - Continue|Quit";
         if (EasyRequestArgs(NULL, &es, NULL, NULL) != 1)
             goto cleanup;

@@ -795,11 +795,10 @@ cleanup:
 void show_about(struct Window *win)
 {
     struct EasyStruct es;
-    es.es_StructSize   = sizeof(es);
-    es.es_Flags        = 0;
-    es.es_Title        = (UBYTE *)"About " DISKPART_VERTITLE;
-    es.es_TextFormat   = (UBYTE *)
-        "DiskPart\n"
+    char body[512];
+    sprintf(body,
+        "DiskPart %s\n"
+        "Built: %s\n"
         "AmigaOS 3.x RDB Hard Disk Partition Editor\n"
         "\n"
         "A native GadTools application with full RDB support.\n"
@@ -810,7 +809,13 @@ void show_about(struct Window *win)
         "\n"
         "https://github.com/ChuckyGang/DiskPart\n"
         "\n"
-        "MIT License \xa9 2026 John Hertell";
+        "MIT License \xa9 2026 John Hertell",
+        DISKPART_VERSION, DiskPart_BuildStamp);
+
+    es.es_StructSize   = sizeof(es);
+    es.es_Flags        = 0;
+    es.es_Title        = (UBYTE *)"About " DISKPART_VERTITLE;
+    es.es_TextFormat   = (UBYTE *)body;
     es.es_GadgetFormat = (UBYTE *)"OK";
     EasyRequestArgs(win, &es, NULL, NULL);
 }
