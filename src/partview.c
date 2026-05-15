@@ -453,12 +453,20 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
         /* Partition blocks */
         for (i = 0; i < (WORD)rdb->num_parts; i++) {
             struct PartInfo *pi  = &rdb->parts[i];
+            WORD  map_right = mx + (WORD)mw;
             WORD  px1 = MAP_X(pi->low_cyl);
             WORD  px2 = MAP_X(pi->high_cyl + 1);
             LONG  pen;
             WORD  pw;
 
-            if (px2 < px1 + 2) px2 = px1 + 2;
+            /* Clip to map area — a partition with high_cyl > rdb->hi_cyl
+               (e.g. after a buggy geometry update) must not draw past
+               the right edge. */
+            if (px1 < mx) px1 = mx;
+            if (px1 > map_right) px1 = map_right;
+            if (px2 < mx) px2 = mx;
+            if (px2 > map_right) px2 = map_right;
+            if (px2 < px1 + 2) px2 = (px1 + 2 > map_right) ? map_right : px1 + 2;
             pen = part_pens[i % NUM_PART_COLORS];
             if (pen < 0) pen = (i % 3) + 3;
 
@@ -2157,12 +2165,39 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                 ix, iy, iw, bx, by, bw, bh,
                                                 hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
                                 } else if (choice == 2) {
-                                    /* Update Geometry (EXPERIMENTAL) */
+                                    /* Update Geometry (EXPERIMENTAL) — translate each
+                                       partition's cyl boundaries to the new bytes-per-cyl
+                                       so partitions stay on the same physical bytes and
+                                       the in-memory view is self-consistent (matches what
+                                       a reload-after-write would show). */
+                                    ULONG bsz     = (rdb->blk_size > 0) ? rdb->blk_size : 512;
+                                    UQUAD old_bpc = (UQUAD)rdb->heads * rdb->sectors * bsz;
+                                    UQUAD new_bpc = (UQUAD)real_heads * real_secs    * bsz;
+                                    if (old_bpc > 0 && new_bpc > 0) {
+                                        UWORD k;
+                                        for (k = 0; k < rdb->num_parts; k++) {
+                                            struct PartInfo *p = &rdb->parts[k];
+                                            UQUAD start = (UQUAD)p->low_cyl        * old_bpc;
+                                            UQUAD end   = (UQUAD)(p->high_cyl + 1) * old_bpc;
+                                            ULONG nlo   = (ULONG)(start / new_bpc);
+                                            ULONG nhi_excl = (ULONG)(end / new_bpc);
+                                            if (nhi_excl == 0) nhi_excl = 1;
+                                            p->low_cyl  = nlo;
+                                            p->high_cyl = nhi_excl - 1;
+                                            if (p->high_cyl > real_cyls - 1)
+                                                p->high_cyl = real_cyls - 1;
+                                            if (p->low_cyl  > p->high_cyl)
+                                                p->low_cyl  = p->high_cyl;
+                                            p->heads   = real_heads;
+                                            p->sectors = real_secs;
+                                        }
+                                    }
                                     rdb->cylinders = real_cyls;
                                     rdb->heads     = real_heads;
                                     rdb->sectors   = real_secs;
                                     rdb->hi_cyl    = real_cyls - 1;
                                     dirty = TRUE;
+                                    refresh_listview(win, lv_gad, rdb, sel);
                                     draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                                 ix, iy, iw, bx, by, bw, bh,
                                                 hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
