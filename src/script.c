@@ -606,6 +606,7 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     pi->mask          = 0x7FFFFFFCUL;
     pi->num_buffer    = 30;
     pi->block_size    = 512;
+    pi->sectors_per_block = 1;
     /* heads/sectors=0: RDB_Write falls back to RDB geometry */
 
     s_st.rdb.num_parts++;

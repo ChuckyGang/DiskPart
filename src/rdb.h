@@ -127,6 +127,7 @@ struct PartInfo {
     ULONG heads;
     ULONG sectors;
     ULONG block_size;
+    ULONG sectors_per_block; /* DE_SECSPERBLK: device sectors per FS block (usually 1; 2 = 1024-byte FFS) */
     ULONG dos_type;
     LONG  boot_pri;
     ULONG reserved_blks;   /* DE_RESERVEDBLKS: unavailable blocks at start (usually 2) */

@@ -743,6 +743,9 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         pi->heads         = env[DE_NUMHEADS];
         pi->sectors       = env[DE_BLKSPERTRACK];
         pi->block_size    = env[DE_SIZEBLOCK] * 4;
+        pi->sectors_per_block = (env[DE_TABLESIZE] >= DE_SECSPERBLK
+                                 && env[DE_SECSPERBLK] > 0)
+                                ? env[DE_SECSPERBLK] : 1;
         pi->dos_type      = env[DE_DOSTYPE];
         pi->boot_pri      = (LONG)env[DE_BOOTPRI];
         pi->reserved_blks = env[DE_RESERVEDBLKS];
@@ -1326,7 +1329,8 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         pb->pb_Environment[DE_NUMHEADS]     =
             pi->heads   > 0 ? pi->heads   :
             rdb->heads  > 0 ? rdb->heads  : 1;
-        pb->pb_Environment[DE_SECSPERBLK]   = 1;
+        pb->pb_Environment[DE_SECSPERBLK]   = pi->sectors_per_block > 0
+                                              ? pi->sectors_per_block : 1;
         pb->pb_Environment[DE_BLKSPERTRACK] =
             pi->sectors > 0 ? pi->sectors :
             rdb->sectors > 0 ? rdb->sectors : 1;

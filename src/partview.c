@@ -1739,7 +1739,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                            &rdb->parts[sel], old_hi);
                                             offer_sfs_grow(win, bd, rdb,
                                                            &rdb->parts[sel], old_hi);
-                                            dirty = TRUE;
+                                            dirty        = TRUE;
+                                            needs_reboot = TRUE;
                                             refresh_listview(win, lv_gad, rdb, sel);
                                             draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                                         ix, iy, iw, bx, by, bw, bh,
@@ -1876,6 +1877,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.heads        = rdb->heads;
                                 new_pi.sectors      = rdb->sectors;
                                 new_pi.block_size    = 512;
+                                new_pi.sectors_per_block = 1;
                                 new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
                                 new_pi.reserved_blks = 2;
                                 new_pi.interleave    = 0;
@@ -2058,7 +2060,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                &rdb->parts[sel], old_hi);
                                 offer_sfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
-                                dirty = TRUE;
+                                dirty        = TRUE;
+                                needs_reboot = TRUE;
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,
@@ -2277,6 +2280,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                         new_pi.heads        = rdb->heads;
                         new_pi.sectors      = rdb->sectors;
                         new_pi.block_size    = 512;
+                        new_pi.sectors_per_block = 1;
                         new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
                         new_pi.reserved_blks = 2;
                         new_pi.interleave    = 0;
@@ -2312,7 +2316,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                &rdb->parts[sel], old_hi);
                                 offer_sfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
-                                dirty = TRUE;
+                                dirty        = TRUE;
+                                needs_reboot = TRUE;
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,

@@ -472,12 +472,21 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
         for (k = 0; k < dlg_num_fs; k++)
             if (dlg_fs_dostypes[k] == pi->dos_type) { cur_fs = k; break; }
     }
-    cur_bsz = blocksize_index(pi->block_size > 0 ? pi->block_size : 512);
+    {
+        /* "Block Size" in the dialog is the FFS LOGICAL block size, i.e.
+           pi->block_size * pi->sectors_per_block.  RDB stores the device
+           sector size (DE_SIZEBLOCK*4 = 512) and SecsPerBlock separately.
+           For a 1024-byte FFS the on-disk values are 512 + spb=2. */
+        ULONG dev_bsz_ui = pi->block_size > 0 ? pi->block_size : 512;
+        ULONG spb_ui     = pi->sectors_per_block > 0 ? pi->sectors_per_block : 1;
+        cur_bsz = blocksize_index(dev_bsz_ui * spb_ui);
+    }
 
     char locyl_str[16], sizemb_str[16], bootpri_str[16];
     {
         ULONG eff_heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
         ULONG eff_secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+        /* size-in-MB math is in device sectors; eff_bsz here = device sector */
         ULONG eff_bsz   = pi->block_size > 0 ? pi->block_size : 512;
         ULONG bytes_per_cyl = eff_heads * eff_secs * eff_bsz;
         ULONG cyl_count     = (pi->high_cyl >= pi->low_cyl)
@@ -698,12 +707,20 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         break;
                     case PDLG_OK: {
                         ULONG old_dos_type   = pi->dos_type;
-                        ULONG old_block_size = pi->block_size > 0 ? pi->block_size : 512;
+                        ULONG old_dev_bsz    = pi->block_size > 0 ? pi->block_size : 512;
+                        ULONG old_spb        = pi->sectors_per_block > 0
+                                               ? pi->sectors_per_block : 1;
+                        ULONG old_fs_bsz     = old_dev_bsz * old_spb;
                         ULONG new_dos_type   = dlg_fs_dostypes[cur_fs];
-                        ULONG new_block_size = blocksize_values[cur_bsz];
+                        ULONG new_fs_bsz     = blocksize_values[cur_bsz];
+                        /* Keep device sector = 512; spb absorbs the multiple.
+                           (DiskPart only supports 512-byte device sectors.) */
+                        ULONG new_dev_bsz    = 512;
+                        ULONG new_spb        = new_fs_bsz / new_dev_bsz;
+                        if (new_spb == 0) new_spb = 1;
                         BOOL  destructive    = !is_new &&
-                                               (new_dos_type   != old_dos_type ||
-                                                new_block_size != old_block_size);
+                                               (new_dos_type != old_dos_type ||
+                                                new_fs_bsz   != old_fs_bsz);
                         if (destructive) {
                             struct EasyStruct es = {
                                 sizeof(struct EasyStruct), 0,
@@ -722,11 +739,13 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         si = (struct StringInfo *)name_gad->SpecialInfo;
                         strncpy(pi->drive_name, (char *)si->Buffer,
                                 sizeof(pi->drive_name)-1);
-                        pi->block_size = new_block_size;
+                        pi->block_size        = new_dev_bsz;
+                        pi->sectors_per_block = new_spb;
                         /* Convert Size (MB) to high_cyl */
                         {
                             ULONG eff_heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
                             ULONG eff_secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+                            /* size math uses device sector (heads*secs are device units) */
                             ULONG eff_bsz   = pi->block_size > 0 ? pi->block_size : 512;
                             ULONG bytes_per_cyl = eff_heads * eff_secs * eff_bsz;
                             ULONG max_hi = rdb->hi_cyl;

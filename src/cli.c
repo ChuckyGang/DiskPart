@@ -1071,6 +1071,7 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
     pi->mask          = 0x7FFFFFFCUL;
     pi->num_buffer    = 30;
     pi->block_size    = 512;
+    pi->sectors_per_block = 1;
     s_rdb.num_parts++;
 
     {
