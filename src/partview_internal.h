@@ -1,13 +1,13 @@
 /*
- * partview_internal.h — Cross-file declarations for partview module.
+ * partview_internal.h - Cross-file declarations for partview module.
  *
  * partview.c was split into:
- *   partview.c          — map drawing, list rendering, build_gadgets, event loop
- *   partview_dialogs.c  — partition dialog, advanced dialog, geometry, about,
+ *   partview.c          - map drawing, list rendering, build_gadgets, event loop
+ *   partview_dialogs.c  - partition dialog, advanced dialog, geometry, about,
  *                         parse helpers, FriendlyDosType helper
- *   partview_fs.c       — filesystem manager dialog
- *   partview_rdb.c      — RDB backup/restore/view and diagnostic tools
- *   partview_move.c     — partition move, filesystem grow operations
+ *   partview_fs.c       - filesystem manager dialog
+ *   partview_rdb.c      - RDB backup/restore/view and diagnostic tools
+ *   partview_move.c     - partition move, filesystem grow operations
  *
  * Functions promoted from static are declared here and included by all
  * partview_*.c files.  Do NOT include this header outside the partview group.

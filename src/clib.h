@@ -1,5 +1,5 @@
 /*
- * clib.h — Minimal C library declarations for DiskPart.
+ * clib.h - Minimal C library declarations for DiskPart.
  *
  * -nostdlib build: this replaces <string.h>, <stdio.h>, <stdlib.h>.
  *

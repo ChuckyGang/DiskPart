@@ -1,5 +1,5 @@
 /*
- * partview_dialogs.c — Partition and geometry dialogs for DiskPart.
+ * partview_dialogs.c - Partition and geometry dialogs for DiskPart.
  *
  * Contains:
  *   FriendlyDosType, parse helpers (parse_num/long/dostype),
@@ -51,7 +51,7 @@ void FriendlyDosType(ULONG dostype, char *buf)
     FormatDosType(dostype, buf);
 }
 
-/* Block size — maps cycle index ↔ bytes value */
+/* Block size - maps cycle index ↔ bytes value */
 static const char * const blocksize_labels[] = {
     "512", "1024", "2048", "4096", "8192", "16384", "32768", NULL
 };
@@ -68,7 +68,7 @@ static UWORD blocksize_index(ULONG bsz)
     return 0;   /* default 512 */
 }
 
-/* BufMemType — maps cycle index ↔ MEMF_* value */
+/* BufMemType - maps cycle index ↔ MEMF_* value */
 static const char * const bufmem_labels[] = {
     "Any", "Public", "Chip", "Fast", "24-bit DMA", NULL
 };
@@ -125,9 +125,9 @@ LONG parse_long(const char *s)
 /*
  * Parse a DosType from either hex ("0x50465303") or a 4-char string ("PFS\3").
  * String rules: up to 4 chars packed big-endian into a ULONG.
- *   \N  (backslash + single decimal digit 0-9) → byte value N (e.g. \3 → 0x03).
- *   Any other char → its ASCII value.
- * Examples: "PFS\3" → 0x50465303, "DOS\0" → 0x444F5300, "DOS\1" → 0x444F5301.
+ *   \N  (backslash + single decimal digit 0-9) -> byte value N (e.g. \3 -> 0x03).
+ *   Any other char -> its ASCII value.
+ * Examples: "PFS\3" -> 0x50465303, "DOS\0" -> 0x444F5300, "DOS\1" -> 0x444F5301.
  */
 ULONG parse_dostype(const char *s)
 {
@@ -142,7 +142,7 @@ ULONG parse_dostype(const char *s)
         return parse_num(s);
 
     /*
-     * Quoted: "PFS3" — take bytes literally (ASCII '3' = 0x33).
+     * Quoted: "PFS3" - take bytes literally (ASCII '3' = 0x33).
      * Useful when you actually want the ASCII digit in the dostype.
      */
     if (s[0] == '"') {
@@ -158,7 +158,7 @@ ULONG parse_dostype(const char *s)
     /*
      * Short name with trailing digit: PFS3, DOS3, SFS0 etc.
      * If the string is exactly 4 chars and the last is 0-9, treat
-     * the digit as a binary byte (PFS3 → 0x50465303, not 0x50465333).
+     * the digit as a binary byte (PFS3 -> 0x50465303, not 0x50465333).
      * This matches what PFS\3 / DOS\3 notation means.
      * Use quotes ("PFS3") to force literal ASCII bytes instead.
      */
@@ -555,7 +555,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
               if (!name_gad) goto cleanup; prev=name_gad; }
             row++;
 
-            /* Lo Cylinder — reference display only, not editable */
+            /* Lo Cylinder - reference display only, not editable */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
             ng.ng_Width=gad_w; ng.ng_Height=row_h;
             ng.ng_GadgetText="Cylinder"; ng.ng_GadgetID=0; ng.ng_Flags=PLACETEXT_LEFT;
@@ -732,7 +732,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                             };
                             if (!EasyRequest(win, &es, NULL,
                                              (ULONG)pi->drive_name, TAG_DONE))
-                                break; /* user cancelled — stay in dialog */
+                                break; /* user cancelled - stay in dialog */
                         }
                         {
                         struct StringInfo *si;
@@ -840,7 +840,7 @@ void show_about(struct Window *win)
 }
 
 /* ------------------------------------------------------------------ */
-/* geometry_dialog — manual disk geometry entry                        */
+/* geometry_dialog - manual disk geometry entry                        */
 /* Used when TD_GETGEOMETRY fails or user wants to override.           */
 /* Returns TRUE (OK with valid values) or FALSE (cancelled).           */
 /* ------------------------------------------------------------------ */

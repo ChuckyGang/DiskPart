@@ -1,5 +1,5 @@
 /*
- * sfs_util.h — Shared SFS byte-access and checksum helpers.
+ * sfs_util.h - Shared SFS byte-access and checksum helpers.
  *
  * Used by sfsresize.c and partmove.c.  All SFS on-disk fields are
  * big-endian; these helpers provide endian-safe byte-level access

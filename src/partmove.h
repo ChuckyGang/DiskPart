@@ -1,5 +1,5 @@
 /*
- * partmove.h — Partition data move: copies all blocks from the current
+ * partmove.h - Partition data move: copies all blocks from the current
  *              cylinder range to a new one, updating filesystem metadata
  *              where required (SFS firstbyte/lastbyte).
  *

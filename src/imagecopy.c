@@ -1,5 +1,5 @@
 /*
- * imagecopy.c — Whole-disk image dump and restore (see imagecopy.h).
+ * imagecopy.c - Whole-disk image dump and restore (see imagecopy.h).
  *
  * Strategy: per-block reads/writes via the existing BlockDev_ReadBlock /
  * BlockDev_WriteBlock API are batched against a 64 KB stage buffer so the
@@ -73,7 +73,7 @@ BOOL ImageCopy_DiskToFile(struct BlockDev *bd, const char *path,
         ULONG i;
         if (batch > IMG_BATCH_BLOCKS) batch = IMG_BATCH_BLOCKS;
 
-        /* Per-block reads — zero unreadable blocks rather than abort,
+        /* Per-block reads - zero unreadable blocks rather than abort,
          * matching rdb_backup_extended() behaviour. */
         for (i = 0; i < batch; i++) {
             UBYTE *dst = buf + i * bd->block_size;
@@ -125,7 +125,7 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
     }
 
     /* Try ExamineFH for a progress hint. fib_Size is LONG so files >2 GB
-     * may report a negative or wrapped value — treat anything not strictly
+     * may report a negative or wrapped value - treat anything not strictly
      * positive and block-aligned as "unknown", and fall back to streaming
      * progress without a percentage. */
     hint_total = 0;

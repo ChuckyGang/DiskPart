@@ -1,5 +1,5 @@
 /*
- * cli.c — DiskPart CLI mode.
+ * cli.c - DiskPart CLI mode.
  *
  * Invoked by main() when the program is run from a shell with arguments.
  * ReadArgs() parses the command line; output goes to the current console
@@ -103,7 +103,7 @@ static void cli_puts(const char *s)
 }
 
 /* ------------------------------------------------------------------ */
-/* parse_dev — split "uaehf.device:3" into name + unit               */
+/* parse_dev - split "uaehf.device:3" into name + unit               */
 /* ------------------------------------------------------------------ */
 
 static BOOL parse_dev(const char *str, char *devname, ULONG *unit)
@@ -122,7 +122,7 @@ static BOOL parse_dev(const char *str, char *devname, ULONG *unit)
 }
 
 /* ------------------------------------------------------------------ */
-/* parse_size_bytes — bare number or n[KMG] suffix → byte count        */
+/* parse_size_bytes - bare number or n[KMG] suffix -> byte count        */
 /* ------------------------------------------------------------------ */
 
 static UQUAD parse_size_bytes(const char *s)
@@ -137,7 +137,7 @@ static UQUAD parse_size_bytes(const char *s)
 }
 
 /* ------------------------------------------------------------------ */
-/* resolve_target — resolve DEV= / IMAGE= into BlockDev_Open args.    */
+/* resolve_target - resolve DEV= / IMAGE= into BlockDev_Open args.    */
 /* When IMAGE= is set, synthesises devname = "FILE:<path>", unit=0    */
 /* so all cmd_* functions can call BlockDev_Open(devname, unit)       */
 /* without needing to know which backend is in use.                   */
@@ -172,7 +172,7 @@ static BOOL resolve_target(LONG *args, char *devname, ULONG *unit)
 }
 
 /* ------------------------------------------------------------------ */
-/* maybe_create_image — handle IMAGE=<path> CREATE SIZE=<n> up-front. */
+/* maybe_create_image - handle IMAGE=<path> CREATE SIZE=<n> up-front. */
 /* Creates the file, immediately closes it, and prints a status line. */
 /* Subsequent commands open the now-existing file via FILE: dispatch. */
 /* Returns RETURN_OK (created or no-op), or RETURN_ERROR.             */
@@ -217,7 +217,7 @@ static LONG maybe_create_image(LONG *args)
 }
 
 /* ------------------------------------------------------------------ */
-/* str_eq_ci — case-insensitive strcmp                                 */
+/* str_eq_ci - case-insensitive strcmp                                 */
 /* ------------------------------------------------------------------ */
 
 static BOOL str_eq_ci(const char *a, const char *b)
@@ -240,7 +240,7 @@ static BOOL str_eq_ci(const char *a, const char *b)
 #define ERDB_HDR_SZ  32             /* 8 longwords */
 
 /* ------------------------------------------------------------------ */
-/* cli_parse_dostype — 0xNN, $NN, or DOS3/PFS3/SFS0 style             */
+/* cli_parse_dostype - 0xNN, $NN, or DOS3/PFS3/SFS0 style             */
 /* ------------------------------------------------------------------ */
 
 static BOOL cli_parse_dostype(const char *s, ULONG *out)
@@ -263,8 +263,8 @@ static BOOL cli_parse_dostype(const char *s, ULONG *out)
 }
 
 /* ------------------------------------------------------------------ */
-/* cli_parse_low — NEXT / START / literal cylinder                    */
-/* cli_parse_high — END / +NNN[KMG] / literal cylinder               */
+/* cli_parse_low - NEXT / START / literal cylinder                    */
+/* cli_parse_high - END / +NNN[KMG] / literal cylinder               */
 /* ------------------------------------------------------------------ */
 
 static ULONG cli_parse_low(const char *s, struct RDBInfo *rdb)
@@ -321,7 +321,7 @@ static BOOL cli_parse_high(const char *s, ULONG low, ULONG hi_cyl,
 }
 
 /* ------------------------------------------------------------------ */
-/* ask_yn — interactive Y/N prompt                                     */
+/* ask_yn - interactive Y/N prompt                                     */
 /*                                                                     */
 /* With force=TRUE: prints the question with "[Y]" and returns TRUE.  */
 /* With force=FALSE: prompts and reads one line from stdin.            */
@@ -350,7 +350,7 @@ static BOOL ask_yn(const char *question, BOOL force)
 }
 
 /* ------------------------------------------------------------------ */
-/* print_dev_info — one-line device summary                           */
+/* print_dev_info - one-line device summary                           */
 /* ------------------------------------------------------------------ */
 
 static void print_dev_info(struct BlockDev *bd)
@@ -370,7 +370,7 @@ static void print_dev_info(struct BlockDev *bd)
 /* LISTDEV                                                             */
 /* ------------------------------------------------------------------ */
 
-static struct DevNameList s_devnames;   /* ~5 KB — static avoids stack pressure */
+static struct DevNameList s_devnames;   /* ~5 KB - static avoids stack pressure */
 
 static LONG cmd_listdev(BOOL probe_units)
 {
@@ -423,7 +423,7 @@ static LONG cmd_listdev(BOOL probe_units)
 }
 
 /* ------------------------------------------------------------------ */
-/* SMART — read ATA SMART attribute data via SCSI ATA PASS-THROUGH   */
+/* SMART - read ATA SMART attribute data via SCSI ATA PASS-THROUGH   */
 /* ------------------------------------------------------------------ */
 
 static const struct { UBYTE id; const char *name; } s_smart_names[] = {
@@ -496,10 +496,10 @@ static LONG cmd_smart(const char *devname, ULONG unit)
     }
 
     /*
-     * ATA PASS-THROUGH (12) — SMART READ DATA (0xD0)
+     * ATA PASS-THROUGH (12) - SMART READ DATA (0xD0)
      *
      * CDB[0] = 0xA1  ATA PASS-THROUGH (12)
-     * CDB[1] = 0x08  PROTOCOL = 4 (PIO Data-In)  → 4<<1
+     * CDB[1] = 0x08  PROTOCOL = 4 (PIO Data-In)  -> 4<<1
      * CDB[2] = 0x0E  T_DIR=1 | BYT_BLOK=1 | T_LENGTH=2
      * CDB[3] = 0xD0  FEATURES = SMART READ DATA
      * CDB[4] = 0x01  SECTOR COUNT = 1
@@ -551,9 +551,9 @@ static LONG cmd_smart(const char *devname, ULONG unit)
 
     revision = (UWORD)buf[0] | ((UWORD)buf[1] << 8);
     if (bd->disk_brand[0])
-        sprintf(outbuf, "SMART — %s  (revision %u)\n\n", bd->disk_brand, (unsigned)revision);
+        sprintf(outbuf, "SMART - %s  (revision %u)\n\n", bd->disk_brand, (unsigned)revision);
     else
-        sprintf(outbuf, "SMART — %s unit %lu  (revision %u)\n\n",
+        sprintf(outbuf, "SMART - %s unit %lu  (revision %u)\n\n",
                 devname, unit, (unsigned)revision);
     cli_puts(outbuf);
 
@@ -597,7 +597,7 @@ static LONG cmd_smart(const char *devname, ULONG unit)
 }
 
 /* ------------------------------------------------------------------ */
-/* INFO — display RDB, partitions, filesystems                        */
+/* INFO - display RDB, partitions, filesystems                        */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_info(const char *devname, ULONG unit)
@@ -683,7 +683,7 @@ static LONG cmd_info(const char *devname, ULONG unit)
 }
 
 /* ------------------------------------------------------------------ */
-/* BACKUP — save single RDSK block to file                            */
+/* BACKUP - save single RDSK block to file                            */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
@@ -739,7 +739,7 @@ backup_done:
 }
 
 /* ------------------------------------------------------------------ */
-/* RESTORE — restore single block to block 0 (two Y/N confirmations) */
+/* RESTORE - restore single block to block 0 (two Y/N confirmations) */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_restore(const char *devname, ULONG unit,
@@ -812,7 +812,7 @@ restore_done:
 }
 
 /* ------------------------------------------------------------------ */
-/* BACKUPEXT — save all RDB blocks (ERDB format)                      */
+/* BACKUPEXT - save all RDB blocks (ERDB format)                      */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
@@ -892,7 +892,7 @@ backupext_done:
 }
 
 /* ------------------------------------------------------------------ */
-/* RESTOREEXT — restore all RDB blocks from ERDB file                 */
+/* RESTOREEXT - restore all RDB blocks from ERDB file                 */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_restoreext(const char *devname, ULONG unit,
@@ -943,7 +943,7 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
         cli_puts("ERROR: Block size mismatch. Aborted.\n"); goto restoreext_done;
     }
     if (fsize != (LONG)(ERDB_HDR_SZ + num_blocks * block_size)) {
-        cli_puts("ERROR: File size mismatch — backup may be corrupt. Aborted.\n");
+        cli_puts("ERROR: File size mismatch - backup may be corrupt. Aborted.\n");
         goto restoreext_done;
     }
 
@@ -980,7 +980,7 @@ restoreext_done:
 }
 
 /* ------------------------------------------------------------------ */
-/* ADDPART — add one partition, then write RDB                        */
+/* ADDPART - add one partition, then write RDB                        */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
@@ -1102,7 +1102,7 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
-/* ADDFS — add filesystem entry, then write RDB                       */
+/* ADDFS - add filesystem entry, then write RDB                       */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
@@ -1216,7 +1216,7 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
-/* CHECK — RDB integrity check                                         */
+/* CHECK - RDB integrity check                                         */
 /* ------------------------------------------------------------------ */
 
 static void check_cli_cb(void *ud, const char *line)
@@ -1254,7 +1254,7 @@ static LONG cmd_check(const char *devname, ULONG unit)
 }
 
 /* ------------------------------------------------------------------ */
-/* VERIFY / VERIFYEXT — compare backup file to live disk              */
+/* VERIFY / VERIFYEXT - compare backup file to live disk              */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
@@ -1330,10 +1330,10 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
     RDB_FreeCode(&s_rdb); BlockDev_Close(bd);
 
     if (diff_count == 0) {
-        cli_puts("VERIFY: MATCH — backup matches RDB block on disk.\n");
+        cli_puts("VERIFY: MATCH - backup matches RDB block on disk.\n");
         return RETURN_OK;
     } else {
-        sprintf(outbuf, "VERIFY: MISMATCH — %lu byte(s) differ, first at offset %lu.\n",
+        sprintf(outbuf, "VERIFY: MISMATCH - %lu byte(s) differ, first at offset %lu.\n",
                 (unsigned long)diff_count, (unsigned long)first_diff);
         cli_puts(outbuf);
         return RETURN_WARN;
@@ -1448,7 +1448,7 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
 }
 
 /* ------------------------------------------------------------------ */
-/* DELPART — delete a partition by name, then write RDB               */
+/* DELPART - delete a partition by name, then write RDB               */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
@@ -1482,7 +1482,7 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
 
     for (i = 0; i < s_rdb.num_parts; i++) {
         if (str_eq_ci(s_rdb.parts[i].drive_name, name)) {
-            sprintf(outbuf, "Delete: %-6s  cyls %lu-%lu  — are you sure?",
+            sprintf(outbuf, "Delete: %-6s  cyls %lu-%lu  - are you sure?",
                     s_rdb.parts[i].drive_name,
                     (ULONG)s_rdb.parts[i].low_cyl,
                     (ULONG)s_rdb.parts[i].high_cyl);
@@ -1513,7 +1513,7 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
-/* INIT NEW — create a fresh RDB on a blank or overwrite disk         */
+/* INIT NEW - create a fresh RDB on a blank or overwrite disk         */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
@@ -1524,7 +1524,7 @@ static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
 
     print_dev_info(bd);
 
-    /* Check for existing RDB — affects question wording only */
+    /* Check for existing RDB - affects question wording only */
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (RDB_Read(bd, &s_rdb) && s_rdb.valid) {
         sprintf(outbuf,
@@ -1568,7 +1568,7 @@ static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
 }
 
 /* ------------------------------------------------------------------ */
-/* INIT NEWGEO — expand RDB cylinder count to match actual disk size  */
+/* INIT NEWGEO - expand RDB cylinder count to match actual disk size  */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
@@ -1632,7 +1632,7 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
 
     s_rdb.cylinders = new_cyls;
     s_rdb.hi_cyl    = new_cyls - 1;
-    /* lo_cyl stays the same — partitions are already at their cylinder offsets */
+    /* lo_cyl stays the same - partitions are already at their cylinder offsets */
 
     cli_puts("Writing updated RDB... ");
     if (!RDB_Write(bd, &s_rdb)) {
@@ -1651,7 +1651,7 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
 }
 
 /* ------------------------------------------------------------------ */
-/* cmd_init — open device, dispatch NEW / NEWGEO                      */
+/* cmd_init - open device, dispatch NEW / NEWGEO                      */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_init(const char *devname, ULONG unit,
@@ -1687,8 +1687,8 @@ static LONG cmd_init(const char *devname, ULONG unit,
 }
 
 /* ------------------------------------------------------------------ */
-/* IMAGEOUT — dump current target to a new image file                 */
-/* IMAGEIN  — write an image file back to current target              */
+/* IMAGEOUT - dump current target to a new image file                 */
+/* IMAGEIN  - write an image file back to current target              */
 /* ------------------------------------------------------------------ */
 
 /* CLI progress callback: prints percentage every 5% when total is known,
@@ -1703,7 +1703,7 @@ static BOOL cli_prog_cb(void *ud, ULONG cur, ULONG total)
 {
     struct CliProg *p = (struct CliProg *)ud;
 
-    /* Ctrl+C check — SetSignal(0,...) returns the previous mask and
+    /* Ctrl+C check - SetSignal(0,...) returns the previous mask and
      * clears the bits we passed in. */
     if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
         cli_puts("\n** Cancelled.\n");
@@ -1750,7 +1750,7 @@ static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
         sprintf(outbuf,
             "WARNING: source is %s (>2 GB).\n"
             "  Destination filesystem must support large files\n"
-            "  (SFS, PFS3, FFS-NSD or FFS post-OS3.5) — older\n"
+            "  (SFS, PFS3, FFS-NSD or FFS post-OS3.5) - older\n"
             "  FFS will fail near the 2 GB mark.\n", szbuf);
         cli_puts(outbuf);
     }
@@ -1825,7 +1825,7 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
 }
 
 /* ------------------------------------------------------------------ */
-/* cli_run — parse and dispatch                                        */
+/* cli_run - parse and dispatch                                        */
 /* ------------------------------------------------------------------ */
 
 LONG cli_run(void)
@@ -1842,7 +1842,7 @@ LONG cli_run(void)
         return RETURN_ERROR;
     }
 
-    /* No recognised command → empty command line, caller opens GUI.
+    /* No recognised command -> empty command line, caller opens GUI.
      * CREATE counts as a command on its own (creates the image and exits). */
     if (!args[ARG_LISTDEV] && !args[ARG_INIT]         && !args[ARG_SCRIPT]  &&
         !args[ARG_INFO]    && !args[ARG_SMART]         && !args[ARG_BACKUP] &&
@@ -1858,7 +1858,7 @@ LONG cli_run(void)
     if (args[ARG_LISTDEV])
         rc = cmd_listdev((BOOL)args[ARG_UNITS]);
 
-    /* CREATE IMAGE=<path> SIZE=<n> — runs first so subsequent commands
+    /* CREATE IMAGE=<path> SIZE=<n> - runs first so subsequent commands
      * (INIT, ADDPART, ...) on the same line operate on the new file. */
     if (rc == RETURN_OK && args[ARG_CREATE])
         rc = maybe_create_image(args);

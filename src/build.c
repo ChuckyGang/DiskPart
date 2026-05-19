@@ -1,4 +1,4 @@
-/* Build stamp — recompiled on every link via the Makefile FORCE rule
+/* Build stamp - recompiled on every link via the Makefile FORCE rule
  * so __DATE__ and __TIME__ reflect the current build, not whenever
  * this file last changed. */
 

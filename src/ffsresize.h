@@ -1,5 +1,5 @@
 /*
- * ffsresize.h — Experimental FFS/OFS filesystem grow after a partition
+ * ffsresize.h - Experimental FFS/OFS filesystem grow after a partition
  *               cylinder range extension.
  *
  * EXPERIMENTAL: writes filesystem metadata blocks directly to disk.
@@ -21,8 +21,8 @@ BOOL FFS_IsSupportedType(ULONG dostype);
 /*
  * Optional progress callback.  Called at the start of each phase with a
  * short human-readable description of what is about to happen.
- * ud  — opaque user-data pointer passed unchanged from FFS_GrowPartition.
- * msg — NUL-terminated ASCII string, valid only for the duration of the call.
+ * ud  - opaque user-data pointer passed unchanged from FFS_GrowPartition.
+ * msg - NUL-terminated ASCII string, valid only for the duration of the call.
  * The callback must return quickly; it must not block or do disk I/O.
  */
 typedef void (*FFS_ProgressFn)(void *ud, const char *msg);
@@ -32,7 +32,7 @@ typedef void (*FFS_ProgressFn)(void *ud, const char *msg);
  * pi->high_cyl must already be set to the NEW (larger) value.
  * old_high_cyl is the value it had before the edit.
  *
- * Writes bitmap blocks directly to disk — the RDB write (high_cyl update)
+ * Writes bitmap blocks directly to disk - the RDB write (high_cyl update)
  * should happen AFTER this call succeeds.
  *
  * err_buf      : caller-supplied buffer for error text, at least 128 bytes.

@@ -1,5 +1,5 @@
 /*
- * partview_move.c — Partition move and filesystem grow operations.
+ * partview_move.c - Partition move and filesystem grow operations.
  *
  * Contains: check_ffs_root, move_progress_fn, draw_move_warn_text,
  *           offer_move_partition, ffs_grow_progress, offer_ffs_grow,
@@ -103,7 +103,7 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
     BOOL sec_ok    = (buf[127] == 1);        /* ST_ROOT */
     BOOL own_ok    = (buf[1] == root);
     BOOL bm_valid  = (buf[78] == 0xFFFFFFFFUL);
-    /* FFS does NOT validate own_key — confirmed: KS 3.1 accepts own_key=0 on
+    /* FFS does NOT validate own_key - confirmed: KS 3.1 accepts own_key=0 on
        live partitions. own_ok is informational only. */
     BOOL looks_ok  = type_ok && sec_ok && cs_ok && bm_valid;
 
@@ -703,7 +703,7 @@ void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
                            ULONG old_hi)
 {
     struct EasyStruct es;
-    char errbuf[256];  /* must hold FFS_GrowPartition diagnostic — keep in sync */
+    char errbuf[256];  /* must hold FFS_GrowPartition diagnostic - keep in sync */
 
     if (pi->high_cyl <= old_hi) return;
     if (!FFS_IsSupportedType(pi->dos_type)) return;

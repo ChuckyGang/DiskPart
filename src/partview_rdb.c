@@ -1,5 +1,5 @@
 /*
- * partview_rdb.c — RDB backup/restore/view and disk diagnostic tools.
+ * partview_rdb.c - RDB backup/restore/view and disk diagnostic tools.
  *
  * Contains: rdb_backup_block, rdb_restore_block, rdb_backup_extended,
  *           rdb_restore_extended, rdb_verify_block, rdb_verify_extended,
@@ -228,7 +228,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
     }
     Close(fh);
 
-    /* Second confirmation — shown after the file is chosen, names the device */
+    /* Second confirmation - shown after the file is chosen, names the device */
     { char msg[160];
       sprintf(msg,
           "LAST CHANCE\n\n"
@@ -259,7 +259,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
 }
 
 /* ------------------------------------------------------------------ */
-/* Extended Backup / Restore — all blocks rdb_block_lo..HighRDSKBlock */
+/* Extended Backup / Restore - all blocks rdb_block_lo..HighRDSKBlock */
 /* File format: 32-byte header + raw blocks                           */
 /*   hdr[0] = 'ERDB' magic                                            */
 /*   hdr[1] = version 1                                               */
@@ -323,7 +323,7 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
     }
 
     /* Build suggested filename from disk product name.
-       Spaces → '_', non-alphanumeric/dash → '_', trailing '_' trimmed.
+       Spaces -> '_', non-alphanumeric/dash -> '_', trailing '_' trimmed.
        Falls back to "disk" if the product string is empty. */
     { char init_file[64];
       { char name[32]; char *d = name; UWORD ci;
@@ -485,7 +485,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"File too small — not a valid extended backup.";
+        es.es_TextFormat=(UBYTE*)"File too small - not a valid extended backup.";
         es.es_GadgetFormat=(UBYTE*)"OK";
         EasyRequest(win, &es, NULL); return;
     }
@@ -571,7 +571,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
 }
 
 /* ------------------------------------------------------------------ */
-/* View RDB Block — read-only display of all RDB fields               */
+/* View RDB Block - read-only display of all RDB fields               */
 /* ------------------------------------------------------------------ */
 
 #define VRDB_LIST     1
@@ -596,7 +596,7 @@ static void vrdb_add(const char *s)
 }
 
 /* Copy a fixed-length, possibly space-padded, possibly non-null-terminated
-   SCSI-style string into dst (null-terminated).  Non-printable chars → '.'.
+   SCSI-style string into dst (null-terminated).  Non-printable chars -> '.'.
    Returns dst. */
 static char *vrdb_str(const char *src, UWORD srclen, char *dst, UWORD dstsize)
 {
@@ -711,7 +711,7 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
         vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
         if (!rdb->valid)
-            vrdb_add("*** No valid RDB found — showing raw block 0 ***");
+            vrdb_add("*** No valid RDB found - showing raw block 0 ***");
 
         /* --- Installed Filesystems (from parsed RDB) --- */
         { char b[80]; UWORD fi;
@@ -1000,7 +1000,7 @@ vrdb_cleanup:
 }
 
 /* ------------------------------------------------------------------ */
-/* Raw Block Scan — diagnostic: CMD_READ blocks 0-15 + block 0 dump   */
+/* Raw Block Scan - diagnostic: CMD_READ blocks 0-15 + block 0 dump   */
 /* Works regardless of rdb->valid; bypasses BlockDev_ReadBlock.        */
 /* ------------------------------------------------------------------ */
 
@@ -1080,7 +1080,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
     for (blk = 0; blk < 16; blk++) {
         ULONG id; char idtxt[5]; const char *tag;
 
-        /* First read — discard, just to prime the DMA FIFO */
+        /* First read - discard, just to prime the DMA FIFO */
         bd->iotd.iotd_Req.io_Command = CMD_READ;
         bd->iotd.iotd_Req.io_Length  = 512;
         bd->iotd.iotd_Req.io_Data    = (APTR)buf;
@@ -1089,7 +1089,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         bd->iotd.iotd_Count          = 0;
         (void)DoIO((struct IORequest *)&bd->iotd);   /* ignore first result */
 
-        /* Second read — this is the stable one */
+        /* Second read - this is the stable one */
         bd->iotd.iotd_Req.io_Command = CMD_READ;
         bd->iotd.iotd_Req.io_Length  = 512;
         bd->iotd.iotd_Req.io_Data    = (APTR)buf;
@@ -1194,8 +1194,8 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
             /* Three-pass read matching RDB_Read: two priming reads then
                the real read. */
-            BlockDev_ReadBlock(bd, part_blk, buf);   /* prime 1 — discard */
-            BlockDev_ReadBlock(bd, part_blk, buf);   /* prime 2 — discard */
+            BlockDev_ReadBlock(bd, part_blk, buf);   /* prime 1 - discard */
+            BlockDev_ReadBlock(bd, part_blk, buf);   /* prime 2 - discard */
             if (!BlockDev_ReadBlock(bd, part_blk, buf))
                 err = -1;
             else
@@ -1335,11 +1335,11 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
     /* ---- Multi-read stability test (A3000 DMA shift check) ----
      * 1. Read each block 4× consecutively into separate CHIP RAM buffers.
-     *    Report byte diffs between reads.  0 diffs does NOT mean data is good —
+     *    Report byte diffs between reads.  0 diffs does NOT mean data is good -
      *    it means every read returns the same bytes (possibly all wrong).
      * 2. Show checksum status + key fields from read 1 so on-disk corruption
      *    is visible even when all 4 reads agree.
-     * 3. Interleaved test: RDSK → PART → RDSK again.  If the two RDSK reads
+     * 3. Interleaved test: RDSK -> PART -> RDSK again.  If the two RDSK reads
      *    differ, reading PART is corrupting the DMA state for subsequent reads.
      * ------------------------------------------------------------------ */
     {
@@ -1429,7 +1429,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         } \
         *_lx = '\0'; vrdb_add(_ln); \
     } \
-    /* checksum of read 1 — catches on-disk corruption missed by diffs */ \
+    /* checksum of read 1 - catches on-disk corruption missed by diffs */ \
     { const ULONG *_lp = (const ULONG *)b[0]; \
       ULONG _sl = _lp[1], _sm = 0, _si; \
       if (_sl >= 2 && _sl <= 128) for (_si=0;_si<_sl;_si++) _sm+=_lp[_si]; \
@@ -1437,7 +1437,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
               _sl, _sm, (_sl>=2&&_sl<=128&&_sm==0)?"OK":"BAD"); \
       vrdb_add(line); \
     } \
-    /* key fields — show actual bytes so corruption is explicit */ \
+    /* key fields - show actual bytes so corruption is explicit */ \
     if (!(is_part_)) { \
         const ULONG *_lp = (const ULONG *)b[0]; \
         sprintf(line, "    Cyls=%lu Heads=%lu Secs=%lu PartList=%lu", \
@@ -1473,12 +1473,12 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
 #undef MREAD_BLK
 
-                /* Interleaved test: RDSK → PART → RDSK
+                /* Interleaved test: RDSK -> PART -> RDSK
                    If the two RDSK reads differ, reading PART pollutes DMA state.
                    If they agree but csum is BAD, the corruption is on-disk.     */
                 if (mpart != 0xFFFFFFFFUL) {
                     ULONG _off, _nd = 0, _sh = 0;
-                    /* RDSK → b[0] */
+                    /* RDSK -> b[0] */
                     bd->iotd.iotd_Req.io_Command = CMD_READ;
                     bd->iotd.iotd_Req.io_Length  = 512;
                     bd->iotd.iotd_Req.io_Data    = (APTR)b[0];
@@ -1486,7 +1486,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                     bd->iotd.iotd_Req.io_Flags   = 0;
                     bd->iotd.iotd_Count          = 0;
                     DoIO((struct IORequest *)&bd->iotd);
-                    /* PART → b[1] (advance DMA state) */
+                    /* PART -> b[1] (advance DMA state) */
                     bd->iotd.iotd_Req.io_Command = CMD_READ;
                     bd->iotd.iotd_Req.io_Length  = 512;
                     bd->iotd.iotd_Req.io_Data    = (APTR)b[1];
@@ -1494,7 +1494,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                     bd->iotd.iotd_Req.io_Flags   = 0;
                     bd->iotd.iotd_Count          = 0;
                     DoIO((struct IORequest *)&bd->iotd);
-                    /* RDSK again → b[2] */
+                    /* RDSK again -> b[2] */
                     bd->iotd.iotd_Req.io_Command = CMD_READ;
                     bd->iotd.iotd_Req.io_Length  = 512;
                     bd->iotd.iotd_Req.io_Data    = (APTR)b[2];
@@ -1626,9 +1626,9 @@ rscan_cleanup:
 
 /* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
-/* raw_disk_read — show all on-disk fields for blocks 0-15            */
+/* raw_disk_read - show all on-disk fields for blocks 0-15            */
 /* Single CMD_READ per block, no retries, no fixups.  Shows exactly   */
-/* what is stored on the medium — useful for debugging DMA corruption. */
+/* what is stored on the medium - useful for debugging DMA corruption. */
 /* ------------------------------------------------------------------ */
 
 void raw_disk_read(struct Window *win, struct BlockDev *bd)
@@ -1686,7 +1686,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
     }
     vrdb_add("");
 
-    /* --- SCSI INQUIRY — asks the device directly, bypasses driver --- */
+    /* --- SCSI INQUIRY - asks the device directly, bypasses driver --- */
     vrdb_add("=== SCSI INQUIRY (HD_SCSICMD, direct to device) ===");
     {
         struct SCSICmd scmd;
@@ -1757,7 +1757,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
     }
     vrdb_add("");
 
-    /* --- SCSI READ CAPACITY(10) — get real sector count from device --- */
+    /* --- SCSI READ CAPACITY(10) - get real sector count from device --- */
     vrdb_add("=== SCSI READ CAPACITY(10) (HD_SCSICMD, direct to device) ===");
     {
         struct SCSICmd scmd;
@@ -1820,7 +1820,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
 
     /* --- Capacity probe: binary-search real last LBA via HD_SCSICMD --- */
     /* Sends SCSI READ(10) directly to the drive at increasing LBAs.      */
-    /* Drive responds with success or CHECK CONDITION — no driver         */
+    /* Drive responds with success or CHECK CONDITION - no driver         */
     /* interpretation involved.  Finds real capacity even if READ         */
     /* CAPACITY response was corrupted or truncated by the driver.        */
     vrdb_add("=== Real capacity probe (HD_SCSICMD binary search) ===");
@@ -1852,14 +1852,14 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
 } while(0)
 
         /* Step 1: probe just past reported capacity.
-           If it reads OK the driver is under-reporting — expand upward.
+           If it reads OK the driver is under-reporting - expand upward.
            If it fails we already have the real boundary. */
         PROBE_LBA(rc_last_lba + 1); steps++;
         if (perr != 0) {
             /* Reported capacity matches reality */
             hi = rc_last_lba + 1;
         } else {
-            /* Drive has more sectors than reported — find real upper bound */
+            /* Drive has more sectors than reported - find real upper bound */
             lo = rc_last_lba + 1;
             while (steps < 32) {
                 ULONG next = lo * 2 + 1;
@@ -1897,11 +1897,11 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
             if (lo != rc_last_lba) {
                 char szbuf2[16];
                 FormatSize((UQUAD)(rc_last_lba + 1) * (UQUAD)rc_blksz, szbuf2);
-                sprintf(line, "  READ CAPACITY said: %s — WRONG!", szbuf2);
+                sprintf(line, "  READ CAPACITY said: %s - WRONG!", szbuf2);
                 vrdb_add(line);
-                vrdb_add("  *** Driver/DMA reports wrong size — use Manual Geometry! ***");
+                vrdb_add("  *** Driver/DMA reports wrong size - use Manual Geometry! ***");
             } else {
-                vrdb_add("  READ CAPACITY agrees — reported size is correct.");
+                vrdb_add("  READ CAPACITY agrees - reported size is correct.");
             }
         }
     }
@@ -1973,7 +1973,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
             vrdb_add(line);
 
         } else if (id == IDNAME_PARTITION) {
-            /* PART fields — note offsets 0x24 and 0xC0 are DMA-suspect */
+            /* PART fields - note offsets 0x24 and 0xC0 are DMA-suspect */
             UBYTE *bstr = buf + 0x24;   /* pb_DriveName BSTR */
             ULONG *env  = (ULONG *)(buf + 128); /* pb_Environment */
             char  name[32];
@@ -2114,7 +2114,7 @@ rdr_cleanup:
 }
 
 /* ------------------------------------------------------------------ */
-/* diag_read_block — read one 512-byte block for diagnostic use only. */
+/* diag_read_block - read one 512-byte block for diagnostic use only. */
 /*                                                                     */
 /* Tries HD_SCSICMD (SCSI READ(10)) first, falls back to CMD_READ for  */
 /* devices that don't support HD_SCSICMD.                              */
@@ -2122,9 +2122,9 @@ rdr_cleanup:
 /* buf MUST be AllocVec'd with MEMF_PUBLIC.                            */
 /*                                                                     */
 /* Returns:                                                            */
-/*   0  — success via HD_SCSICMD (SCSI path)                          */
-/*   1  — success via CMD_READ fallback (non-SCSI or SCSI unavail.)   */
-/*  -1  — both paths failed                                            */
+/*   0  - success via HD_SCSICMD (SCSI path)                          */
+/*   1  - success via CMD_READ fallback (non-SCSI or SCSI unavail.)   */
+/*  -1  - both paths failed                                            */
 /* ------------------------------------------------------------------ */
 
 static int diag_read_block(struct BlockDev *bd, ULONG blknum, UBYTE *chipbuf)
@@ -2136,7 +2136,7 @@ static int diag_read_block(struct BlockDev *bd, ULONG blknum, UBYTE *chipbuf)
 
     /* HD_SCSICMD: SCSI READ(10), LBA = blknum, transfer length = 1 block.
        scmd/cdb/sense are CPU-read only (not DMA'd), so stack (FAST RAM) is
-       fine.  chipbuf is where the SDMAC puts the 512 data bytes — must be
+       fine.  chipbuf is where the SDMAC puts the 512 data bytes - must be
        CHIP RAM, which the caller guarantees. */
     memset(&scmd,  0, sizeof(scmd));
     memset(cdb,    0, sizeof(cdb));
@@ -2180,7 +2180,7 @@ static int diag_read_block(struct BlockDev *bd, ULONG blknum, UBYTE *chipbuf)
 }
 
 /* ------------------------------------------------------------------ */
-/* raw_hex_dump — dump raw hex+ASCII of blocks 0..N-1                 */
+/* raw_hex_dump - dump raw hex+ASCII of blocks 0..N-1                 */
 /* Uses diag_read_block: HD_SCSICMD first, CMD_READ fallback.         */
 /* Block header shows [SCSI] or [CMD] so you can see which path ran.  */
 /* ------------------------------------------------------------------ */
@@ -2408,7 +2408,7 @@ static const char *smart_attr_name(UBYTE id)
 }
 
 /* ------------------------------------------------------------------ */
-/* smart_send — issue one SMART sub-command via ATA PASS-THROUGH.     */
+/* smart_send - issue one SMART sub-command via ATA PASS-THROUGH.     */
 /*                                                                     */
 /* feature : ATA FEATURES register value:                             */
 /*   0xD0 = READ DATA, 0xD1 = READ THRESHOLDS, 0xD8 = ENABLE OPS     */
@@ -2441,8 +2441,8 @@ static int smart_send(struct BlockDev *bd, UBYTE feature, UBYTE *buf)
     cdb[2]  = has_data ? 0x0E : 0x00;   /* T_DIR|BYTE_BLOCK|T_LENGTH=2    */
     cdb[4]  = feature;                   /* ATA FEATURES register           */
     cdb[6]  = has_data ? 1 : 0;         /* ATA SECTOR COUNT = 1 block      */
-    cdb[10] = 0x4F;                      /* ATA LBA MID — SMART signature   */
-    cdb[12] = 0xC2;                      /* ATA LBA HIGH — SMART signature  */
+    cdb[10] = 0x4F;                      /* ATA LBA MID - SMART signature   */
+    cdb[12] = 0xC2;                      /* ATA LBA HIGH - SMART signature  */
     cdb[14] = 0xB0;                      /* ATA COMMAND = SMART             */
 
     scmd.scsi_Data        = has_data ? (UWORD *)buf : NULL;
@@ -2501,7 +2501,7 @@ static int smart_send(struct BlockDev *bd, UBYTE feature, UBYTE *buf)
 }
 
 /* ------------------------------------------------------------------ */
-/* smart_status — display ATA SMART health data for the open device.  */
+/* smart_status - display ATA SMART health data for the open device.  */
 /* ------------------------------------------------------------------ */
 
 void smart_status(struct Window *win, struct BlockDev *bd)
@@ -2526,7 +2526,7 @@ void smart_status(struct Window *win, struct BlockDev *bd)
         return;
     }
 
-    /* Buffers for DMA — MEMF_PUBLIC required for hardware DMA access. */
+    /* Buffers for DMA - MEMF_PUBLIC required for hardware DMA access. */
     data_buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
     thr_buf  = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
     if (!data_buf || !thr_buf) {
@@ -2739,11 +2739,11 @@ smart_win_cleanup:
 }
 
 /* ------------------------------------------------------------------ */
-/* write_badb — write a BADB chain to the RDB reserved area and patch */
+/* write_badb - write a BADB chain to the RDB reserved area and patch */
 /* the RDSK header to point BadBlockList at it.                       */
 /*                                                                     */
 /* bbe_GoodBlock is set to RDB_END_MARK (no replacement block) for    */
-/* each entry — marks the sector as unrecoverable.                    */
+/* each entry - marks the sector as unrecoverable.                    */
 /* ------------------------------------------------------------------ */
 
 static BOOL write_badb(struct Window *win, struct BlockDev *bd,
@@ -2850,7 +2850,7 @@ badb_done:
 }
 
 /* ------------------------------------------------------------------ */
-/* bad_block_scan — scan every block on the disk for read failures.   */
+/* bad_block_scan - scan every block on the disk for read failures.   */
 /* Shows a cancellable progress window during the scan, then displays */
 /* results in a scrollable list.  If bad blocks are found and an RDB  */
 /* exists, offers to write a BADB chain.                              */
@@ -2961,7 +2961,7 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
         }
         if (scan_win) GT_RefreshWindow(scan_win, NULL);
 
-        /* Scan loop — polls scan_win for cancel between every block read. */
+        /* Scan loop - polls scan_win for cancel between every block read. */
         for (blk = 0; blk < total_blks && !cancelled; blk++) {
             if (scan_win) {
                 struct IntuiMessage *imsg;
@@ -3153,7 +3153,7 @@ bbs_no_vrdb:
 }
 
 /* ------------------------------------------------------------------ */
-/* rdb_integrity_check — validate all RDB block checksums and chains  */
+/* rdb_integrity_check - validate all RDB block checksums and chains  */
 /* ------------------------------------------------------------------ */
 
 static void ic_vrdb_cb(void *ud, const char *line)
@@ -3279,7 +3279,7 @@ ic_cleanup:
 }
 
 /* ------------------------------------------------------------------ */
-/* rdb_verify_block — compare backup file to RDB block on disk        */
+/* rdb_verify_block - compare backup file to RDB block on disk        */
 /* ------------------------------------------------------------------ */
 
 void rdb_verify_block(struct Window *win, struct BlockDev *bd,
@@ -3412,7 +3412,7 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
 }
 
 /* ------------------------------------------------------------------ */
-/* rdb_verify_extended — compare extended backup file to disk blocks  */
+/* rdb_verify_extended - compare extended backup file to disk blocks  */
 /* ------------------------------------------------------------------ */
 
 void rdb_verify_extended(struct Window *win, struct BlockDev *bd)

@@ -1,12 +1,12 @@
 /*
- * main.c — DiskPart two-level device selection.
+ * main.c - DiskPart two-level device selection.
  *
  * Level 1: list of exec device driver names that responded to probing.
  * Level 2: list of units for the chosen driver, showing disk name/size.
  * Level 3: partition editor (partview.c).
  *
  * AmigaOS 2.x+ (Kickstart v37+), m68k-amiga-elf-gcc (Bartman toolchain).
- * GadTools UI — no MUI, no external library dependencies.
+ * GadTools UI - no MUI, no external library dependencies.
  */
 
 #include <exec/types.h>
@@ -42,7 +42,7 @@
 static const char diskpart_ver[] = "$VER: DiskPart 0.1 (2026)";
 
 /* ------------------------------------------------------------------ */
-/* Library bases — SysBase set by main() before any LP call            */
+/* Library bases - SysBase set by main() before any LP call            */
 /* ------------------------------------------------------------------ */
 
 struct ExecBase      *SysBase;
@@ -443,7 +443,7 @@ struct ProbeWin {
     UWORD  y_status;    /* y of the "Testing unit N" row   */
     UWORD  y_result0;   /* y of first result row           */
     UWORD  results;     /* number of result rows written   */
-    char   title[80];   /* Intuition keeps a pointer — must outlive win */
+    char   title[80];   /* Intuition keeps a pointer - must outlive win */
 };
 
 static void probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
@@ -479,7 +479,7 @@ static void probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
         break;
 
     case PROBE_EMPTY:
-        /* Nothing — status line already shows "Testing unit N..." */
+        /* Nothing - status line already shows "Testing unit N..." */
         break;
     }
 
@@ -1071,7 +1071,7 @@ int main(void)
     DOSBase = (struct DosLibrary *)OpenLibrary("dos.library", 37);
     if (!DOSBase) goto cleanup;
 
-    /* CLI launch with arguments → CLI mode (no GUI libs needed). */
+    /* CLI launch with arguments -> CLI mode (no GUI libs needed). */
     {
         struct Process *proc = (struct Process *)FindTask(NULL);
         if (proc->pr_CLI) {
@@ -1094,9 +1094,9 @@ int main(void)
     if (!GadToolsBase) goto cleanup;
 
     AslBase = OpenLibrary("asl.library", 37);
-    /* Not fatal — file requester simply won't be available */
+    /* Not fatal - file requester simply won't be available */
 
-    /* Startup warning — shown before the slow device scan */
+    /* Startup warning - shown before the slow device scan */
     {
         struct EasyStruct es;
         char body[512];
@@ -1121,10 +1121,10 @@ int main(void)
             goto cleanup;
     }
 
-    /* Scan for block device driver names — instant, no I/O */
+    /* Scan for block device driver names - instant, no I/O */
     Devices_Scan(&dev_names);
 
-    /* Navigation: driver name → unit → partition editor */
+    /* Navigation: driver name -> unit -> partition editor */
     {
         WORD name_idx;
         while ((name_idx = run_devname_window()) != -1 &&
@@ -1133,7 +1133,7 @@ int main(void)
             WORD unit_idx;
             BOOL quit = FALSE;
 
-            /* Image-file backend — skip device probe and unit selection;
+            /* Image-file backend - skip device probe and unit selection;
              * after the editor closes, return to the device-selection window. */
             if (name_idx == RESULT_IMAGE) {
                 if (!pick_image_path(image_path, sizeof(image_path)))

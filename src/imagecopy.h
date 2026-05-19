@@ -1,12 +1,12 @@
 /*
- * imagecopy.h — Whole-disk image dump and restore.
+ * imagecopy.h - Whole-disk image dump and restore.
  *
  * Wraps BlockDev_ReadBlock / BlockDev_WriteBlock with batched dos.library
  * file I/O so a disk can be copied to a regular file (image dump) and a
  * file can be written back to a disk (image restore).
  *
- * Both directions operate purely sequentially — no Seek is performed on
- * the file once it is opened — so the AmigaOS Seek() 2 GB ceiling does
+ * Both directions operate purely sequentially - no Seek is performed on
+ * the file once it is opened - so the AmigaOS Seek() 2 GB ceiling does
  * not apply to the copy itself. The destination filesystem still has to
  * be able to hold the resulting file (FFS pre-OS3.5 caps at 2 GB; SFS,
  * PFS3, FFS-NSD support much larger files).
@@ -28,7 +28,7 @@
  * total (`total` may be 0 if not known up front, e.g. an input image
  * file larger than ExamineFH could report). Callback may be NULL.
  *
- * Return TRUE to continue the copy, FALSE to abort it cleanly — the copy
+ * Return TRUE to continue the copy, FALSE to abort it cleanly - the copy
  * function will then close the file, free the buffer, set errbuf to
  * "Cancelled by user." and return FALSE. The callback runs synchronously
  * in the calling task. */

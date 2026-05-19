@@ -1,14 +1,14 @@
 /*
- * partmove.c — Partition data move.
+ * partmove.c - Partition data move.
  *
  * Copies all physical blocks from the current cylinder range to a new
  * one using multi-block TD_READ64 / TD_WRITE64 I/O (128 blocks at a
  * time) to minimise Exec message-passing overhead.
  *
  * Direction safety:
- *   Moving to LOWER cylinders → copy front-to-back (safe: destination
+ *   Moving to LOWER cylinders -> copy front-to-back (safe: destination
  *   precedes source so we never overwrite unread blocks).
- *   Moving to HIGHER cylinders → copy back-to-front (safe: destination
+ *   Moving to HIGHER cylinders -> copy back-to-front (safe: destination
  *   follows source for the same reason).
  *
  * SFS metadata:
@@ -235,7 +235,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Block copy — direction depends on relative positions              */
+    /* Block copy - direction depends on relative positions              */
     /* ---------------------------------------------------------------- */
     done = 0;
     MOVE_PROGRESS(0, phys_count, "Copying blocks...");
@@ -313,9 +313,9 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
             goto done_label;
         }
         if (sfs_getl(scratch, SFS_RB_ID) != SFS_ROOT_ID) {
-            /* Not SFS — copy succeeded but metadata update skipped.
+            /* Not SFS - copy succeeded but metadata update skipped.
                This shouldn't happen; warn but don't fail the move. */
-            sprintf(err_buf, "SFS: root id mismatch after copy — "
+            sprintf(err_buf, "SFS: root id mismatch after copy - "
                              "metadata not updated.\nRun SFScheck %s: after reboot.",
                     pi->drive_name);
             goto done_label;
@@ -358,7 +358,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
         for (r = 0; r < 2; r++) {
             if (!sfs_read_root(bd, phys_base_new, root_blks[r],
                                 sfs_phys, sfs_root_buf))
-                continue;  /* end root may be absent — skip silently */
+                continue;  /* end root may be absent - skip silently */
             if (!sfs_verify_checksum(sfs_root_buf, sfs_blocksize))
                 continue;
             if (sfs_getl(sfs_root_buf, SFS_RB_ID) != SFS_ROOT_ID)
@@ -372,7 +372,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
             if (!sfs_write_root(bd, phys_base_new, root_blks[r],
                                 sfs_phys, sfs_root_buf)) {
                 if (r == 0) {
-                    /* Primary root write failed — volume will be unmountable. */
+                    /* Primary root write failed - volume will be unmountable. */
                     sprintf(err_buf,
                             "SFS: failed to write primary root block after move.\n"
                             "Data was copied but SFS location metadata not updated.\n"
@@ -380,21 +380,21 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
                             pi->drive_name);
                     goto done_label;
                 } else {
-                    /* Backup root write failed — primary is correct, warn only. */
+                    /* Backup root write failed - primary is correct, warn only. */
                     sprintf(err_buf,
                             "SFS: backup root write failed (block %lu).\n"
                             "Primary root is correct; volume should mount.\n"
                             "Run SFScheck %s: after reboot to repair backup.",
                             (unsigned long)root_blks[1],
                             pi->drive_name);
-                    /* Continue — ok will be set to TRUE below. */
+                    /* Continue - ok will be set to TRUE below. */
                 }
             }
         }
     }
 
     /* ---------------------------------------------------------------- */
-    /* Update PartInfo — caller must then call RDB_Write                 */
+    /* Update PartInfo - caller must then call RDB_Write                 */
     /* ---------------------------------------------------------------- */
     pi->low_cyl  = new_low_cyl;
     pi->high_cyl = new_high_cyl;

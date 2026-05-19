@@ -1,5 +1,5 @@
 /*
- * gcc_runtime.c — GCC 64-bit arithmetic runtime helpers for -nostdlib builds.
+ * gcc_runtime.c - GCC 64-bit arithmetic runtime helpers for -nostdlib builds.
  *
  * GCC emits calls to these when lowering 64-bit operations on m68k.
  * 68k is big-endian: in a u64, the high word is at the lower address.

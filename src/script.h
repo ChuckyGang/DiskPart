@@ -1,5 +1,5 @@
 /*
- * script.h — DiskPart script engine.
+ * script.h - DiskPart script engine.
  */
 
 #ifndef SCRIPT_H
@@ -8,7 +8,7 @@
 #include <exec/types.h>
 
 /*
- * script_run — execute a DiskPart script file.
+ * script_run - execute a DiskPart script file.
  *
  * Each line is one command.  Changes accumulate in memory; only a
  * WRITE command commits anything to disk.

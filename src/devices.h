@@ -1,5 +1,5 @@
 /*
- * devices.h — Block device enumeration for DiskPart.
+ * devices.h - Block device enumeration for DiskPart.
  */
 
 #ifndef DEVICES_H
@@ -33,10 +33,10 @@ struct UnitList {
 };
 
 /*
- * Devices_Scan — populate nl with all discoverable block device driver names.
+ * Devices_Scan - populate nl with all discoverable block device driver names.
  * Phase 1: walk AmigaDOS DosList for mounted devices.
  * Phase 2: walk exec DeviceList for all drivers currently loaded in RAM.
- * No I/O is performed — this is a pure memory walk and completes instantly.
+ * No I/O is performed - this is a pure memory walk and completes instantly.
  */
 void Devices_Scan(struct DevNameList *nl);
 
@@ -48,7 +48,7 @@ void Devices_Scan(struct DevNameList *nl);
  */
 void DevNameList_FormatDisplay(struct DevNameList *nl, UWORD col_chars);
 
-/* Probe progress callback — called before and after each unit open attempt.
+/* Probe progress callback - called before and after each unit open attempt.
  * phase PROBE_START : about to probe this unit  (info = NULL)
  * phase PROBE_FOUND : unit responded            (info = display string)
  * phase PROBE_EMPTY : unit not present          (info = NULL)

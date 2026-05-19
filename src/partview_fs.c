@@ -1,5 +1,5 @@
 /*
- * partview_fs.c — Filesystem manager dialog for DiskPart.
+ * partview_fs.c - Filesystem manager dialog for DiskPart.
  *
  * Contains: build_fs_list, fs_load_file, fs_addedit_dialog,
  *           filesystem_manager_dialog.
@@ -37,7 +37,7 @@ extern struct Library       *GadToolsBase;
 
 /* Gadget IDs for the filesystem manager window */
 #define FSDLG_LIST    1
-#define FSDLG_SEL     2   /* GTLV_ShowSelected target — display only */
+#define FSDLG_SEL     2   /* GTLV_ShowSelected target - display only */
 #define FSDLG_ADD     3
 #define FSDLG_EDIT    4
 #define FSDLG_DELETE  5
@@ -156,14 +156,14 @@ static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi
         for (i = 0; i + 12 < (ULONG)fsize; i += 2) {
             if (code[i] == 0x4A && code[i+1] == 0xFC) {
                 major = code[i + 11];
-                /* look for $VER: string to get minor — fall back to 0 */
+                /* look for $VER: string to get minor - fall back to 0 */
                 {
                     ULONG j;
                     for (j = 0; j + 5 < (ULONG)fsize; j++) {
                         if (code[j]   == '$' && code[j+1] == 'V' &&
                             code[j+2] == 'E' && code[j+3] == 'R' &&
                             code[j+4] == ':') {
-                            /* skip "$VER: name maj.min" — advance past ": " and name */
+                            /* skip "$VER: name maj.min" - advance past ": " and name */
                             ULONG k = j + 5;
                             while (k < (ULONG)fsize && code[k] == ' ') k++;
                             /* skip name token */
@@ -254,7 +254,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         ng.ng_VisualInfo = vi;
         ng.ng_TextAttr   = scr->Font;
 
-        /* DosType string — narrowed; accepts "DOS\1" or "0x444F5301" */
+        /* DosType string - narrowed; accepts "DOS\1" or "0x444F5301" */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad);
         ng.ng_Width=dt_str_w; ng.ng_Height=row_h;
         ng.ng_GadgetText="DosType"; ng.ng_GadgetID=AFSDLG_DOSTYPE;
@@ -263,7 +263,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
           dostype_gad=CreateGadgetA(STRING_KIND,gctx,&ng,st);
           if (!dostype_gad) goto fs_add_cleanup; prev=dostype_gad; }
 
-        /* Hex readout — read-only display to the right of DosType */
+        /* Hex readout - read-only display to the right of DosType */
         ng.ng_LeftEdge=gad_x+dt_str_w+pad; ng.ng_TopEdge=(WORD)(bor_t+pad);
         ng.ng_Width=dt_hex_w; ng.ng_Height=row_h;
         ng.ng_GadgetText=NULL; ng.ng_GadgetID=AFSDLG_HEXDISP;
@@ -281,7 +281,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
           file_gad=CreateGadgetA(STRING_KIND,prev,&ng,st);
           if (!file_gad) goto fs_add_cleanup; prev=file_gad; }
 
-        /* Browse button — right of File string */
+        /* Browse button - right of File string */
         ng.ng_LeftEdge=gad_x+(WORD)file_w+pad; ng.ng_TopEdge=(WORD)(bor_t+pad+row_h+pad);
         ng.ng_Width=browse_w; ng.ng_Height=row_h;
         ng.ng_GadgetText="Browse..."; ng.ng_GadgetID=AFSDLG_BROWSE;
@@ -473,7 +473,7 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
         ng.ng_VisualInfo = vi;
         ng.ng_TextAttr   = scr->Font;
 
-        /* GTLV_ShowSelected target — must be created BEFORE the listview.
+        /* GTLV_ShowSelected target - must be created BEFORE the listview.
            With this set, GadTools gives the listview persistent selection
            highlighting and GADGETUP Code becomes the reliable item ordinal. */
         { UWORD sel_y = bor_t + pad + hdr_h + lv_h + pad;
@@ -489,7 +489,7 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
           if (!sel_gad) goto fs_mgr_cleanup;
           prev = sel_gad; }
 
-        /* Listview — GTLV_ShowSelected links it to sel_gad above */
+        /* Listview - GTLV_ShowSelected links it to sel_gad above */
         ng.ng_LeftEdge  = bor_l + pad;
         ng.ng_TopEdge   = (WORD)(bor_t + pad + hdr_h);
         ng.ng_Width     = inner_w - pad * 2;
@@ -588,7 +588,7 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
                         sel = (WORD)code;
                         break;
                     case FSDLG_SEL:
-                        break; /* show-selected string gadget — ignore */
+                        break; /* show-selected string gadget - ignore */
                     case FSDLG_DONE: running = FALSE; break;
 
                     case FSDLG_CANCEL: {

@@ -1,5 +1,5 @@
 /*
- * partview.h — Partition view window for DiskPart.
+ * partview.h - Partition view window for DiskPart.
  */
 
 #ifndef PARTVIEW_H

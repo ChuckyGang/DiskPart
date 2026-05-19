@@ -1,5 +1,5 @@
 /*
- * sfs_util.c — Shared SFS byte-access and checksum helpers.
+ * sfs_util.c - Shared SFS byte-access and checksum helpers.
  */
 
 #include <exec/types.h>

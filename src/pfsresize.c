@@ -1,5 +1,5 @@
 /*
- * pfsresize.c — Experimental PFS3/PFS2 filesystem grow.
+ * pfsresize.c - Experimental PFS3/PFS2 filesystem grow.
  *
  * STRATEGY (simple and reversible):
  *   PFS3 auto-creates bitmap blocks on demand (NewBitmapBlock called from
@@ -9,7 +9,7 @@
  *     1. Update disksize in the rootblock (if MODE_SIZEFIELD is set) and
  *        clear the MODE_SIZEFIELD flag itself.
  *        PFS3 checks at mount: if (MODE_SIZEFIELD && disksize != dg_TotalSectors)
- *        → fail ("Uninitialized").  dg_TotalSectors comes from the in-memory
+ *        -> fail ("Uninitialized").  dg_TotalSectors comes from the in-memory
  *        DosEnvec de_HighCyl.  After a grow, de_HighCyl is still old until the
  *        user writes the RDB and reboots.  We clear MODE_SIZEFIELD so that PFS
  *        skips the disksize check entirely on the next reboot.  disksize is
@@ -49,9 +49,9 @@
  *   need so that this auto-creation cannot fail silently.
  *
  * REFERENCES (pfs3aio source):
- *   blocks.h  — rootblock_t, bitmapblock_t, cindexblock_t field layout
- *   allocation.c — InitAllocation, AllocReservedBlock, NewBitmapBlock
- *   volume.c  — GetCurrentRoot (MODE_SIZEFIELD check)
+ *   blocks.h  - rootblock_t, bitmapblock_t, cindexblock_t field layout
+ *   allocation.c - InitAllocation, AllocReservedBlock, NewBitmapBlock
+ *   volume.c  - GetCurrentRoot (MODE_SIZEFIELD check)
  */
 
 #include <exec/types.h>
@@ -131,7 +131,7 @@ BOOL PFS_IsSupportedType(ULONG dostype)
 
     /* 'PFS\0'-'PFS\3' (0x50465300-0x50465303) */
     if (prefix == 0x504653UL && ver <= 3) return TRUE;
-    /* 'PDS\0'-'PDS\3' (0x50445300-0x50445303) — most common for pfs3aio */
+    /* 'PDS\0'-'PDS\3' (0x50445300-0x50445303) - most common for pfs3aio */
     if (prefix == 0x504453UL && ver <= 3) return TRUE;
 
     return FALSE;
@@ -206,7 +206,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* PFS3 partition layout:
          Logical blocks 0 .. reserved_blks-1 : PFS bootblock
-           (disktype='PFS\1', options=0 — NOT the rootblock)
+           (disktype='PFS\1', options=0 - NOT the rootblock)
          Logical block reserved_blks (typically 2) : PFS rootblock cluster
            (disktype='PFS\1', options != 0, rblkcluster != 0)
        The rootblock is at logical block de_ReservedBlks from the start of
@@ -217,12 +217,12 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG part_abs     = (pi->low_cyl * heads * sectors + rb_lblock) * phys_per_lblock;
 
     /* delta_blocks is computed in Phase 4 from PFS3's own disksize field.
-       Do NOT compute it here from heads/sectors — the DosEnvec geometry may
+       Do NOT compute it here from heads/sectors - the DosEnvec geometry may
        not match PFS3's format geometry (e.g. IDE 255x63 LBA translation vs
        the real CHS used at mkfs time), leading to a grossly wrong delta. */
 
     /* ---------------------------------------------------------------- */
-    /* Phase 1 — read the PFS rootblock (before Inhibit; reads work    */
+    /* Phase 1 - read the PFS rootblock (before Inhibit; reads work    */
     /* without inhibit and hang after it due to PFS flush writes still  */
     /* draining in the device queue after Inhibit returns).             */
     /* ---------------------------------------------------------------- */
@@ -234,7 +234,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 2 — validate disktype, extract cluster geometry            */
+    /* Phase 2 - validate disktype, extract cluster geometry            */
     /* ---------------------------------------------------------------- */
     {
         ULONG disktype = pfs_getl(first_sector, PFS_RB_DISKTYPE);
@@ -280,7 +280,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 3 — read and save full rootblock cluster                   */
+    /* Phase 3 - read and save full rootblock cluster                   */
     /* ---------------------------------------------------------------- */
     PFS_PROGRESS("Reading rootblock cluster...");
     {
@@ -308,7 +308,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 4 — read fields from the in-memory cluster buffer          */
+    /* Phase 4 - read fields from the in-memory cluster buffer          */
     /* ---------------------------------------------------------------- */
     {
         /* All locals declared up-front for C89 compatibility */
@@ -328,7 +328,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
            The DosEnvec may use LBA-translated geometry (e.g. 255x63) that
            differs from the real CHS PFS3 used at format time.  Dividing the
            on-disk disksize by the old cylinder count gives the exact
-           blocks-per-cylinder in PFS3's native units — immune to geometry
+           blocks-per-cylinder in PFS3's native units - immune to geometry
            mismatch and to reserved_blksize differences (512 vs 1024). */
         old_ncyl     = (old_high_cyl >= pi->low_cyl)
                        ? (old_high_cyl - pi->low_cyl + 1) : 1;
@@ -406,7 +406,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             ULONG blksz      = (pi->block_size >= 512) ? pi->block_size : 512;
             ULONG max_blocks = (ULONG)PFS_MAX_BITMAPINDEX * idxperblk
                                * bm_coverage;
-            /* max_blocks in logical blocks → MB: divide by blocks-per-MB */
+            /* max_blocks in logical blocks -> MB: divide by blocks-per-MB */
             ULONG max_mb     = max_blocks / (1048576UL / blksz);
             sprintf(err_buf,
                     "Partition too large for PFS3.\n"
@@ -445,14 +445,14 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         }
 
         /* ---------------------------------------------------------------- */
-        /* Phase 5 — update rootblock fields in the cluster buffer          */
+        /* Phase 5 - update rootblock fields in the cluster buffer          */
         /* ---------------------------------------------------------------- */
         if (options & PFS_MODE_SIZEFIELD)
             pfs_setl(cluster_buf, PFS_RB_DISKSIZE, new_disksize);
         pfs_setl(cluster_buf, PFS_RB_BLOCKSFREE, blocksfree + delta_blocks);
 
         /* ---------------------------------------------------------------- */
-        /* Phase 6 — write updated cluster BEFORE any Inhibit               */
+        /* Phase 6 - write updated cluster BEFORE any Inhibit               */
         /*                                                                   */
         /* UAE/Amiberry sets the device write-extent to zero while          */
         /* Inhibit(DOSTRUE) is active (to prevent double-writes while PFS   */
@@ -473,7 +473,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         write_ok = TRUE;
 
         /* ---------------------------------------------------------------- */
-        /* Phase 7 — clear MODE_SIZEFIELD (second write, still pre-Inhibit) */
+        /* Phase 7 - clear MODE_SIZEFIELD (second write, still pre-Inhibit) */
         /* ---------------------------------------------------------------- */
         if (options & PFS_MODE_SIZEFIELD) {
             pfs_setl(cluster_buf, PFS_RB_OPTIONS,
@@ -484,7 +484,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         }
 
         /* ---------------------------------------------------------------- */
-        /* Phase 8 — Inhibit(TRUE) + Inhibit(FALSE) to flush PFS cache      */
+        /* Phase 8 - Inhibit(TRUE) + Inhibit(FALSE) to flush PFS cache      */
         /*           and force a re-read of our updated rootblock.           */
         /*                                                                   */
         /* PFS3's GetCurrentRoot() is called on Inhibit(DOSFALSE), which    */
@@ -509,7 +509,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* Build success message (must fit in caller's 256-byte err_buf)   */
         /* Includes a raw hex dump of original rootblock bytes 52-91 so   */
         /* field offsets can be verified against the actual disk layout.   */
-        /* Worst-case length: ~210 chars — fits in 256.                    */
+        /* Worst-case length: ~210 chars - fits in 256.                    */
         /* ---------------------------------------------------------------- */
         /* cyl_diff × bpc = delta_blocks; bpc derived from PFS3 disksize,
            not DosEnvec geometry, so it matches PFS3's native block units */

@@ -1,5 +1,5 @@
 /*
- * rdb.c — Block device I/O and RDB read/write for DiskPart.
+ * rdb.c - Block device I/O and RDB read/write for DiskPart.
  *
  * Stage 1: BlockDev_Open / BlockDev_Close / BlockDev_ReadBlock /
  *          BlockDev_WriteBlock / BlockDev_HasMBR.
@@ -248,7 +248,7 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
     bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
     bd->iotd.iotd_Req.io_Flags   = 0;
     DoIO((struct IORequest *)&bd->iotd);
-    /* ignore error — geometry is informational only */
+    /* ignore error - geometry is informational only */
 
     bd->block_size  = 512;   /* RDB format requires 512-byte blocks */
     {
@@ -309,7 +309,7 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
         }
     }
 
-    /* READ CAPACITY (10) — true capacity direct from drive, bypasses
+    /* READ CAPACITY (10) - true capacity direct from drive, bypasses
        the cylinder count limitations in some older drivers (e.g. A3000
        scsi.device).  Overrides td_total_bytes when available. */
     {
@@ -391,7 +391,7 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
         if (err == 0) return TRUE;
     }
 
-    /* Fall back to TD_READ64 — uses iotd_Count as high 32 bits of byte offset,
+    /* Fall back to TD_READ64 - uses iotd_Count as high 32 bits of byte offset,
        avoiding the 32-bit overflow on disks > 4 GB. */
     {
         UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
@@ -408,7 +408,7 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
     /* Last resort: CMD_READ (32-bit byte offset, no 64-bit support).
        Some older drivers / non-SCSI interfaces only implement CMD_READ.
        RDB is always in the first 16 blocks so 32-bit addressing is fine here.
-       Do NOT use CMD_READ as the primary path on A3000 scsi.device — it has
+       Do NOT use CMD_READ as the primary path on A3000 scsi.device - it has
        DMA timing issues with SD card adapters that corrupt data; those devices
        succeed on the HD_SCSICMD path above and never reach this fallback. */
     {
@@ -448,7 +448,7 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
     }
 
     /* TD_WRITE64.  CMD_WRITE and CMD_UPDATE both hang on cached filesystem
-       partition blocks in UAE/Amiberry — they block waiting for the
+       partition blocks in UAE/Amiberry - they block waiting for the
        filesystem handler to flush its cache, which can deadlock if the
        handler is blocked.  TD_WRITE64 bypasses the driver's sector cache
        and writes directly without involving any filesystem handler.
@@ -506,7 +506,7 @@ BOOL BlockDev_GetGeometry(struct BlockDev *bd,
     *heads   = (geom.dg_Heads        > 0) ? geom.dg_Heads        : 16;
     *sectors = (geom.dg_TrackSectors > 0) ? geom.dg_TrackSectors : 63;
 
-    /* Prefer READ CAPACITY total block count — it comes directly from
+    /* Prefer READ CAPACITY total block count - it comes directly from
        the drive and is not subject to driver CHS arithmetic bugs. */
     if (bd->rc_total_blocks > 0)
         *cyls = bd->rc_total_blocks / (*heads * *sectors);
@@ -588,7 +588,7 @@ void FormatSize(UQUAD bytes, char *buf)
 }
 
 /* ------------------------------------------------------------------ */
-/* chain_seen — cycle detection for RDB linked-list walks             */
+/* chain_seen - cycle detection for RDB linked-list walks             */
 /* Records each visited block number; returns TRUE if already seen.   */
 /* seen[] must be zeroed before the walk begins.                      */
 /* ------------------------------------------------------------------ */
@@ -637,7 +637,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
            a non-standard tool (some old formatters store unusual values
            here, and other fields like rdb_BlockBytes may be non-standard
            too).  The 4-byte "RDSK" magic is a 1-in-4-billion discriminator
-           on its own — accept the block as-is when the checksum is
+           on its own - accept the block as-is when the checksum is
            unverifiable. */
         {
             const ULONG *lp = (const ULONG *)buf;
@@ -645,7 +645,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             if (sl >= 2 && sl <= 128) {
                 ULONG sum = 0, ci;
                 for (ci = 0; ci < sl; ci++) sum += lp[ci];
-                if (sum != 0) continue;   /* checksum mismatch — not a valid RDSK */
+                if (sum != 0) continue;   /* checksum mismatch - not a valid RDSK */
             }
             /* sl == 0 or sl > 128: checksum unverifiable; trust the ID */
         }
@@ -666,7 +666,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
            Handle two distinct cases:
            1. hi_cyl >= cylinders: some tools (e.g. lide on large drives) write
               hi_cyl = cylinders rather than cylinders-1 (off-by-one).  Clamp
-              silently — the rest of the RDB is valid and should not be reset.
+              silently - the rest of the RDB is valid and should not be reset.
            2. lo_cyl out of range or reversed: clearly garbage; derive both
               values from rdb_Cylinders. */
         if (rdb->cylinders > 0) {
@@ -710,7 +710,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         pb = (struct PartitionBlock *)buf;
         if (pb->pb_ID != IDNAME_PARTITION)
             break;
-        /* Checksum-validate the PART block — same logic as for RDSK:
+        /* Checksum-validate the PART block - same logic as for RDSK:
            verify when SummedLongs is in range (2..128), else trust ID. */
         {
             const ULONG *lp = (const ULONG *)buf;
@@ -718,7 +718,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             if (sl >= 2 && sl <= 128) {
                 ULONG sum = 0, ci;
                 for (ci = 0; ci < sl; ci++) sum += lp[ci];
-                if (sum != 0) break;   /* checksum mismatch — corrupt or truncated chain */
+                if (sum != 0) break;   /* checksum mismatch - corrupt or truncated chain */
             }
             /* sl out of range: non-standard tool; trust the PART ID */
         }
@@ -764,7 +764,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         rdb->num_parts++;
     }
 
-    /* Sort partitions by low_cyl (insertion sort — n is small).
+    /* Sort partitions by low_cyl (insertion sort - n is small).
        Ensures display order and written PART-block order both follow
        cylinder position regardless of the order stored in the RDB link list. */
     {
@@ -796,14 +796,14 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         fhb = (struct FileSysHeaderBlock *)buf;
         if (fhb->fhb_ID != IDNAME_FSHEADER)
             break;
-        /* Checksum-validate the FSHD block — same logic as RDSK/PART. */
+        /* Checksum-validate the FSHD block - same logic as RDSK/PART. */
         {
             const ULONG *lp = (const ULONG *)buf;
             ULONG sl = fhb->fhb_SummedLongs;
             if (sl >= 2 && sl <= 128) {
                 ULONG sum = 0, ci;
                 for (ci = 0; ci < sl; ci++) sum += lp[ci];
-                if (sum != 0) break;   /* checksum mismatch — corrupt or truncated chain */
+                if (sum != 0) break;   /* checksum mismatch - corrupt or truncated chain */
             }
             /* sl out of range: non-standard tool; trust the FSHD ID */
         }
@@ -854,7 +854,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         } /* end LSEG count scope */
 
         if (num_lseg > 0) {
-            ULONG alloc_sz = num_lseg * 492UL;  /* upper bound — last block may be partial */
+            ULONG alloc_sz = num_lseg * 492UL;  /* upper bound - last block may be partial */
             fi->code = (UBYTE *)AllocVec(alloc_sz, MEMF_PUBLIC | MEMF_CLEAR);
             if (fi->code) {
                 ULONG lseg_seen2[CHAIN_SEEN_MAX]; UWORD lseg_seen2_n = 0;
@@ -878,7 +878,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
                         if (sum != 0) { ok = FALSE; break; }
                     }
                     /* sl out of range: non-standard tool; trust the LSEG ID */
-                    /* Respect lsb_SummedLongs — the last block may be partial.
+                    /* Respect lsb_SummedLongs - the last block may be partial.
                        SummedLongs includes 5 header longs; the rest is data.
                        Clamp to 492 bytes (123 longs) maximum per block. */
                     data_bytes = (lsb->lsb_SummedLongs > 5UL)
@@ -908,7 +908,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
 
 
 /* ------------------------------------------------------------------ */
-/* RDB_FreeCode — free all AllocVec'd filesystem code buffers          */
+/* RDB_FreeCode - free all AllocVec'd filesystem code buffers          */
 /* ------------------------------------------------------------------ */
 
 void RDB_FreeCode(struct RDBInfo *rdb)
@@ -1139,7 +1139,7 @@ void RDB_InitFresh(struct RDBInfo *rdb,
        overhead (RDB + partition blocks + FSHD headers).
        target = ceil((1 + MAX_PARTITIONS + MAX_FILESYSTEMS + 533 LSEG) / blks_per_cyl)
               = ceil(630 / blks_per_cyl), minimum 1.
-       On a large-geometry disk (heads=16, sectors=63 → 1008 blks/cyl) this
+       On a large-geometry disk (heads=16, sectors=63 -> 1008 blks/cyl) this
        still gives lo_cyl=1; on a small-geometry disk it reserves more. */
     {
         ULONG blks_per_cyl = heads * sectors;   /* both are >= 1 after clamping */
@@ -1156,7 +1156,7 @@ void RDB_InitFresh(struct RDBInfo *rdb,
 }
 
 /* ------------------------------------------------------------------ */
-/* fill_lseg_chain — fill LSEG blocks into big_buf (no I/O)           */
+/* fill_lseg_chain - fill LSEG blocks into big_buf (no I/O)           */
 /* ------------------------------------------------------------------ */
 
 static void fill_lseg_chain(UBYTE *big_buf, ULONG base_blk, ULONG block_size,
@@ -1280,7 +1280,7 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         }
     }
 
-    /* Single contiguous buffer — all blocks filled in-memory first, then
+    /* Single contiguous buffer - all blocks filled in-memory first, then
        written one block at a time. */
     big_buf = (UBYTE *)AllocVec(total_blocks * bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
     if (!big_buf) return FALSE;
@@ -1321,7 +1321,7 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
         bstr[0] = len;
         memcpy(bstr + 1, pi->drive_name, len);
 
-        /* DosEnvec — index 19 (DE_BOOTBLOCKS) is the highest index we fill */
+        /* DosEnvec - index 19 (DE_BOOTBLOCKS) is the highest index we fill */
         pb->pb_Environment[DE_TABLESIZE]    = 19;
         pb->pb_Environment[DE_SIZEBLOCK]    = pi->block_size > 0
                                               ? pi->block_size / 4 : 128;

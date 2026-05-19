@@ -1,10 +1,10 @@
 /*
- * ffsresize.c — EXPERIMENTAL: grow an FFS/OFS filesystem to cover an
+ * ffsresize.c - EXPERIMENTAL: grow an FFS/OFS filesystem to cover an
  *               extended partition cylinder range.
  *
  * Only growing is supported (never shrinking).
  * Supports DOS\0 through DOS\7 (OFS, FFS, IntlOFS, IntlFFS, DCOFS, DCFFS
- * and variants) — they all share the same on-disk bitmap structure.
+ * and variants) - they all share the same on-disk bitmap structure.
  * Supports FS block sizes of 512 or 1024 bytes (DE_SECSPERBLK = 1 or 2
  * with a 512-byte device sector).
  *
@@ -22,8 +22,8 @@
  *                    consecutive device-block I/Os via the helpers below.
  *
  * Algorithm:
- *   1. Read + validate the partition boot block → locate root block.
- *   2. Read + validate the root block → locate the bitmap chain.
+ *   1. Read + validate the partition boot block -> locate root block.
+ *   2. Read + validate the root block -> locate the bitmap chain.
  *   3. Update the last existing bitmap block: mark newly-available blocks
  *      (those that were beyond old_size but within the last bm block's
  *      range) as free.
@@ -62,10 +62,10 @@
    Layout from moredos.i; positions counted from END-of-block are computed
    from nlongs at run time (works for both 128-long and 256-long blocks): */
 #define RL_TYPE         0
-/* L[1] = rb_OwnKey   = always 0 (FFS checks this; non-zero → RootCorrupt) */
+/* L[1] = rb_OwnKey   = always 0 (FFS checks this; non-zero -> RootCorrupt) */
 /* L[2] = rb_SeqNum   = always 0 */
 /* L[3] = rb_HTSize   = nlongs - 56 (72 for 512-byte, 200 for 1024-byte)   */
-/* L[4] = rb_Nothing1 = always 0 (FFS checks this; non-zero → RootCorrupt) */
+/* L[4] = rb_Nothing1 = always 0 (FFS checks this; non-zero -> RootCorrupt) */
 #define RL_CHKSUM       5
 #define RL_HT_START     6                       /* L[6..] hash table */
 #define RL_HT_SIZE(nl)  ((nl) - 56)             /* hash table entry count */
@@ -84,12 +84,12 @@
 #define EXT_BM_MAX(nl)  ((nl) - 1)  /* bm pointer slots per ext block;
                                        last long = next ext block or 0 */
 #define MAX_EXT_CHAIN   32   /* maximum ext blocks we'll follow */
-/* Worst-case ext-pointer count, for sizing static buffers — assumes
+/* Worst-case ext-pointer count, for sizing static buffers - assumes
    1024-byte blocks (nlongs = 256, slots/ext = 255). */
 #define EXT_BM_MAX_MAX  255
 
 /* ------------------------------------------------------------------ */
-/* FS-block I/O helpers — translate one FS-block I/O into spb device  */
+/* FS-block I/O helpers - translate one FS-block I/O into spb device  */
 /* block I/Os of bd->block_size bytes each.                            */
 /* ------------------------------------------------------------------ */
 static BOOL read_fs_block(struct BlockDev *bd, ULONG part_abs, ULONG fs_blk,
@@ -192,7 +192,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
     /* FS block size must be a power of two in [512, 16384].
        The block-layout math (RL_* offsets, bpbm, HTSize) scales naturally
-       to any of these sizes.  Sizes >1024 are less common in the wild —
+       to any of these sizes.  Sizes >1024 are less common in the wild -
        the standard Amiga BootBlockChecksum convention covers a fixed
        1024-byte area, so a *bootable* partition with larger FS blocks
        may show "Not a DOS disk" until rewritten with a proper boot;
@@ -209,7 +209,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG part_abs       = pi->low_cyl * heads * sectors;
     ULONG old_dev_blocks = (old_high_cyl - pi->low_cyl + 1) * heads * sectors;
     ULONG new_dev_blocks = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
-    /* FS-block totals — FFS rounds down: HighestBlock = total/spb - 1. */
+    /* FS-block totals - FFS rounds down: HighestBlock = total/spb - 1. */
     ULONG old_blocks     = old_dev_blocks / spb;
     ULONG new_blocks     = new_dev_blocks / spb;
 
@@ -271,13 +271,13 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
        from here on reflect the actual on-disk state with no pending
        FFS writes racing against us.
        If the partition isn't mounted, Inhibit() returns FALSE and we
-       continue anyway — direct access to an unmounted partition is safe. */
+       continue anyway - direct access to an unmounted partition is safe. */
     sprintf(inh_name, "%s:", pi->drive_name);
     FFS_PROGRESS("Inhibiting filesystem handler...");
     did_inhibit = Inhibit((STRPTR)inh_name, DOSTRUE);
 
     /* ---------------------------------------------------------------- */
-    /* Phase 1 — read + validate boot block, get root block number      */
+    /* Phase 1 - read + validate boot block, get root block number      */
     /* ---------------------------------------------------------------- */
     FFS_PROGRESS("Reading boot block...");
 
@@ -300,7 +300,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         root_blk = old_blocks / 2;
 
     /* ---------------------------------------------------------------- */
-    /* Phase 2 — read + validate root block                             */
+    /* Phase 2 - read + validate root block                             */
     /* ---------------------------------------------------------------- */
     FFS_PROGRESS("Reading root block...");
 
@@ -341,7 +341,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 3 — collect existing bm block numbers into flat array,     */
+    /* Phase 3 - collect existing bm block numbers into flat array,     */
     /*           track the ext block chain for later rewriting          */
     /* ---------------------------------------------------------------- */
     FFS_PROGRESS("Reading bitmap chain...");
@@ -388,7 +388,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 4 — check we can accommodate the new bm block numbers      */
+    /* Phase 4 - check we can accommodate the new bm block numbers      */
     /* ---------------------------------------------------------------- */
 
     /* Available slots in the existing chain after the current entries */
@@ -432,7 +432,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 5 — update the last EXISTING bm block                      */
+    /* Phase 5 - update the last EXISTING bm block                      */
     FFS_PROGRESS("Extending last bitmap block...");
     /*                                                                   */
     /* Blocks old_blocks .. min(old_bm_need*bpbm, new_blocks) - 1       */
@@ -468,7 +468,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 6 — create new bm blocks                                   */
+    /* Phase 6 - create new bm blocks                                   */
     FFS_PROGRESS("Writing new bitmap blocks...");
     /*                                                                   */
     /* New bm block N (N = old_bm_need .. new_bm_need-1) is placed at   */
@@ -525,7 +525,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 7 — add new bm block numbers to the chain                  */
+    /* Phase 7 - add new bm block numbers to the chain                  */
     /* ---------------------------------------------------------------- */
     FFS_PROGRESS("Updating bitmap chain in root...");
 
@@ -596,7 +596,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 8 — relocate root block to new_blocks/2 and write it      */
+    /* Phase 8 - relocate root block to new_blocks/2 and write it      */
     FFS_PROGRESS("Relocating root block...");
     /*                                                                   */
     /* After the RDB is updated with new high_cyl, AmigaOS FFS computes */
@@ -620,7 +620,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
              off    = (block - reserved) % bpbm
            Using any other formula selects the WRONG bit. */
         if (new_root < reserved) {
-            sprintf(err_buf, "new_root %lu < reserved %lu — impossible geometry",
+            sprintf(err_buf, "new_root %lu < reserved %lu - impossible geometry",
                     (unsigned long)new_root, (unsigned long)reserved);
             goto done;
         }
@@ -639,12 +639,12 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             nr_bm_blknum = bm_blknums[bm_idx_nr];
             nr_bm_off    = (new_root - reserved) % bpbm;
 
-            /* ALWAYS mark new_root USED — even when new_root == root_blk.
+            /* ALWAYS mark new_root USED - even when new_root == root_blk.
                Phase 6 creates the bm block covering new_root as all-free
                (only bit-0 USED for the bm block itself).  If we only update
                the bitmap when new_root != root_blk, new_root stays FREE and
-               FFS allocates it for file data on the first write → root
-               overwritten → "Uninitialized" after reboot.
+               FFS allocates it for file data on the first write -> root
+               overwritten -> "Uninitialized" after reboot.
                The "is target free?" sanity check is only meaningful when we
                are relocating to a new position; skip it for in-place. */
             if (!read_fs_block(bd, part_abs, bm_blknums[bm_idx_nr], spb, bm_buf)) {
@@ -679,7 +679,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             /* Free old root in its own bm block if that's a different block */
             if (new_root != root_blk && bm_idx_or != bm_idx_nr && root_blk >= reserved) {
                 if (bm_idx_or >= bm_count) {
-                    /* old root is out of bitmap range — unusual but not fatal;
+                    /* old root is out of bitmap range - unusual but not fatal;
                        just skip freeing it (it stays "used" which is safe) */
                 } else {
                     if (!read_fs_block(bd, part_abs, bm_blknums[bm_idx_or], spb, bm_buf)) {
@@ -706,13 +706,13 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
            L[1] = rb_OwnKey and L[4] = rb_Nothing1 MUST remain 0.
            FFS restart validation ORs L[1], L[2], L[4] and goes to
            RootCorrupt if any are non-zero (restart.asm:226-229).
-           Force both to 0 regardless of what the source root contained — a
+           Force both to 0 regardless of what the source root contained - a
            root written by an older buggy version of this code may have had
            non-zero values here, and we must not carry them forward.
            The new disk size comes from the DosEnvec (updated by RDB_Write),
-           not from the root block — FFS never reads disk_size from the root.
-           bm_flag is set to 0 so FFS runs its validator — see comment below. */
-        /* All fields validated by FFS restart.asm — force correct values
+           not from the root block - FFS never reads disk_size from the root.
+           bm_flag is set to 0 so FFS runs its validator - see comment below. */
+        /* All fields validated by FFS restart.asm - force correct values
            regardless of what the source root contained: */
         root_buf[1]            = 0;            /* rb_OwnKey   must be 0 */
         root_buf[2]            = 0;            /* rb_SeqNum   must be 0 */
@@ -726,7 +726,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
            cached copy of the bm block covering new_root with the FREE bit
            set (from before our write).  If bm_flag=VALID, FFS trusts that
            cached state and allocates new_root for file data on the first
-           write → root overwritten → "Uninitialized" after next reboot.
+           write -> root overwritten -> "Uninitialized" after next reboot.
            With bm_flag=0, FFS knows the bitmap is invalid and rebuilds it
            from the directory tree.  It marks new_root USED (it found it as
            the root block) and the volume name in L[108] is preserved. */
@@ -744,7 +744,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
            A driver that returns success for TD_WRITE64 but ignores the
            write (common on some IDE/CF setups at byte offsets > 4 GB)
            will be caught here.  If verification fails we skip Phase 9b
-           and 9c — no further writes are attempted to avoid writing to
+           and 9c - no further writes are attempted to avoid writing to
            wrong disk locations. */
         {
             ULONG save_cs = root_buf[RL_CHKSUM];
@@ -771,14 +771,14 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 9b — update fhb_Parent in all of root's direct children   */
+    /* Phase 9b - update fhb_Parent in all of root's direct children   */
     FFS_PROGRESS("Updating file/directory parent pointers...");
     /*                                                                   */
     /* FFS v40 (exinfo.asm:682, 1024) checks:                           */
     /*   cmp.l vfhb_Parent(a0), <current_directory_key>                 */
     /* before including an entry in ExNext / ExAll results.  After root */
     /* relocation, file/dir headers still hold the OLD root block       */
-    /* number as their parent field → FFS skips every entry → "no      */
+    /* number as their parent field -> FFS skips every entry -> "no      */
     /* files".                                                           */
     /*                                                                   */
     /* Walk root hash table L[6..77] and every hash chain hanging off   */
@@ -820,14 +820,14 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 9 — update boot block bb[2] to point to new_root          */
+    /* Phase 9 - update boot block bb[2] to point to new_root          */
     FFS_PROGRESS("Updating boot block...");
     /*                                                                   */
     /* Some FFS implementations read the root block number from bb[2]   */
     /* of the partition boot block (the first block of the partition).  */
     /* Writing new_root here costs nothing and eliminates any ambiguity  */
     /* about which root block to use.  boot_buf still holds the boot    */
-    /* block data from Phase 1 — we just update the one field and       */
+    /* block data from Phase 1 - we just update the one field and       */
     /* write it back.                                                    */
     /* ---------------------------------------------------------------- */
     boot_buf[BL_ROOT_BLK] = new_root;
@@ -849,16 +849,16 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Phase 9c — stamp bm_flag=VALID on the OLD root block             */
+    /* Phase 9c - stamp bm_flag=VALID on the OLD root block             */
     /*                                                                   */
     /* After Inhibit(FALSE), FFS restarts using the OLD DosEnvec (RDB   */
-    /* is not written yet — new HiCyl is not visible to FFS yet).  FFS  */
+    /* is not written yet - new HiCyl is not visible to FFS yet).  FFS  */
     /* computes the root block number from the OLD DosEnvec.  If that   */
     /* old root has bm_flag=0 (e.g. from DiskSalv, a prior failed grow, */
     /* or any other corruption), FFS runs its bitmap validator.          */
     /*                                                                   */
     /* The validator scans all reachable file/dir blocks from the OLD    */
-    /* root, marks them USED, and marks EVERYTHING ELSE FREE — including */
+    /* root, marks them USED, and marks EVERYTHING ELSE FREE - including */
     /* new_root, which is not a regular file/dir block referenced from   */
     /* the old directory tree.  After validation: new_root = FREE.      */
     /* FFS then allocates new_root for the next file header written to   */
@@ -882,13 +882,13 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             bm_buf[RL_CHKSUM]          = 0;
             bm_buf[RL_CHKSUM]          = ffs_checksum(bm_buf, nlongs);
             if (!write_fs_block(bd, part_abs, root_blk, spb, bm_buf)) {
-                /* Non-fatal — log in err_buf temporarily but don't abort */
+                /* Non-fatal - log in err_buf temporarily but don't abort */
                 sprintf(err_buf,
                         "Warning: could not stamp bm_flag on old root at rel %lu\n"
                         "FFS may run bitmap validator after Inhibit release.\n"
                         "Filesystem written; reboot and verify.",
                         (unsigned long)root_blk);
-                /* We still set ok=TRUE below — the new filesystem structure
+                /* We still set ok=TRUE below - the new filesystem structure
                    is correct.  Worst case: FFS validator runs and we need
                    to DiskSalv.  Clear err_buf so success message shows. */
                 err_buf[0] = '\0';
@@ -945,7 +945,7 @@ done:
         Inhibit((STRPTR)inh_name, DOSFALSE);
 
     /* Give FFS time to process its message queue and run any validator
-       triggered by the restart.  FFS validator is asynchronous — it may
+       triggered by the restart.  FFS validator is asynchronous - it may
        not run until several scheduler ticks after Inhibit release.
        5 seconds is ample for any partition size on real or emulated hw. */
     FFS_PROGRESS("Waiting for FFS to resume (5 sec)...");
@@ -991,14 +991,14 @@ done:
                         (unsigned long)save_cs, (unsigned long)calc_cs,
                         (unsigned long)(part_abs + new_root * spb));
             }
-            /* bm_flag=0 is expected — FFS will run its validator after reboot */
+            /* bm_flag=0 is expected - FFS will run its validator after reboot */
         }
     }
 
     /* ------------------------------------------------------------------ */
     /* Stage 2b: verify the bm block covering new_root after Inhibit(FALSE)*/
     /* A bad bm checksum or new_root marked FREE here means FFS will run  */
-    /* its validator, which will free new_root → root overwritten on copy */
+    /* its validator, which will free new_root -> root overwritten on copy */
     /* ------------------------------------------------------------------ */
     if (ok && nr_bm_blknum != 0 && bm_buf) {
         if (!read_fs_block(bd, part_abs, nr_bm_blknum, spb, bm_buf)) {
@@ -1018,7 +1018,7 @@ done:
                         "BM block %lu CHECKSUM BAD after Inhibit(FALSE)!\n"
                         "stored=0x%08lX calc=0x%08lX\n"
                         "FFS validator will run and free new_root=%lu\n"
-                        "→ root will be overwritten on next file write",
+                        "-> root will be overwritten on next file write",
                         (unsigned long)nr_bm_blknum,
                         (unsigned long)save_cs, (unsigned long)calc_cs,
                         (unsigned long)new_root);
@@ -1027,7 +1027,7 @@ done:
                 sprintf(err_buf,
                         "BM block %lu: new_root=%lu marked FREE after Inhibit(FALSE)!\n"
                         "(off=%lu in bm block)\n"
-                        "FFS will allocate new_root for file data → root overwritten",
+                        "FFS will allocate new_root for file data -> root overwritten",
                         (unsigned long)nr_bm_blknum,
                         (unsigned long)new_root,
                         (unsigned long)nr_bm_off);
@@ -1036,7 +1036,7 @@ done:
     }
 
     /* On success, write diagnostic info to err_buf so the caller can
-       display it — useful to verify new_root matches FFS expectations. */
+       display it - useful to verify new_root matches FFS expectations. */
     if (ok) {
         /* Count hash table entries (non-zero = files/dirs in root).
            Hash table is L[6..77] (72 entries) in the root block. */

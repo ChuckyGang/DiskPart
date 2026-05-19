@@ -1,8 +1,8 @@
 /*
- * devices.c — Block device enumeration for DiskPart.
+ * devices.c - Block device enumeration for DiskPart.
  *
  * Devices_Scan:            instant two-phase discovery (DosList + exec DeviceList).
- *                          No I/O — pure kernel memory walk.
+ *                          No I/O - pure kernel memory walk.
  * Devices_GetUnitsForName: probe units for one driver, gather disk info.
  */
 
@@ -26,7 +26,7 @@
 /* ------------------------------------------------------------------ */
 
 /*
- * Exact-match blacklist — devices that are never disk controllers.
+ * Exact-match blacklist - devices that are never disk controllers.
  * Derived from HDToolBox 3.9 ASKDEVICE blacklist (~120 entries) plus
  * our own additions.  Case-insensitive comparison used below.
  */
@@ -88,7 +88,7 @@ static const char * const skip_devs[] = {
 };
 
 /*
- * Prefix blacklist — device names matching these prefixes are skipped.
+ * Prefix blacklist - device names matching these prefixes are skipped.
  * Handles the HDToolBox wildcard patterns (e.g. "hyperCOM#?.device").
  */
 static const char * const skip_prefixes[] = {
@@ -138,7 +138,7 @@ static BOOL is_skipped(const char *name)
 }
 
 /*
- * Force-include list — added unconditionally by Devices_Scan regardless of
+ * Force-include list - added unconditionally by Devices_Scan regardless of
  * whether the driver is mounted or even loaded in RAM.  Covers SCSI/IDE
  * controllers whose drivers may not appear in DosList or exec DeviceList
  * until first opened (e.g. a blank/unformatted disk).
@@ -170,7 +170,7 @@ static BOOL contains_scs_or_ide(const char *name)
     return FALSE;
 }
 
-/* Unit range hints — used only by Devices_GetUnitsForName(). */
+/* Unit range hints - used only by Devices_GetUnitsForName(). */
 static const struct { const char *name; ULONG max_unit; } known_devs[] = {
     { "scsi.device",       6 },
     { "ide.device",        3 },
@@ -217,7 +217,7 @@ void Devices_Scan(struct DevNameList *nl)
             add_name(nl, force_devs[i]);
     }
 
-    /* Phase 1: AmigaDOS DosList — finds drivers backing mounted partitions.
+    /* Phase 1: AmigaDOS DosList - finds drivers backing mounted partitions.
        Pure memory walk, no I/O. */
     dol = LockDosList(LDF_DEVICES | LDF_READ);
     while ((dol = NextDosEntry(dol, LDF_DEVICES)) != NULL) {
@@ -256,7 +256,7 @@ void Devices_Scan(struct DevNameList *nl)
     }
     UnLockDosList(LDF_DEVICES | LDF_READ);
 
-    /* Phase 2: exec DeviceList — all device drivers currently in RAM.
+    /* Phase 2: exec DeviceList - all device drivers currently in RAM.
        Catches drivers loaded but with no mounted DOS partitions (e.g. an
        unformatted disk, or a SCSI card whose disks failed to mount).
        Walk under Forbid() so the list doesn't change under us. */
@@ -276,7 +276,7 @@ void Devices_Scan(struct DevNameList *nl)
     Permit();
 
     /* Phase 3: collect version numbers from exec DeviceList.
-       Devices are struct Library subclasses — lib_Version / lib_Revision
+       Devices are struct Library subclasses - lib_Version / lib_Revision
        are valid for any open driver.  display[] is filled later by
        DevNameList_FormatDisplay() once the screen font metrics are known. */
     {

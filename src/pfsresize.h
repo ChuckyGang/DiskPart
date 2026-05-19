@@ -1,5 +1,5 @@
 /*
- * pfsresize.h — Experimental PFS3/PFS2 filesystem grow after a partition
+ * pfsresize.h - Experimental PFS3/PFS2 filesystem grow after a partition
  *               cylinder range extension.
  *
  * EXPERIMENTAL: writes filesystem metadata directly to disk.
@@ -23,7 +23,7 @@ BOOL PFS_IsSupportedType(ULONG dostype);
  * cylinder range.  pi->high_cyl must already be set to the NEW (larger)
  * value.  old_high_cyl is the value it had before the edit.
  *
- * Writes the updated rootblock cluster directly to disk — the RDB write
+ * Writes the updated rootblock cluster directly to disk - the RDB write
  * (high_cyl update) should happen AFTER this call succeeds.
  *
  * Reversible: the original rootblock cluster is saved in memory before

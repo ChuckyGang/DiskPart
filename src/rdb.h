@@ -1,5 +1,5 @@
 /*
- * rdb.h — Block device handle and RDB structures for DiskPart.
+ * rdb.h - Block device handle and RDB structures for DiskPart.
  */
 
 #ifndef RDB_H
@@ -46,7 +46,7 @@ typedef unsigned long long UQUAD;
 /* Open block device handle                                            */
 /* ------------------------------------------------------------------ */
 
-/* Backend kind for BlockDev — selects between exec.device I/O
+/* Backend kind for BlockDev - selects between exec.device I/O
  * (uaehf.device, scsi.device, ...) and dos.library file I/O for image files. */
 #define BD_DEVICE   0
 #define BD_FILE     1

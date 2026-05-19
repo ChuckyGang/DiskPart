@@ -1,5 +1,5 @@
 /*
- * sfsresize.c — Experimental SmartFileSystem (SFS) partition grow.
+ * sfsresize.c - Experimental SmartFileSystem (SFS) partition grow.
  *
  * TWO STRATEGIES, chosen automatically:
  *
@@ -23,7 +23,7 @@
  *
  * COMMON FINAL STEPS (both strategies):
  *    - Write new end root at new_totalblocks-1 (seqnum = max+1).
- *    - Write updated start root at block 0  (seqnum = max+2 → authoritative).
+ *    - Write updated start root at block 0  (seqnum = max+2 -> authoritative).
  *    - Delay(50) + Inhibit(TRUE)+Inhibit(FALSE) to flush SFS cache.
  *
  * WRITE ORDER:
@@ -37,10 +37,10 @@
  *    root restores the original structure completely.
  *
  * REFERENCES (SFS source, /home/john/Downloads/SFS/Smartfilesystem/Sources):
- *   fs/blockstructure.h  — fsRootBlock, fsBlockHeader layout
- *   fs/bitmap.h          — fsBitmap, BITMAP_ID
- *   SFScheck/SFScheck.c  — checkrootblock, blocks_inbitmap formula
- *   SFScheck/asmsupport.s — CALCCHECKSUM: acc=1, add all ULONGs; 0=valid
+ *   fs/blockstructure.h  - fsRootBlock, fsBlockHeader layout
+ *   fs/bitmap.h          - fsBitmap, BITMAP_ID
+ *   SFScheck/SFScheck.c  - checkrootblock, blocks_inbitmap formula
+ *   SFScheck/asmsupport.s - CALCCHECKSUM: acc=1, add all ULONGs; 0=valid
  */
 
 #include <exec/types.h>
@@ -67,9 +67,9 @@ extern struct IntuitionBase *IntuitionBase;
 /* ------------------------------------------------------------------ */
 /* SFS on-disk block IDs                                               */
 /* ------------------------------------------------------------------ */
-#define SFS_ROOT_ID   0x53465300UL   /* 'SFS\0' — root block id field */
-#define SFS_BITMAP_ID 0x42544D50UL   /* 'BTMP' — bitmap block id      */
-#define SFS_OBJC_ID   0x4F424A43UL   /* 'OBJC' — objectcontainer id   */
+#define SFS_ROOT_ID   0x53465300UL   /* 'SFS\0' - root block id field */
+#define SFS_BITMAP_ID 0x42544D50UL   /* 'BTMP' - bitmap block id      */
+#define SFS_OBJC_ID   0x4F424A43UL   /* 'OBJC' - objectcontainer id   */
 
 /* fsRootInfo is at the END of the rootobjectcontainer (OBJC) block.
  * Layout: deletedblocks(+0), deletedfiles(+4), freeblocks(+8), ...
@@ -487,7 +487,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
             /* Apply bit changes to existing bitmap caches */
             {
-                /* Old end root → FREE; also free the bitmap block's slack tail.
+                /* Old end root -> FREE; also free the bitmap block's slack tail.
                    oe_bmb == old_bmb_count-1 always.  The tail [totalblocks ..
                    oe_base+blocks_inbitmap-1] was marked 0 (non-existent) but
                    is now valid free space after grow. */
@@ -503,7 +503,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                                           totalblocks, oe_tail, 1);
                 }
 
-                /* New bitmap block positions → IN USE */
+                /* New bitmap block positions -> IN USE */
                 for (k = 0; k < num_new_bmb; k++) {
                     ULONG pos      = bitmapbase + old_bmb_count + k;
                     ULONG bmb_for  = pos / blocks_inbitmap;
@@ -555,10 +555,10 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                 bm = (ULONG *)(buf_bmb_work + SFS_BM_HEADER_SIZE);
                 for (j = 0; j < ul_count; j++) bm[j] = 0xFFFFFFFFUL;
 
-                /* New end root → IN USE */
+                /* New end root -> IN USE */
                 if (new_totalblocks-1 >= base_blk && new_totalblocks-1 <= blk_end)
                     sfs_bm_set_used(buf_bmb_work, base_blk, new_totalblocks-1);
-                /* Non-existent blocks → 0 */
+                /* Non-existent blocks -> 0 */
                 if (blk_end >= new_totalblocks)
                     sfs_bm_mark_range(buf_bmb_work, base_blk, blocks_inbitmap,
                                       new_totalblocks, blk_end, 0);
@@ -677,7 +677,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     } else {
         /* ================================================================ */
         /* num_new_bmb == 0: update only the existing bitmap blocks for     */
-        /* old end root → free and new end root → in use.                  */
+        /* old end root -> free and new end root -> in use.                  */
         /* ================================================================ */
         ULONG oe_bmb  = (totalblocks-1) / blocks_inbitmap;
         ULONG ne_bmb  = (new_totalblocks-1) / blocks_inbitmap;
@@ -709,7 +709,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             for (j = 0; (ULONG)j < sfs_blocksize; j++)
                 mod_orig[mi][j] = mod_buf[mi][j];
         }
-        /* Old end root → FREE; free new blocks [totalblocks .. new_totalblocks-2].
+        /* Old end root -> FREE; free new blocks [totalblocks .. new_totalblocks-2].
            When num_new_bmb==0, both old and new end roots are always in the same
            bitmap block (oe_bmb==ne_bmb), and all new free blocks are in that block
            too (proven: delta_sfs < blocks_inbitmap in this case). */
@@ -723,7 +723,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                               totalblocks, new_totalblocks - 2, 1);
         }
 
-        /* New end root → IN USE */
+        /* New end root -> IN USE */
         for (mi = 0; mi < num_mod; mi++)
             if (mod_idx[mi] == ne_bmb) break;
         if (mi < num_mod)
@@ -764,7 +764,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     /* ---------------------------------------------------------------- */
-    /* Write updated start root (highest seqnum → authoritative)        */
+    /* Write updated start root (highest seqnum -> authoritative)        */
     /* ---------------------------------------------------------------- */
     SFS_PROGRESS("Writing updated SFS start root...");
     sfs_setl(buf_root0, SFS_RB_TOTALBLOCKS, new_totalblocks);
@@ -786,7 +786,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* reboot (Ctrl-Amiga-Amiga) the device driver may keep the OLD      */
     /* DosEnvec; SFS then finds the old end root (totalblocks matches),  */
     /* rejects our new start root (totalblocks mismatch), and uses the   */
-    /* old bitmapbase → shows old free space.  Zeroing the block makes   */
+    /* old bitmapbase -> shows old free space.  Zeroing the block makes   */
     /* it permanently invalid regardless of DosEnvec.                    */
     /* Failure is non-fatal: the grow succeeded; warn in diagnostic.     */
     /* ---------------------------------------------------------------- */
@@ -806,7 +806,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                 sfs_getl(buf_bmb_read, SFS_RB_ID) == SFS_ROOT_ID &&
                 sfs_verify_checksum(buf_bmb_read, sfs_blocksize) &&
                 sfs_getl(buf_bmb_read, SFS_RB_OWNBLOCK) == older) {
-                /* Valid old end root — zero it */
+                /* Valid old end root - zero it */
                 if (sfs_write_block(bd, phys_base, older, sfs_phys, buf_bmb_work))
                     old_end_inv |= 2;
             }
@@ -872,7 +872,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             vrf_tb = sfs_getl(buf_bmb_read, SFS_RB_TOTALBLOCKS);
             vrf_bm = sfs_getl(buf_bmb_read, SFS_RB_BITMAPBASE);
         }
-        /* Count free bits (=1 bits) in LAST OLD bitmap block — this is where
+        /* Count free bits (=1 bits) in LAST OLD bitmap block - this is where
            the newly freed blocks appear (tail of old coverage + new space). */
         if (sfs_read_block(bd, phys_base,
                            new_bitmapbase_for_root + old_bmb_count - 1,
@@ -958,7 +958,7 @@ done:
                 sfs_write_block(bd, phys_base, bitmapbase + mod_idx[mi],
                                 sfs_phys, mod_orig[mi]);
         /* Rollback relocation: new bitmap blocks in extended area don't need
-           rollback — restoring start root (below) makes old structure authoritative */
+           rollback - restoring start root (below) makes old structure authoritative */
     }
     /* Always restore start root if it was overwritten */
     if (!ok && root0_written && buf_orig0)

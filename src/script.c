@@ -1,5 +1,5 @@
 /*
- * script.c — DiskPart script engine.
+ * script.c - DiskPart script engine.
  *
  * Reads a text file and executes commands one line at a time.
  * All partition/filesystem changes are held in memory; only WRITE
@@ -73,7 +73,7 @@ static void sc_warn(ULONG ln, const char *msg)
 }
 
 /*
- * sc_ask_yn — ask a Y/N question during script execution.
+ * sc_ask_yn - ask a Y/N question during script execution.
  *
  * With force=TRUE: prints question with "[Y]" and returns TRUE.
  * With force=FALSE: prompts interactively; returns TRUE only for Y/y.
@@ -215,9 +215,9 @@ static BOOL parse_dostype(const char *s, ULONG *out)
 }
 
 /*
- * parse_low — parse LOW= value.
- *   NEXT  → first free cylinder after the last existing partition
- *   <n>   → literal cylinder number
+ * parse_low - parse LOW= value.
+ *   NEXT  -> first free cylinder after the last existing partition
+ *   <n>   -> literal cylinder number
  */
 static ULONG parse_low(const char *s, struct RDBInfo *rdb)
 {
@@ -250,10 +250,10 @@ static ULONG parse_low(const char *s, struct RDBInfo *rdb)
 }
 
 /*
- * parse_high — parse HIGH= value.
- *   END       → hi_cyl (last usable cylinder on disk)
- *   +NNN[KMG] → LOW + cylinders_for_NNN - 1
- *   <n>       → literal cylinder number
+ * parse_high - parse HIGH= value.
+ *   END       -> hi_cyl (last usable cylinder on disk)
+ *   +NNN[KMG] -> LOW + cylinders_for_NNN - 1
+ *   <n>       -> literal cylinder number
  *
  * Returns FALSE if the value is invalid (e.g. +size too small for 1 cyl).
  */
@@ -284,7 +284,7 @@ static BOOL parse_high(const char *s, ULONG low, ULONG hi_cyl,
     return TRUE;
 }
 
-/* parse_size_bytes — accept a bare number or n[KMG] suffix as a byte count.
+/* parse_size_bytes - accept a bare number or n[KMG] suffix as a byte count.
  * Returns 0 on failure (since 0-byte images are also invalid). */
 static UQUAD parse_size_bytes(const char *s)
 {
@@ -341,8 +341,8 @@ static void open_close_existing(ULONG ln)
 
 /* ------------------------------------------------------------------ */
 /* OPEN                                                                */
-/*   OPEN <device> <unit>     — exec.device backend                   */
-/*   OPEN FILE   <path>       — image file backend                    */
+/*   OPEN <device> <unit>     - exec.device backend                   */
+/*   OPEN FILE   <path>       - image file backend                    */
 /* ------------------------------------------------------------------ */
 
 static LONG do_open(ULONG ln, char **tok, UWORD ntok)
@@ -540,12 +540,12 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
     if (nlen == 0) { sc_err(ln, "ADDPART: NAME is empty."); return RETURN_ERROR; }
 
-    /* LOW (required) — literal cyl or NEXT */
+    /* LOW (required) - literal cyl or NEXT */
     v = kwarg(tok, ntok, "LOW");
     if (!v) { sc_err(ln, "ADDPART requires LOW=<cyl|NEXT>."); return RETURN_ERROR; }
     low = parse_low(v, &s_st.rdb);
 
-    /* HIGH (required) — literal cyl, END, or +NNN[KMG] */
+    /* HIGH (required) - literal cyl, END, or +NNN[KMG] */
     v = kwarg(tok, ntok, "HIGH");
     if (!v) { sc_err(ln, "ADDPART requires HIGH=<cyl|END|+size>."); return RETURN_ERROR; }
     if (!parse_high(v, low, s_st.rdb.hi_cyl,
@@ -559,11 +559,11 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     if (v && !parse_dostype(v, &dostype))
         { sc_err(ln, "ADDPART: unrecognised TYPE."); return RETURN_ERROR; }
 
-    /* BOOTPRI (optional) — implies BOOTABLE */
+    /* BOOTPRI (optional) - implies BOOTABLE */
     v = kwarg(tok, ntok, "BOOTPRI");
     if (v) { bootpri = strtol(v, NULL, 10); bootable = TRUE; }
 
-    /* BOOTABLE flag (optional) — can also be set independently */
+    /* BOOTABLE flag (optional) - can also be set independently */
     if (has_flag(tok, ntok, "BOOTABLE")) bootable = TRUE;
 
     /* Validate range */
@@ -696,7 +696,7 @@ static LONG do_checkrdb(ULONG ln)
 }
 
 /* ------------------------------------------------------------------ */
-/* VERIFYRDB — compare single-block backup file to RDB block on disk  */
+/* VERIFYRDB - compare single-block backup file to RDB block on disk  */
 /* ------------------------------------------------------------------ */
 
 static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
@@ -758,7 +758,7 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
     if (diff_count == 0) {
         sc_puts("VERIFYRDB: MATCH\n"); return RETURN_OK;
     } else {
-        sprintf(s_msg, "VERIFYRDB: MISMATCH — %lu byte(s) differ, first @ offset %lu.\n",
+        sprintf(s_msg, "VERIFYRDB: MISMATCH - %lu byte(s) differ, first @ offset %lu.\n",
                 (unsigned long)diff_count, (unsigned long)first_diff);
         sc_puts(s_msg);
         return RETURN_WARN;
@@ -766,7 +766,7 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
-/* VERIFYEXT — compare extended backup file to disk blocks            */
+/* VERIFYEXT - compare extended backup file to disk blocks            */
 /* ------------------------------------------------------------------ */
 
 static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
@@ -914,7 +914,7 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
     fi->global_vec   = (ULONG)-1L;
     fi->seg_list_blk = RDB_END_MARK;
 
-    /* FILE (optional) — load filesystem binary */
+    /* FILE (optional) - load filesystem binary */
     v = kwarg(tok, ntok, "FILE");
     if (v && v[0]) {
         BPTR   fh;
@@ -1019,8 +1019,8 @@ static LONG do_write(ULONG ln)
 }
 
 /* ------------------------------------------------------------------ */
-/* IMAGEOUT FILE=<path>  — dump open device to a new image file       */
-/* IMAGEIN  FILE=<path>  — write image file back to open device       */
+/* IMAGEOUT FILE=<path>  - dump open device to a new image file       */
+/* IMAGEIN  FILE=<path>  - write image file back to open device       */
 /* ------------------------------------------------------------------ */
 
 static ULONG s_prog_pct;

@@ -1,5 +1,5 @@
 /*
- * clib.c — Minimal C library for DiskPart (-nostdlib, Bartman ELF toolchain).
+ * clib.c - Minimal C library for DiskPart (-nostdlib, Bartman ELF toolchain).
  *
  * Provides: sprintf, strcmp, strncpy, strtoul, strtol.
  * memset/memcpy/memmove/strlen are in support/gcc8_c_support.c.

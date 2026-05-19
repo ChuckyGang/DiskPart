@@ -1,5 +1,5 @@
 /*
- * partview_image.c — Whole-disk image dump and restore (GUI side).
+ * partview_image.c - Whole-disk image dump and restore (GUI side).
  *
  * Two operations available from the Advanced menu:
  *   image_dump_disk    : current disk -> image file
@@ -35,7 +35,7 @@ extern struct Library *AslBase;
 
 /* ------------------------------------------------------------------ */
 /* Small progress window: one status line that gets repainted in      */
-/* place every callback. No close gadget, no buttons — caller owns    */
+/* place every callback. No close gadget, no buttons - caller owns    */
 /* the lifecycle (open before the copy, close after).                 */
 /* ------------------------------------------------------------------ */
 
@@ -156,7 +156,7 @@ static void prog_close(struct ImgProgress *p)
 
 /* Drain any pending IntuiMessages, watching for cancel triggers
  * (Cancel button, close gadget, or ESC key). Sets p->cancelled if any
- * trigger fires. Non-blocking — returns immediately if no messages. */
+ * trigger fires. Non-blocking - returns immediately if no messages. */
 static void prog_check_input(struct ImgProgress *p)
 {
     struct IntuiMessage *imsg;
@@ -256,7 +256,7 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
         char body[400];
         FormatSize(disk_bytes, size_str);
         sprintf(body,
-            "This disk is %s — larger than 2 GB.\n\n"
+            "This disk is %s - larger than 2 GB.\n\n"
             "The destination filesystem MUST support files\n"
             "larger than 2 GB (SFS, PFS3, FFS-NSD or\n"
             "FFS post-OS3.5).  On older FFS the dump will\n"

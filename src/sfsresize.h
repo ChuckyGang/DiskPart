@@ -1,5 +1,5 @@
 /*
- * sfsresize.h — Experimental SmartFileSystem (SFS) partition grow after a
+ * sfsresize.h - Experimental SmartFileSystem (SFS) partition grow after a
  *               cylinder range extension.
  *
  * EXPERIMENTAL: writes filesystem metadata directly to disk.
