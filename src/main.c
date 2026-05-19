@@ -116,7 +116,7 @@ static BOOL str_contains_ci(const char *hay, const char *needle)
 /* Returns TRUE if devname looks like a storage device worth showing by default. */
 static BOOL is_storage_device(const char *name)
 {
-    static const char * const keys[] = { "ide", "scsi", "flash", "usb", "uae", "gvp", "phase5", "ppc", "sdhc", "emmc", "nvme", NULL };
+    static const char * const keys[] = { "ide", "scsi", "flash", "usb", "uae", "gvp", "phase5", "ppc", "sd", "mmc", "nvme", "card", "warp", NULL };
     UWORD i;
     for (i = 0; keys[i]; i++)
         if (str_contains_ci(name, keys[i])) return TRUE;
@@ -176,7 +176,11 @@ static WORD run_devname_window(void)
     struct Window  *win       = NULL;
     WORD            sel       = -1;
     WORD            result    = -1;
-    BOOL            show_all  = FALSE;
+    /* Sticky across window reopens so a user-enabled Show All survives a
+       round-trip through the partition editor.  Otherwise devices outside
+       the default keyword filter (e.g. warpSD.device) appear to vanish
+       after they're used. */
+    static BOOL     show_all  = FALSE;
 
     struct Node name_nodes[MAX_DEV_NAMES];
     struct List name_list;
@@ -212,7 +216,7 @@ static WORD run_devname_window(void)
         UWORD btn_h   = font_h + 6;
         UWORD lbl_h   = (UWORD)(font_h + 2);  /* label floats above gadget top */
         /* Size the listview to fit the actual device count.
-           Min 6 rows, max whatever fits on screen above the fixed UI below it. */
+           Min 10 rows, max whatever fits on screen above the fixed UI below it. */
         UWORD lv_h;
         {
             UWORD row_h     = (UWORD)(font_h + 2);
@@ -222,9 +226,8 @@ static WORD run_devname_window(void)
                             + btn_h + pad           /* button row */
                             + bor_b;                /* bottom border */
             UWORD max_rows  = (scr->Height > fixed_h + row_h * 4)
-                              ? (UWORD)((scr->Height - fixed_h) / row_h) : 6;
-            UWORD want_rows = (display_count > 4) ? display_count : 4;
-            if (want_rows < 6)  want_rows = 6;
+                              ? (UWORD)((scr->Height - fixed_h) / row_h) : 10;
+            UWORD want_rows = (display_count > 10) ? display_count : 10;
             if (want_rows > max_rows) want_rows = max_rows;
             lv_h = row_h * want_rows;
         }
@@ -286,7 +289,7 @@ static WORD run_devname_window(void)
             if (!prev) goto cleanup;
 
             ng.ng_LeftEdge   = bor_l + pad + btn_w + pad;
-            ng.ng_GadgetText = "Show All";
+            ng.ng_GadgetText = show_all ? "Filter" : "Show All";
             ng.ng_GadgetID   = GID_SHOWALL;
             showall_gad = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
             if (!showall_gad) goto cleanup;
