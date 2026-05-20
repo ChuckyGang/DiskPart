@@ -202,6 +202,11 @@ static LONG maybe_create_image(LONG *args)
         cli_puts("ERROR: SIZE must be at least 512 bytes.\n");
         return RETURN_ERROR;
     }
+    /* dos.library Seek is signed 32-bit. */
+    if (size_bytes > (UQUAD)0x7FFFFE00UL) {
+        cli_puts("ERROR: SIZE exceeds the 2 GB dos.library image-file limit.\n");
+        return RETURN_ERROR;
+    }
 
     FormatSize(size_bytes, szbuf);
     sprintf(outbuf, "Creating image \"%s\" (%s)...\n", path, szbuf);

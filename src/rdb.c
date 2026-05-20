@@ -173,6 +173,11 @@ struct BlockDev *BlockDev_CreateFile(const char *path, UQUAD size_bytes)
 
     if (!path || !*path || size_bytes < 512) return NULL;
 
+    /* dos.library Seek/SetFileSize use signed LONG offsets, so image files
+       are capped at the largest block-aligned positive LONG value.  Reject
+       anything larger here rather than silently truncating to 32 bits. */
+    if (size_bytes > (UQUAD)0x7FFFFE00UL) return NULL;
+
     /* Round up to a 512-byte block boundary. */
     sz = (ULONG)((size_bytes + 511) & ~(UQUAD)511);
     if (sz == 0) return NULL;   /* overflow guard */
@@ -594,6 +599,12 @@ void FormatSize(UQUAD bytes, char *buf)
 /* ------------------------------------------------------------------ */
 #define CHAIN_SEEN_MAX 128
 
+/* Hard cap on LSEG chain length.  Beyond chain_seen's 128-entry window the
+   cycle detector saturates and stops recording new entries, so a non-cyclic
+   chain longer than this would walk forever on a corrupt disk.  128 LSEG
+   blocks is ~60 KB of fs binary - well beyond anything realistic. */
+#define MAX_LSEG_BLOCKS 128
+
 static BOOL chain_seen(ULONG *seen, UWORD *count, ULONG blk)
 {
     UWORD i;
@@ -832,7 +843,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
         memset(lseg_seen, 0, sizeof(lseg_seen));
         num_lseg = 0;
         lseg_blk = fi->seg_list_blk;
-        while (lseg_blk != RDB_END_MARK) {
+        while (lseg_blk != RDB_END_MARK && num_lseg < MAX_LSEG_BLOCKS) {
             struct LoadSegBlock *lsb;
             const ULONG *lp;
             ULONG sum, sl, ci;
@@ -1050,7 +1061,14 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
         }
 
         lseg_blk = fi->seg_list_blk;
+        {
+        ULONG lseg_count = 0;
         while (lseg_blk != RDB_END_MARK) {
+            if (lseg_count >= MAX_LSEG_BLOCKS) {
+                IC_ERRLINE("    LSEG chain exceeds %u blocks (truncated)",
+                           (unsigned)MAX_LSEG_BLOCKS);
+                errors++; break;
+            }
             if (chain_seen(lseg_seen, &lseg_seen_n, lseg_blk)) {
                 IC_ERRLINE("    LSEG LOOP at block %lu", lseg_blk);
                 errors++; break;
@@ -1076,6 +1094,8 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
                 }
             }
             lseg_blk = buf[127];
+            lseg_count++;
+        }
         }
         if (lseg_bad > 0)
             IC_LINE("    LSEG: %lu bad / %lu OK", lseg_bad, lseg_ok);

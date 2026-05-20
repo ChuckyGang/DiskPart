@@ -1043,6 +1043,17 @@ static BOOL prepare_image(const char *path)
         EasyRequestArgs(NULL, &es, NULL, NULL);
         return FALSE;
     }
+    /* dos.library Seek is signed 32-bit. */
+    if (size_bytes > (UQUAD)0x7FFFFE00UL) {
+        struct EasyStruct es;
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)"DiskPart";
+        es.es_TextFormat   = (UBYTE *)"Size exceeds the 2 GB dos.library image-file limit.";
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequestArgs(NULL, &es, NULL, NULL);
+        return FALSE;
+    }
 
     bd = BlockDev_CreateFile(path, size_bytes);
     if (!bd) {

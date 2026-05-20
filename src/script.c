@@ -406,6 +406,11 @@ static LONG do_create(ULONG ln, char **tok, UWORD ntok)
         sc_err(ln, "CREATE SIZE must be at least 512 bytes.");
         return RETURN_ERROR;
     }
+    /* dos.library Seek is signed 32-bit. */
+    if (size_bytes > (UQUAD)0x7FFFFE00UL) {
+        sc_err(ln, "CREATE SIZE exceeds the 2 GB dos.library image-file limit.");
+        return RETURN_ERROR;
+    }
 
     open_close_existing(ln);
 
