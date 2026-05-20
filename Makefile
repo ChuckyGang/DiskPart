@@ -15,10 +15,14 @@
 BARTMAN ?= /home/john/.vscode/extensions/bartmanabyss.amiga-debug-1.8.2/bin/linux
 AMIGA   ?= /opt/amiga
 
-# Auto-detect TOOLCHAIN if not specified: prefer bebbo when /opt/amiga is
-# present, otherwise fall back to bartman.
+# Auto-detect TOOLCHAIN if not specified: prefer Bartman when its extension
+# is installed (the Bebbo build currently has a startup-hang issue on this
+# project), otherwise fall back to Bebbo. CI/docker.sh sets TOOLCHAIN=bebbo
+# explicitly, so it bypasses this preference.
 ifeq ($(origin TOOLCHAIN),undefined)
-  ifneq ($(wildcard $(AMIGA)/bin/m68k-amigaos-gcc),)
+  ifneq ($(wildcard $(BARTMAN)/opt/bin/m68k-amiga-elf-gcc),)
+    TOOLCHAIN := bartman
+  else ifneq ($(wildcard $(AMIGA)/bin/m68k-amigaos-gcc),)
     TOOLCHAIN := bebbo
   else
     TOOLCHAIN := bartman
