@@ -70,13 +70,24 @@ LDFLAGS = $(TC_LDFLAGS)
 
 $(shell mkdir -p obj out)
 
+# Auto-clean stale objects when the toolchain changes. The .o files don't
+# track which compiler produced them, so switching Bebbo<->Bartman would
+# otherwise produce "file not recognized" link errors (or worse, mismatched
+# ABI). Stamp the current toolchain in obj/.toolchain and wipe on mismatch.
+TC_STAMP := obj/.toolchain
+ifneq ($(shell cat $(TC_STAMP) 2>/dev/null),$(TOOLCHAIN))
+  $(info Toolchain changed -> $(TOOLCHAIN); clearing stale objects)
+  $(shell rm -f obj/*.o obj/*.d 2>/dev/null)
+  $(shell echo $(TOOLCHAIN) > $(TC_STAMP))
+endif
+
 src_c   := $(wildcard src/*.c)
 src_obj := $(addprefix obj/,$(patsubst src/%.c,%.o,$(src_c)))
 objects := $(src_obj) $(TC_SUPPORT_OBJ)
 
 .PHONY: all clean icon FORCE
 
-all: $(program)
+all: $(program) $(program).info
 
 # build.o embeds __DATE__/__TIME__ via build.c - force-rebuild every
 # invocation so the stamp matches the current build.
@@ -116,7 +127,7 @@ endif
 
 clean:
 	$(info Cleaning...)
-	@rm -f obj/* out/*
+	@find obj out -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
 
 -include $(src_obj:.o=.d)
 ifeq ($(TOOLCHAIN),bartman)
