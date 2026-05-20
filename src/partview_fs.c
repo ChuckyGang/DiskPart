@@ -92,6 +92,64 @@ static void build_fs_list(const struct RDBInfo *rdb)
     }
 }
 
+/* Filename-based DosType recommendations for FSHD entries. Matched as
+ * case-insensitive substring against the basename of the chosen file;
+ * first hit wins, so list more specific patterns before broader ones. */
+static const struct {
+    const char *substr;
+    ULONG       dostype;
+} fs_dt_guesses[] = {
+    { "pfs3aio",          0x50465303UL },  /* PFS\3 */
+    { "pfs3",             0x50465303UL },  /* PFS\3 */
+    { "pds3",             0x50445303UL },  /* PDS\3 */
+    { "pfs2",             0x50465302UL },  /* PFS\2 */
+    { "pfs",              0x50465303UL },  /* default PFS  -> PFS\3 */
+    { "smartfilesystem",  0x53465300UL },  /* SFS\0 */
+    { "smartfs",          0x53465300UL },
+    { "sfs2",             0x53465302UL },  /* SFS\2 */
+    { "sfs",              0x53465300UL },
+    { "crossdos",         0x4D534400UL },  /* MSD\0 */
+    { "fastfilesystem",   0x444F5301UL },  /* DOS\1 */
+    { "ffs",              0x444F5301UL },  /* DOS\1 */
+};
+#define NUM_FS_DT_GUESSES (sizeof(fs_dt_guesses) / sizeof(fs_dt_guesses[0]))
+
+static int fs_lower(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
+
+static const char *fs_basename(const char *path)
+{
+    const char *p = path, *b = path;
+    while (*p) {
+        if (*p == '/' || *p == ':') b = p + 1;
+        p++;
+    }
+    return b;
+}
+
+static BOOL fs_ci_contains(const char *hay, const char *needle)
+{
+    while (*hay) {
+        const char *h = hay, *n = needle;
+        while (*n && fs_lower((UBYTE)*h) == fs_lower((UBYTE)*n)) { h++; n++; }
+        if (!*n) return TRUE;
+        hay++;
+    }
+    return FALSE;
+}
+
+/* Returns guessed DosType (0 if no match) for a filesystem handler path. */
+static ULONG guess_dostype_from_path(const char *path)
+{
+    const char *base;
+    UWORD i;
+    if (!path || !*path) return 0;
+    base = fs_basename(path);
+    for (i = 0; i < NUM_FS_DT_GUESSES; i++)
+        if (fs_ci_contains(base, fs_dt_guesses[i].substr))
+            return fs_dt_guesses[i].dostype;
+    return 0;
+}
+
 /* Load a file path into *fi->code/code_size. Shows error on failure.
    Returns TRUE on success (or if path is empty = no-code entry).     */
 static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi)
@@ -373,6 +431,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                                   ASL_FileRequest, asl_tags); }
                             if (fr) {
                                 if (AslRequest(fr, NULL)) {
+                                    ULONG guessed;
                                     /* Build full path: drawer + file */
                                     strncpy(file_str, fr->fr_Drawer, sizeof(file_str)-1);
                                     file_str[sizeof(file_str)-1] = '\0';
@@ -381,11 +440,36 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                                     /* Update the string gadget */
                                     { struct TagItem ut[]={{GTST_String,(ULONG)file_str},{TAG_DONE,0}};
                                       GT_SetGadgetAttrsA(file_gad, win, NULL, ut); }
+                                    /* Recommend DosType based on the filename */
+                                    guessed = guess_dostype_from_path(file_str);
+                                    if (guessed != 0) {
+                                        FormatDosType(guessed, dt_str);
+                                        sprintf(hex_str, "0x%08lX", guessed);
+                                        { struct TagItem dtt[]={{GTST_String,(ULONG)dt_str},{TAG_DONE,0}};
+                                          GT_SetGadgetAttrsA(dostype_gad, win, NULL, dtt); }
+                                        { struct TagItem htt[]={{GTTX_Text,(ULONG)hex_str},{TAG_DONE,0}};
+                                          GT_SetGadgetAttrsA(hex_gad, win, NULL, htt); }
+                                    }
                                 }
                                 FreeAslRequest(fr);
                             }
                         }
                         break;
+
+                    case AFSDLG_FILE: {
+                        /* User pressed Return in the File field - try a DosType guess */
+                        struct StringInfo *si = (struct StringInfo *)file_gad->SpecialInfo;
+                        ULONG guessed = guess_dostype_from_path((char *)si->Buffer);
+                        if (guessed != 0) {
+                            FormatDosType(guessed, dt_str);
+                            sprintf(hex_str, "0x%08lX", guessed);
+                            { struct TagItem dtt[]={{GTST_String,(ULONG)dt_str},{TAG_DONE,0}};
+                              GT_SetGadgetAttrsA(dostype_gad, win, NULL, dtt); }
+                            { struct TagItem htt[]={{GTTX_Text,(ULONG)hex_str},{TAG_DONE,0}};
+                              GT_SetGadgetAttrsA(hex_gad, win, NULL, htt); }
+                        }
+                        break;
+                    }
 
                     case AFSDLG_NULL: {
                         is_null = (null_gad->Flags & GFLG_SELECTED) ? TRUE : FALSE;
