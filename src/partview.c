@@ -991,6 +991,36 @@ static void next_drive_name(const struct RDBInfo *rdb, char *buf)
     strncpy(buf, "DH0", 31);   /* fallback, shouldn't happen */
 }
 
+/* Recommend block_size / sectors_per_block / max_transfer / mask for a
+ * brand-new partition. Logical FFS block size grows with partition size
+ * (conservative FFS buckets); MaxTransfer/Mask default to safe IDE values
+ * (0x1FE00 = 255 sectors, 0x7FFFFFFE).
+ *   <=512 MB -> 512   (spb=1)
+ *   <=2 GB   -> 1024  (spb=2)
+ *   <=4 GB   -> 2048  (spb=4)
+ *   > 4 GB   -> 4096  (spb=8)
+ * The dialog displays block_size * sectors_per_block as the FFS block size. */
+static void recommend_new_part_defaults(const struct RDBInfo *rdb,
+                                        ULONG low_cyl, ULONG high_cyl,
+                                        struct PartInfo *pi)
+{
+    ULONG heads   = rdb->heads   > 0 ? rdb->heads   : 1;
+    ULONG sectors = rdb->sectors > 0 ? rdb->sectors : 1;
+    ULONG cyls    = (high_cyl >= low_cyl) ? (high_cyl - low_cyl + 1) : 1;
+    UQUAD bytes   = (UQUAD)cyls * heads * sectors * 512ULL;
+    ULONG spb;
+
+    if      (bytes <= (UQUAD)512 * 1024 * 1024)         spb = 1;
+    else if (bytes <= (UQUAD)2   * 1024 * 1024 * 1024)  spb = 2;
+    else if (bytes <= (UQUAD)4   * 1024 * 1024 * 1024)  spb = 4;
+    else                                                spb = 8;
+
+    pi->block_size        = 512;
+    pi->sectors_per_block = spb;
+    pi->max_transfer      = 0x0001FE00UL;
+    pi->mask              = 0x7FFFFFFEUL;
+}
+
 static void find_free_range(const struct RDBInfo *rdb, ULONG *lo, ULONG *hi)
 {
     /* Sort partition ranges by low_cyl (insertion sort - n is small),
@@ -1933,13 +1963,11 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.high_cyl     = drag_new_hi;
                                 new_pi.heads        = rdb->heads;
                                 new_pi.sectors      = rdb->sectors;
-                                new_pi.block_size    = 512;
-                                new_pi.sectors_per_block = 1;
                                 new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
                                 new_pi.reserved_blks = 2;
                                 new_pi.interleave    = 0;
-                                new_pi.max_transfer  = 0x7FFFFFFFUL;
-                                new_pi.mask          = 0x7FFFFFFCUL;
+                                recommend_new_part_defaults(rdb,
+                                    new_pi.low_cyl, new_pi.high_cyl, &new_pi);
                                 new_pi.num_buffer    = 30;
                                 new_pi.buf_mem_type  = 0;
                                 new_pi.boot_blocks   = 0;
@@ -2336,13 +2364,11 @@ BOOL partview_run(const char *devname, ULONG unit)
                         new_pi.high_cyl     = hi;
                         new_pi.heads        = rdb->heads;
                         new_pi.sectors      = rdb->sectors;
-                        new_pi.block_size    = 512;
-                        new_pi.sectors_per_block = 1;
                         new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
                         new_pi.reserved_blks = 2;
                         new_pi.interleave    = 0;
-                        new_pi.max_transfer  = 0x7FFFFFFFUL;
-                        new_pi.mask          = 0x7FFFFFFCUL;
+                        recommend_new_part_defaults(rdb,
+                            new_pi.low_cyl, new_pi.high_cyl, &new_pi);
                         new_pi.num_buffer    = 30;
                         new_pi.buf_mem_type  = 0;
                         new_pi.boot_blocks   = 0;
