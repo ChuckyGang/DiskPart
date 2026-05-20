@@ -94,6 +94,7 @@ ifeq ($(NEED_ELF2HUNK),1)
 $(program): $(program).elf
 	$(info Elf2Hunk $@)
 	@$(ELF2HUNK) $(program).elf $(program)
+	@cp $(program) $(program).exe
 
 $(program).elf: $(objects)
 	$(info Linking $@)
