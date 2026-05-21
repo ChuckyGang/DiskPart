@@ -399,7 +399,7 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
       }
       Close(fh);
       { char msg[96];
-        sprintf(msg, "Extended RDB backup saved.\n%lu blocks (blocks %lu\x96%lu).",
+        sprintf(msg, "Extended RDB backup saved.\n%lu blocks (blocks %lu-%lu).",
                 (unsigned long)num_blocks,
                 (unsigned long)block_lo,
                 (unsigned long)block_hi);
@@ -524,7 +524,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
     { char msg[192];
       sprintf(msg,
           "LAST CHANCE\n\n"
-          "Write %lu blocks (blocks %lu\x96%lu) to\n"
+          "Write %lu blocks (blocks %lu-%lu) to\n"
           "%s unit %lu ?\n\n"
           "This CANNOT be undone.",
           (unsigned long)num_blocks,
