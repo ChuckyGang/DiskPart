@@ -22,6 +22,8 @@
 #include <libraries/gadtools.h>
 #include <devices/inputevent.h>
 #include <libraries/asl.h>
+#include <workbench/startup.h>
+#include <workbench/workbench.h>
 #ifndef IEQUALIFIER_DOUBLECLICK
 #define IEQUALIFIER_DOUBLECLICK 0x8000
 #endif
@@ -31,6 +33,7 @@
 #include <proto/graphics.h>
 #include <proto/gadtools.h>
 #include <proto/asl.h>
+#include <proto/icon.h>
 
 #include "cli.h"
 #include "clib.h"
@@ -51,6 +54,13 @@ struct IntuitionBase *IntuitionBase  = NULL;
 struct GfxBase       *GfxBase        = NULL;
 struct Library       *GadToolsBase   = NULL;
 struct Library       *AslBase        = NULL;
+struct Library       *IconBase       = NULL;
+
+/* Populated by Bartman _start when launched from Workbench (see
+ * support/gcc8_c_support.c).  NULL on CLI launch or under toolchains
+ * that don't supply a custom _start (e.g. Bebbo) - WB tooltype
+ * lookup will then be a no-op. */
+struct WBStartup *DiskPart_WBStartup = NULL;
 
 /* ------------------------------------------------------------------ */
 /* Gadget IDs                                                           */
@@ -1107,29 +1117,54 @@ int main(void)
     AslBase = OpenLibrary("asl.library", 37);
     /* Not fatal - file requester simply won't be available */
 
-    /* Startup warning - shown before the slow device scan */
-    {
-        struct EasyStruct es;
-        char body[512];
-        sprintf(body,
-            "EXPERIMENTAL SOFTWARE\n"
-            "DiskPart %s  (built %s)\n\n"
-            "DiskPart can modify the partition table\n"
-            "of your hard drive or other block device.\n\n"
-            "Incorrect use WILL cause permanent data loss.\n\n"
-            "Make sure you have a FULL BACKUP of any disk\n"
-            "you intend to work with before proceeding.\n\n"
-            "The author accepts NO responsibility for\n"
-            "any loss of data caused by this software.",
-            DISKPART_VERSION, DiskPart_BuildStamp);
+    IconBase = OpenLibrary("icon.library", 37);
+    /* Not fatal - only used to read the NOWARNING tooltype from our icon */
 
-        es.es_StructSize   = sizeof(es);
-        es.es_Flags        = 0;
-        es.es_Title        = (UBYTE *)"DiskPart - WARNING";
-        es.es_TextFormat   = (UBYTE *)body;
-        es.es_GadgetFormat = (UBYTE *)"I have a backup - Continue|Quit";
-        if (EasyRequestArgs(NULL, &es, NULL, NULL) != 1)
-            goto cleanup;
+    /* Suppress the startup warning if NOWARNING was passed on the CLI
+     * or set as a tooltype on the program icon (Workbench launch). */
+    {
+        BOOL skip_warning = cli_nowarning();
+
+        if (!skip_warning && IconBase && DiskPart_WBStartup &&
+            DiskPart_WBStartup->sm_NumArgs >= 1) {
+            struct WBArg    *wa  = &DiskPart_WBStartup->sm_ArgList[0];
+            struct DiskObject *dobj;
+            BPTR             prev_dir;
+
+            prev_dir = CurrentDir(wa->wa_Lock);
+            dobj = GetDiskObject((STRPTR)wa->wa_Name);
+            if (dobj) {
+                if (FindToolType((STRPTR *)dobj->do_ToolTypes,
+                                 (STRPTR)"NOWARNING"))
+                    skip_warning = TRUE;
+                FreeDiskObject(dobj);
+            }
+            CurrentDir(prev_dir);
+        }
+
+        if (!skip_warning) {
+            struct EasyStruct es;
+            char body[512];
+            sprintf(body,
+                "EXPERIMENTAL SOFTWARE\n"
+                "DiskPart %s  (built %s)\n\n"
+                "DiskPart can modify the partition table\n"
+                "of your hard drive or other block device.\n\n"
+                "Incorrect use WILL cause permanent data loss.\n\n"
+                "Make sure you have a FULL BACKUP of any disk\n"
+                "you intend to work with before proceeding.\n\n"
+                "The author accepts NO responsibility for\n"
+                "any loss of data caused by this software.",
+                DISKPART_VERSION, DiskPart_BuildStamp);
+
+            es.es_StructSize   = sizeof(es);
+            es.es_Flags        = 0;
+            es.es_Title        = (UBYTE *)"DiskPart - WARNING";
+            es.es_TextFormat   = (UBYTE *)body;
+            es.es_GadgetFormat = (UBYTE *)"I have a backup - Continue|Quit";
+            if (EasyRequestArgs(NULL, &es, NULL, NULL) != 1)
+                goto cleanup;
+        }
     }
 
     /* Scan for block device driver names - instant, no I/O */
@@ -1179,6 +1214,7 @@ int main(void)
     }
 
 cleanup:
+    if (IconBase)      CloseLibrary(IconBase);
     if (AslBase)       CloseLibrary(AslBase);
     if (GadToolsBase)  CloseLibrary(GadToolsBase);
     if (GfxBase)       CloseLibrary((struct Library *)GfxBase);

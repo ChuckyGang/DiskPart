@@ -47,7 +47,7 @@ extern struct DosLibrary *DOSBase;
     "NAME/K,LOW/K,HIGH/K,TYPE/K,BOOTPRI/K,BOOTABLE/S,"           \
     "FILE/K,VERSION/K,STACKSIZE/K,"                               \
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
-    "IMAGEOUT/K,IMAGEIN/K"
+    "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S"
 
 enum {
     ARG_LISTDEV = 0,
@@ -83,8 +83,13 @@ enum {
     ARG_SIZE,
     ARG_IMAGEOUT,
     ARG_IMAGEIN,
+    ARG_NOWARNING,
     ARG_COUNT
 };
+
+static BOOL s_nowarning = FALSE;
+
+BOOL cli_nowarning(void) { return s_nowarning; }
 
 /* ------------------------------------------------------------------ */
 /* Shared statics (too large / too slow to put on stack)              */
@@ -1847,7 +1852,10 @@ LONG cli_run(void)
         return RETURN_ERROR;
     }
 
+    s_nowarning = (BOOL)args[ARG_NOWARNING];
+
     /* No recognised command -> empty command line, caller opens GUI.
+     * NOWARNING is not a command on its own, so it falls through too.
      * CREATE counts as a command on its own (creates the image and exits). */
     if (!args[ARG_LISTDEV] && !args[ARG_INIT]         && !args[ARG_SCRIPT]  &&
         !args[ARG_INFO]    && !args[ARG_SMART]         && !args[ARG_BACKUP] &&

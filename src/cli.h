@@ -28,4 +28,12 @@
  */
 LONG cli_run(void);
 
+/*
+ * cli_nowarning - TRUE if the last cli_run() saw NOWARNING/S on the
+ * command line.  Used by the GUI path to skip the startup warning
+ * when cli_run() returned CLI_NO_ARGS (NOWARNING is not a command on
+ * its own, so cli_run still falls through to GUI mode).
+ */
+BOOL cli_nowarning(void);
+
 #endif /* CLI_H */
