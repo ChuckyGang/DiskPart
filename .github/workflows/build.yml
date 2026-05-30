@@ -19,8 +19,35 @@ jobs:
           pip install pillow -q
           make icon
 
-      - name: Build with Bebbo toolchain (Docker, linux/amd64)
-        run: ./docker.sh
+      # Bebbo-built binaries hang on launch on real Amiga / FS-UAE
+      # (libnix collides with the user-declared library-base globals
+      # in src/main.c). Bartman's m68k-amiga-elf-gcc + elf2hunk path
+      # works.  We fetch the toolchain from Bartman's amiga-debug
+      # VS Code extension, which bundles a Linux build of GCC and
+      # elf2hunk under bin/linux/.
+      - name: Cache Bartman toolchain
+        id: bartman-cache
+        uses: actions/cache@v4
+        with:
+          path: bartman
+          key: bartman-amiga-debug-1.8.2
+
+      - name: Fetch Bartman toolchain
+        if: steps.bartman-cache.outputs.cache-hit != 'true'
+        env:
+          BARTMAN_VERSION: 1.8.2
+        run: |
+          curl -fsSL -o bartman.vsix \
+            "https://bartmanabyss.gallery.vsassets.io/_apis/public/gallery/publisher/bartmanabyss/extension/amiga-debug/${BARTMAN_VERSION}/assetbyname/Microsoft.VisualStudio.Services.VSIXPackage"
+          unzip -q bartman.vsix -d bartman
+          rm bartman.vsix
+
+      - name: Build with Bartman toolchain
+        run: |
+          BARTMAN="$PWD/bartman/extension/bin/linux"
+          chmod +x "$BARTMAN/elf2hunk" "$BARTMAN/opt/bin/"*
+          find "$BARTMAN/opt/libexec" -type f -exec chmod +x {} +
+          make TOOLCHAIN=bartman BARTMAN="$BARTMAN"
 
       - name: Upload binary + icon
         uses: actions/upload-artifact@v4
