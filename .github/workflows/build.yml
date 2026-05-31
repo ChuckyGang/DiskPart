@@ -45,8 +45,14 @@ jobs:
       - name: Build with Bartman toolchain
         run: |
           BARTMAN="$PWD/bartman/extension/bin/linux"
-          chmod +x "$BARTMAN/elf2hunk" "$BARTMAN/opt/bin/"*
-          find "$BARTMAN/opt/libexec" -type f -exec chmod +x {} +
+          # .vsix stores binaries as 0666; restore +x on every toolchain
+          # executable, including the target-internal cross-as that
+          # gcc invokes from opt/m68k-amiga-elf/bin/.
+          chmod +x "$BARTMAN/elf2hunk"
+          find "$BARTMAN/opt/bin" \
+               "$BARTMAN/opt/libexec" \
+               "$BARTMAN/opt/m68k-amiga-elf/bin" \
+               -type f -exec chmod +x {} +
           make TOOLCHAIN=bartman BARTMAN="$BARTMAN"
 
       - name: Upload binary + icon
