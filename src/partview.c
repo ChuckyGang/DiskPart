@@ -48,6 +48,7 @@
 #include "sfsresize.h"
 #include "partmove.h"
 #include "partview_internal.h"
+#include "quickformat.h"
 
 
 /* ------------------------------------------------------------------ */
@@ -148,6 +149,12 @@ static const struct RDBInfo *lv_rdb;
 /* Forward declarations needed by lv_render (defined later in file) */
 static char        part_strs[MAX_PARTITIONS][80];
 static struct Node part_nodes[MAX_PARTITIONS];
+
+/* Names of partitions deleted this session, pending an unmount after the next
+   RDB write (kept here rather than on the stack - see s_unmount_count reset in
+   partview_run). */
+static char  s_unmount_names[MAX_PARTITIONS][32];
+static UWORD s_unmount_count;
 
 
 /* Render hook - AmigaOS calls h_Entry with a0=hook, a1=msg, a2=node.
@@ -1355,6 +1362,123 @@ static struct NewMenu partview_menu_def[] = {
 };
 
 /* ------------------------------------------------------------------ */
+/* format_pending_partitions - after a successful RDB write, quick-format */
+/* any newly created partition the user opted to format (want_format).    */
+/* left mounted so no reboot is needed.  Reports the outcome once.        */
+/* Returns TRUE if any pending partition could NOT be mounted live (format  */
+/* skipped or failed) - the caller should then still require a reboot.      */
+/* ------------------------------------------------------------------ */
+static BOOL format_pending_partitions(struct Window *win, struct BlockDev *bd,
+                                      struct RDBInfo *rdb)
+{
+    char  report[512];
+    ULONG rlen = 0;
+    UWORD i;
+    int   any  = 0;
+    BOOL  need_reboot = FALSE;
+
+    report[0] = '\0';
+    for (i = 0; i < rdb->num_parts; i++) {
+        struct PartInfo *pi = &rdb->parts[i];
+        char line[160];
+
+        if (!pi->want_format || pi->volume_name[0] == '\0') continue;
+        any = 1;
+
+        if (!bd || bd->backend == BD_FILE) {
+            sprintf(line, "%s: format skipped (image file).\n", pi->drive_name);
+            need_reboot = TRUE;   /* exists in RDB but not mounted */
+        } else {
+            char err[80], mounted[40];
+            err[0] = '\0';
+            if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
+                sprintf(line, "%s: formatted as \"%s\".\n",
+                        mounted[0] ? mounted : pi->drive_name, pi->volume_name);
+            } else {
+                sprintf(line, "%s: format failed - %s\n", pi->drive_name, err);
+                need_reboot = TRUE;   /* not mounted - reboot to pick it up */
+            }
+        }
+        if (rlen + strlen(line) < sizeof(report) - 1)
+            rlen += (ULONG)sprintf(report + rlen, "%s", line);
+        pi->want_format = 0;   /* handled - don't retry on the next write */
+    }
+
+    if (any) {
+        struct EasyStruct es;
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
+        es.es_TextFormat   = (UBYTE *)report;
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequest(win, &es, NULL);
+    }
+    return need_reboot;
+}
+
+/* Case-insensitive equality for drive names. */
+static BOOL name_eq_ci(const char *a, const char *b)
+{
+    while (*a && *b) {
+        char ca = *a++, cb = *b++;
+        if (ca >= 'a' && ca <= 'z') ca -= 32;
+        if (cb >= 'a' && cb <= 'z') cb -= 32;
+        if (ca != cb) return FALSE;
+    }
+    return (*a == '\0' && *b == '\0');
+}
+
+/* ------------------------------------------------------------------ */
+/* unmount_deleted_partitions - after a successful RDB write, unmount any   */
+/* partition deleted this session so the change takes effect without a      */
+/* reboot.  Skips names that were re-added.  Returns TRUE if any device     */
+/* could not be unmounted (in use) - the caller should still require reboot.*/
+/* ------------------------------------------------------------------ */
+static BOOL unmount_deleted_partitions(struct Window *win, struct RDBInfo *rdb)
+{
+    char  report[512];
+    ULONG rlen = 0;
+    UWORD i, k;
+    int   any = 0;
+    BOOL  need_reboot = FALSE;
+
+    report[0] = '\0';
+    for (i = 0; i < s_unmount_count; i++) {
+        const char *nm = s_unmount_names[i];
+        char  line[128], err[80];
+        BOOL  re_added = FALSE;
+
+        if (!nm[0]) continue;
+        for (k = 0; k < rdb->num_parts; k++)
+            if (name_eq_ci(rdb->parts[k].drive_name, nm)) { re_added = TRUE; break; }
+        if (re_added) continue;   /* name reused by a new partition - leave it */
+
+        any = 1;
+        err[0] = '\0';
+        if (UnmountDevice(nm, err, sizeof(err))) {
+            sprintf(line, "%s: unmounted.\n", nm);
+        } else {
+            sprintf(line, "%s: still mounted - %s\n", nm, err);
+            need_reboot = TRUE;
+        }
+        if (rlen + strlen(line) < sizeof(report) - 1)
+            rlen += (ULONG)sprintf(report + rlen, "%s", line);
+    }
+    s_unmount_count = 0;
+
+    if (any) {
+        struct EasyStruct es;
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
+        es.es_TextFormat   = (UBYTE *)report;
+        es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequest(win, &es, NULL);
+    }
+    return need_reboot;
+}
+
+/* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 /* check_ffs_root - show what FFS would find at the expected root      */
 /* block position for the selected partition.  Useful post-reboot to   */
@@ -1377,6 +1501,8 @@ BOOL partview_run(const char *devname, ULONG unit)
     BOOL              needs_reboot = FALSE;  /* partition layout changed */
     BOOL              exit_req     = FALSE;
     WORD              i;
+
+    s_unmount_count = 0;     /* no deletes pending unmount yet this session */
     static char       wfmt[512];            /* formatted write-fail message - static: off stack */
     static char       win_title[80];
 
@@ -1976,7 +2102,12 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.dev_flags     = 0;
                                 if (partition_dialog(&new_pi, "Add Partition", rdb, TRUE)) {
                                     rdb->parts[rdb->num_parts++] = new_pi;
-                                    dirty = TRUE; needs_reboot = TRUE;
+                                    dirty = TRUE;
+                                    /* A new partition needs a reboot to mount -
+                                       unless it will be quick-formatted (mounted
+                                       live).  format_pending_partitions() flags a
+                                       reboot if that live mount doesn't happen. */
+                                    if (!new_pi.want_format) needs_reboot = TRUE;
                                     refresh_listview(win, lv_gad, rdb, sel);
                                 }
                             }
@@ -2379,7 +2510,10 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                         if (partition_dialog(&new_pi, "Add Partition", rdb, TRUE)) {
                             rdb->parts[rdb->num_parts++] = new_pi;
-                            dirty = TRUE; needs_reboot = TRUE;
+                            dirty = TRUE;
+                            /* New partition needs a reboot to mount unless it
+                               will be quick-formatted (mounted live). */
+                            if (!new_pi.want_format) needs_reboot = TRUE;
                             refresh_listview(win, lv_gad, rdb, sel);
                             draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                         ix, iy, iw, bx, by, bw, bh,
@@ -2424,10 +2558,19 @@ BOOL partview_run(const char *devname, ULONG unit)
                             es.es_GadgetFormat = (UBYTE *)"Yes|No";
                             if (EasyRequest(win, &es, NULL) == 1) {
                                 UWORD j;
+                                /* Remember the name so we can unmount it after
+                                   the RDB is written - no reboot needed unless
+                                   the unmount fails (volume in use). */
+                                if (s_unmount_count < MAX_PARTITIONS) {
+                                    strncpy(s_unmount_names[s_unmount_count],
+                                            rdb->parts[sel].drive_name, 31);
+                                    s_unmount_names[s_unmount_count][31] = '\0';
+                                    s_unmount_count++;
+                                }
                                 for (j=(UWORD)sel; j+1 < rdb->num_parts; j++)
                                     rdb->parts[j] = rdb->parts[j+1];
                                 rdb->num_parts--;
-                                dirty = TRUE; needs_reboot = TRUE;
+                                dirty = TRUE;
                                 if (sel >= (WORD)rdb->num_parts)
                                     sel = (WORD)rdb->num_parts - 1;
                                 refresh_listview(win, lv_gad, rdb, sel);
@@ -2563,6 +2706,10 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                         if (write_ok) {
                             dirty = FALSE;
+                            if (format_pending_partitions(win, bd, rdb))
+                                needs_reboot = TRUE;
+                            if (unmount_deleted_partitions(win, rdb))
+                                needs_reboot = TRUE;
                             if (BlockDev_HasMBR(bd)) {
                                 es.es_TextFormat   = (UBYTE *)"PC partition table (MBR) found on block 0.\nErase it?";
                                 es.es_GadgetFormat = (UBYTE *)"Erase|Keep";
@@ -2593,6 +2740,10 @@ BOOL partview_run(const char *devname, ULONG unit)
                             if (r == 1 && bd) {          /* Write */
                                 if (RDB_Write(bd, rdb)) {
                                     dirty = FALSE;
+                                    if (format_pending_partitions(win, bd, rdb))
+                                        needs_reboot = TRUE;
+                                    if (unmount_deleted_partitions(win, rdb))
+                                        needs_reboot = TRUE;
                                     if (needs_reboot) {
                                         offer_reboot(win,
                                             "Partition table written.\n"

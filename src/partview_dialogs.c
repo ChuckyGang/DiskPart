@@ -264,9 +264,13 @@ ULONG parse_dostype(const char *s)
 #define PDLG_CANCEL      10
 #define PDLG_SYNCSCSI    11
 #define PDLG_AUTOMOUNT   12
+#define PDLG_VOLNAME     14
+#define PDLG_NOFORMAT    15
 
 /* Rows: Name, LoCyl, SizeMB, FS, BlockSize, BootPri, Bootable+Automount, DirSCSI+SyncSCSI */
 #define PDLG_ROWS 8
+/* New partitions add two more rows: Volume name + Do not format. */
+#define PDLG_NEW_EXTRA_ROWS 2
 
 void partition_advanced_dialog(struct PartInfo *pi)
 {
@@ -473,10 +477,16 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
     struct Gadget  *automount_gad = NULL;
     struct Gadget  *dirscsi_gad   = NULL;
     struct Gadget  *syncscsi_gad  = NULL;
+    struct Gadget  *volname_gad   = NULL;
+    struct Gadget  *noformat_gad  = NULL;
     struct Window  *win          = NULL;
     BOOL            result       = FALSE;
     UWORD           cur_fs       = 1;   /* default FFS */
     UWORD           cur_bsz      = 0;   /* default 512 */
+    /* Extra rows shown only when adding a new partition. */
+    UWORD           dlg_rows     = is_new ? (PDLG_ROWS + PDLG_NEW_EXTRA_ROWS)
+                                          : PDLG_ROWS;
+    char            volname_str[32];
 
     /* Dynamic filesystem list: built-ins + whatever is in the RDB FSHD list */
 #define MAX_DLG_FS (NUM_BUILTIN_FS + MAX_FILESYSTEMS + 1)
@@ -537,6 +547,11 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
     }
     sprintf(locyl_str,   "Lo: %lu", (unsigned long)pi->low_cyl);
     sprintf(bootpri_str, "%ld", (long)pi->boot_pri);
+    /* Default volume label for a new partition.  Empty means "do not format";
+       prefilling makes quick-format the default (the "Do not format" checkbox
+       and clearing this field are the opt-outs). */
+    strncpy(volname_str, "Empty", sizeof(volname_str) - 1);
+    volname_str[sizeof(volname_str) - 1] = '\0';
 
     scr = LockPubScreen(NULL);
     if (!scr) goto cleanup;
@@ -557,7 +572,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
         UWORD gad_x   = bor_l + lbl_w;
         UWORD gad_w   = inner_w - lbl_w - pad;
         UWORD win_h   = bor_t + pad
-                      + (UWORD)PDLG_ROWS * (row_h + pad)
+                      + (UWORD)dlg_rows * (row_h + pad)
                       + row_h + pad
                       + bor_b;
 
@@ -678,12 +693,29 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
             }
             row++;
 
+            /* New partitions only: Volume name + "Do not format" checkbox.
+               Format runs after the table is written, on a temporary mount. */
+            if (is_new) {
+                STR_GAD(PDLG_VOLNAME, "Volume name", volname_str, 31, &volname_gad)
+                {
+                    struct TagItem cbt[] = { { GTCB_Checked, 0 }, { TAG_DONE, 0 } };
+                    cbt[0].ti_Data = (ULONG)FALSE;   /* format by default */
+                    ng.ng_LeftEdge=bor_l+pad; ng.ng_TopEdge=ROW_Y(row);
+                    ng.ng_Width=inner_w-pad*2; ng.ng_Height=row_h;
+                    ng.ng_GadgetText="Do not format"; ng.ng_GadgetID=PDLG_NOFORMAT;
+                    ng.ng_Flags=PLACETEXT_RIGHT;
+                    noformat_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
+                    if (!noformat_gad) goto cleanup; prev=noformat_gad;
+                }
+                row++;
+            }
+
 #undef STR_GAD
 #undef ROW_Y
 
             /* Three buttons: OK / Advanced... / Cancel */
             {
-                UWORD btn_y  = bor_t + pad + (UWORD)PDLG_ROWS * (row_h + pad);
+                UWORD btn_y  = bor_t + pad + (UWORD)dlg_rows * (row_h + pad);
                 UWORD third  = (inner_w - pad * 2 - pad * 2) / 3;
                 struct TagItem bt[] = { { TAG_DONE, 0 } };
                 ng.ng_TopEdge=btn_y; ng.ng_Height=row_h;
@@ -819,6 +851,20 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         if (  dirscsi_gad->Flags   & GFLG_SELECTED) pi->flags |= 4UL;
                         if (  syncscsi_gad->Flags  & GFLG_SELECTED) pi->flags |= 8UL;
                         pi->dos_type = new_dos_type;
+                        /* Quick-format request: new partitions only, needs a
+                           non-empty volume name and "Do not format" unchecked. */
+                        pi->volume_name[0] = '\0';
+                        pi->want_format    = 0;
+                        if (is_new && volname_gad) {
+                            BOOL no_format = (noformat_gad &&
+                                (noformat_gad->Flags & GFLG_SELECTED));
+                            si = (struct StringInfo *)volname_gad->SpecialInfo;
+                            strncpy(pi->volume_name, (char *)si->Buffer,
+                                    sizeof(pi->volume_name) - 1);
+                            pi->volume_name[sizeof(pi->volume_name) - 1] = '\0';
+                            pi->want_format = (!no_format &&
+                                               pi->volume_name[0] != '\0');
+                        }
                         if (destructive) need_reboot = TRUE;
                         result = TRUE; running = FALSE;
                         }

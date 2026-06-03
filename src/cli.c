@@ -25,6 +25,7 @@
 #include "rdb.h"
 #include "imagecopy.h"
 #include "script.h"
+#include "quickformat.h"
 #include "cli.h"
 
 extern struct ExecBase   *SysBase;
@@ -47,7 +48,7 @@ extern struct DosLibrary *DOSBase;
     "NAME/K,LOW/K,HIGH/K,TYPE/K,BOOTPRI/K,BOOTABLE/S,"           \
     "FILE/K,VERSION/K,STACKSIZE/K,"                               \
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
-    "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S"
+    "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -84,6 +85,7 @@ enum {
     ARG_IMAGEOUT,
     ARG_IMAGEIN,
     ARG_NOWARNING,
+    ARG_VOLNAME,
     ARG_COUNT
 };
 
@@ -996,7 +998,8 @@ restoreext_done:
 static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
                         const char *name_s,    const char *low_s,
                         const char *high_s,    const char *type_s,
-                        const char *bootpri_s, BOOL bootable)
+                        const char *bootpri_s, BOOL bootable,
+                        const char *volname_s)
 {
     struct BlockDev *bd;
     struct PartInfo *pi;
@@ -1105,6 +1108,28 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
     cli_puts("Writing RDB... ");
     rc = RDB_Write(bd, &s_rdb) ? RETURN_OK : RETURN_ERROR;
     cli_puts(rc == RETURN_OK ? "OK.\n" : "FAILED.\n");
+
+    /* Quick-format the new partition if VOLNAME was given (empty = no format).
+       pi still points at the partition we just added. */
+    if (rc == RETURN_OK && volname_s && volname_s[0]) {
+        if (bd->backend == BD_FILE) {
+            cli_puts("VOLNAME ignored: image files can't be OS-formatted.\n");
+        } else {
+            char err[80], mounted[40];
+            err[0] = '\0';
+            strncpy(pi->volume_name, volname_s, sizeof(pi->volume_name) - 1);
+            pi->volume_name[sizeof(pi->volume_name) - 1] = '\0';
+            if (!pi->heads)   pi->heads   = s_rdb.heads;
+            if (!pi->sectors) pi->sectors = s_rdb.sectors;
+            if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
+                sprintf(outbuf, "Formatted %s as \"%s\".\n",
+                        mounted[0] ? mounted : pi->drive_name, pi->volume_name);
+            } else {
+                sprintf(outbuf, "Format failed: %s\n", err);
+            }
+            cli_puts(outbuf);
+        }
+    }
 
     RDB_FreeCode(&s_rdb);
     BlockDev_Close(bd);
@@ -1508,6 +1533,18 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
             cli_puts("Writing RDB... ");
             rc = RDB_Write(bd, &s_rdb) ? RETURN_OK : RETURN_ERROR;
             cli_puts(rc == RETURN_OK ? "OK.\n" : "FAILED.\n");
+
+            /* Unmount the deleted device so it's gone without a reboot. */
+            if (rc == RETURN_OK) {
+                char err[80];
+                err[0] = '\0';
+                if (UnmountDevice(name, err, sizeof(err)))
+                    sprintf(outbuf, "%s unmounted.\n", name);
+                else
+                    sprintf(outbuf, "%s still mounted (%s); reboot to free it.\n",
+                            name, err);
+                cli_puts(outbuf);
+            }
 
             RDB_FreeCode(&s_rdb);
             BlockDev_Close(bd);
@@ -1947,7 +1984,8 @@ LONG cli_run(void)
                                  (const char *)args[ARG_HIGH],
                                  (const char *)args[ARG_TYPE],
                                  (const char *)args[ARG_BOOTPRI],
-                                 (BOOL)args[ARG_BOOTABLE]);
+                                 (BOOL)args[ARG_BOOTABLE],
+                                 (const char *)args[ARG_VOLNAME]);
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,

@@ -9,6 +9,8 @@
  *   OPEN <device> <unit>
  *   INIT NEW | NEWGEO
  *   ADDPART NAME=<n> LOW=<cyl> HIGH=<cyl> [TYPE=<t>] [BOOTPRI=<n>] [BOOTABLE]
+ *           [VOLNAME=<label>]   ; VOLNAME quick-formats the partition after
+ *                               ; WRITE (device only); omit/empty = no format
  *   DELPART NAME=<n>
  *   CHECKRDB
  *   VERIFYRDB FILE=<path>
@@ -31,6 +33,7 @@
 #include "clib.h"
 #include "rdb.h"
 #include "imagecopy.h"
+#include "quickformat.h"
 #include "script.h"
 
 extern struct ExecBase   *SysBase;
@@ -47,6 +50,9 @@ struct ScriptState {
     BOOL             dirty;      /* TRUE when changes not yet written    */
     BOOL             force;      /* suppress overwrite warnings          */
     BOOL             dryrun;     /* suppress actual disk writes          */
+    /* Names of partitions deleted since the last WRITE, to unmount after it. */
+    char             unmount_names[MAX_PARTITIONS][32];
+    UWORD            unmount_count;
 };
 
 static struct ScriptState s_st;      /* ~9 KB in BSS                    */
@@ -614,6 +620,17 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     pi->sectors_per_block = 1;
     /* heads/sectors=0: RDB_Write falls back to RDB geometry */
 
+    /* VOLNAME (optional) - quick-format this partition after WRITE (empty/absent
+       = no format).  Fill geometry now since QuickFormat needs it. */
+    v = kwarg(tok, ntok, "VOLNAME");
+    if (v && v[0]) {
+        strncpy(pi->volume_name, v, sizeof(pi->volume_name) - 1);
+        pi->volume_name[sizeof(pi->volume_name) - 1] = '\0';
+        pi->want_format = 1;
+        pi->heads   = s_st.rdb.heads;
+        pi->sectors = s_st.rdb.sectors;
+    }
+
     s_st.rdb.num_parts++;
     s_st.dirty = TRUE;
 
@@ -661,6 +678,13 @@ static LONG do_delpart(ULONG ln, char **tok, UWORD ntok)
                     s_st.rdb.parts[i].drive_name,
                     (ULONG)s_st.rdb.parts[i].low_cyl,
                     (ULONG)s_st.rdb.parts[i].high_cyl);
+            /* Remember for unmount after WRITE (no reboot needed). */
+            if (s_st.unmount_count < MAX_PARTITIONS) {
+                strncpy(s_st.unmount_names[s_st.unmount_count],
+                        s_st.rdb.parts[i].drive_name, 31);
+                s_st.unmount_names[s_st.unmount_count][31] = '\0';
+                s_st.unmount_count++;
+            }
             for (j = i; j + 1 < s_st.rdb.num_parts; j++)
                 s_st.rdb.parts[j] = s_st.rdb.parts[j + 1];
             s_st.rdb.num_parts--;
@@ -1020,6 +1044,54 @@ static LONG do_write(ULONG ln)
     }
     sc_puts("OK.\n");
     s_st.dirty = FALSE;
+
+    /* Quick-format any partition that was given a VOLNAME (device backend only). */
+    {
+        UWORD i;
+        for (i = 0; i < s_st.rdb.num_parts; i++) {
+            struct PartInfo *pi = &s_st.rdb.parts[i];
+            if (!pi->want_format || pi->volume_name[0] == '\0') continue;
+            if (s_st.bd->backend == BD_FILE) {
+                sprintf(s_msg, "  %s: format skipped (image file).\n",
+                        pi->drive_name);
+            } else {
+                char err[80], mounted[40];
+                err[0] = '\0';
+                if (QuickFormat_Partition(s_st.bd, pi, mounted, err, sizeof(err))) {
+                    sprintf(s_msg, "  Formatted %s as \"%s\".\n",
+                            mounted[0] ? mounted : pi->drive_name,
+                            pi->volume_name);
+                } else {
+                    sprintf(s_msg, "  %s: format failed - %s\n",
+                            pi->drive_name, err);
+                }
+            }
+            sc_puts(s_msg);
+            pi->want_format = 0;
+        }
+    }
+
+    /* Unmount partitions deleted since the last WRITE (skip names re-added). */
+    {
+        UWORD u, k;
+        for (u = 0; u < s_st.unmount_count; u++) {
+            const char *nm = s_st.unmount_names[u];
+            BOOL re_added = FALSE;
+            char err[80];
+            if (!nm[0]) continue;
+            for (k = 0; k < s_st.rdb.num_parts; k++)
+                if (ci_eq(s_st.rdb.parts[k].drive_name, nm)) { re_added = TRUE; break; }
+            if (re_added) continue;
+            err[0] = '\0';
+            if (UnmountDevice(nm, err, sizeof(err)))
+                sprintf(s_msg, "  %s unmounted.\n", nm);
+            else
+                sprintf(s_msg, "  %s still mounted (%s); reboot to free it.\n",
+                        nm, err);
+            sc_puts(s_msg);
+        }
+        s_st.unmount_count = 0;
+    }
     return RETURN_OK;
 }
 

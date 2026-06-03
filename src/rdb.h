@@ -139,6 +139,10 @@ struct PartInfo {
     ULONG boot_blocks;
     ULONG baud;            /* DE_BAUD: baud rate for serial handlers */
     ULONG control;         /* DE_CONTROL: control word for handler/filesystem */
+    /* Transient (in-memory only; not stored in the RDB) - drive quick-format
+       of a newly created partition after the table is written. */
+    char  volume_name[32]; /* label to format with; empty = do not format */
+    UBYTE want_format;     /* TRUE only for a new partition the user opted to format */
 };
 
 struct FSInfo {

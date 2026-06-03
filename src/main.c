@@ -55,6 +55,7 @@ struct GfxBase       *GfxBase        = NULL;
 struct Library       *GadToolsBase   = NULL;
 struct Library       *AslBase        = NULL;
 struct Library       *IconBase       = NULL;
+struct Library       *ExpansionBase  = NULL;
 
 /* Populated by Bartman _start when launched from Workbench (see
  * support/gcc8_c_support.c).  NULL on CLI launch or under toolchains
@@ -1092,6 +1093,10 @@ int main(void)
     DOSBase = (struct DosLibrary *)OpenLibrary("dos.library", 37);
     if (!DOSBase) goto cleanup;
 
+    /* Opened before the CLI dispatch below so quick-format works in CLI/script
+       mode too (a ROM library; not fatal if absent). */
+    ExpansionBase = OpenLibrary("expansion.library", 37);
+
     /* CLI launch with arguments -> CLI mode (no GUI libs needed). */
     {
         struct Process *proc = (struct Process *)FindTask(NULL);
@@ -1214,6 +1219,7 @@ int main(void)
     }
 
 cleanup:
+    if (ExpansionBase) CloseLibrary(ExpansionBase);
     if (IconBase)      CloseLibrary(IconBase);
     if (AslBase)       CloseLibrary(AslBase);
     if (GadToolsBase)  CloseLibrary(GadToolsBase);

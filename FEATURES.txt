@@ -1,0 +1,113 @@
+================================================================================
+                            DiskPart - Feature List
+================================================================================
+
+DiskPart is a GadTools-based RDB (Rigid Disk Block) partition editor for
+AmigaOS 2.x and later (Kickstart 2.04+), with a full command-line and
+scripting interface.
+
+
+--------------------------------------------------------------------------------
+ TARGET SELECTION
+--------------------------------------------------------------------------------
+ * Work on a physical device (exec block-device unit) or on a disk image file.
+ * Image files are treated as 512-byte-block disks (16 heads x 63 sectors).
+ * Device selector filters out ~100 known non-storage drivers, with a
+   "Show All / Filter" toggle.
+ * Unit probe reports vendor, product and disk size, plus the driver version.
+
+
+--------------------------------------------------------------------------------
+ RDB INITIALISATION
+--------------------------------------------------------------------------------
+ * Initialise a fresh RDB with auto-detected geometry.
+ * If an RDB already exists, the geometry (cylinder count) can be updated while
+   keeping existing partition data (NEWGEO).
+ * PC partition table (MBR) detection on block 0, with an option to erase it.
+
+
+--------------------------------------------------------------------------------
+ FILESYSTEMS
+--------------------------------------------------------------------------------
+ * Add a filesystem driver to the RDB.
+ * DosType may be entered as ASCII (e.g. DOS3, PFS\3) or as a 0x / $ hex value.
+ * DiskPart will try to guess the DosType from the handler file name.
+ * Filesystem driver version word and stack size are configurable.
+
+
+--------------------------------------------------------------------------------
+ PARTITIONS
+--------------------------------------------------------------------------------
+ * Add a partition with the "Add" button, or by click-and-dragging in an empty
+   area of the partition map.
+ * Quick-format a newly added partition immediately (Volume name + "Do not
+   format" option in the Add dialog; VOLNAME= on the CLI / in scripts).  The
+   partition is temp-mounted and formatted by its real filesystem handler, then
+   left mounted - no reboot needed.  Real devices only (not image files).
+ * Recommends a block size based on the partition size.
+ * Symbolic cylinder values: LOW=START / NEXT, HIGH=END / +<size>.
+ * Most flags are available even if the device does not technically support
+   them (Bootable, Automount, DirectSCSI, SyncSCSI, ...).
+ * Advanced attributes: block size, buffer memory type, reserved blocks,
+   interleave, max transfer, mask, number of buffers.
+ * Boot priority and Last Disk / Last LUN boot-control flags.
+ * Move a partition's data to a new location on disk.
+ * Deleting a partition unmounts its device after the write (if not in use), so
+   no reboot is needed.  Also DELPART on the CLI / in scripts.
+
+ GROW
+ * Grow of FFS, PFS and SFS partitions is supported.  (EXPERIMENTAL)
+ * SHRINKING of filesystems is NOT supported.
+
+
+--------------------------------------------------------------------------------
+ BACKUP / RESTORE / VERIFY
+--------------------------------------------------------------------------------
+ * Backup and restore of the RDB block.
+ * Extended backup and restore of all RDB blocks, including filesystem drivers.
+ * Verify an RDB against saved blocks (single block and extended).
+ * RDB integrity check: checksums, partition overlaps, filesystem headers and
+   block-chain consistency.
+
+
+--------------------------------------------------------------------------------
+ IMAGING
+--------------------------------------------------------------------------------
+ * Dump a disk to an image file.
+ * Write an image file back to a disk.
+ * Create a new, empty image of a chosen size (CREATE SIZE=<n>K/M/G), sparse on
+   filesystems that support it.
+ * Large files (>2 GB) require a host filesystem that can handle them; the
+   dos.library Seek limit otherwise caps image files at ~2 GB.
+
+
+--------------------------------------------------------------------------------
+ HEALTH / DIAGNOSTICS
+--------------------------------------------------------------------------------
+ * SMART status read support (ATA SMART via SCSI ATA PASS-THROUGH).
+ * Bad-block scan with per-sector error reporting.
+ * Debug tools: view RDB block, raw block scan, hex dump, raw disk read,
+   FFS root-block inspection (post-resize validation).
+
+
+--------------------------------------------------------------------------------
+ COMMAND LINE & SCRIPTING
+--------------------------------------------------------------------------------
+ * Full command-line operation in addition to the GUI.
+ * Script files with comments (# or ;) and blank lines.
+ * Script commands: OPEN / CREATE / CLOSE, INIT NEW / NEWGEO, ADDPART, DELPART,
+   ADDFS, WRITE, INFO, CHECKRDB, VERIFYRDB / VERIFYEXT, IMAGEOUT / IMAGEIN,
+   REBOOT.
+ * ADDPART VOLNAME=<label> (CLI and script) quick-formats the new partition.
+ * DRYRUN mode previews actions without writing.
+ * FORCE option suppresses confirmation prompts for unattended runs.
+
+
+--------------------------------------------------------------------------------
+ MISCELLANEOUS
+--------------------------------------------------------------------------------
+ * Write-back verification: blocks are read back after writing to detect errors.
+ * Workbench launch and tooltype support, in addition to CLI launch.
+ * No undo - all changes are applied only on explicit Write.
+
+================================================================================
