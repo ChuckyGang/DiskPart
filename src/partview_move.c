@@ -26,6 +26,7 @@
 #include "sfsresize.h"
 #include "partmove.h"
 #include "partview_internal.h"
+#include "quickformat.h"
 
 extern struct ExecBase      *SysBase;
 extern struct IntuitionBase *IntuitionBase;
@@ -698,16 +699,22 @@ static void ffs_grow_progress(void *ud, const char *msg)
     Text(rp, (STRPTR)msg, (WORD)len);
 }
 
-void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
-                           const struct RDBInfo *rdb, struct PartInfo *pi,
-                           ULONG old_hi)
+int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
+                          const struct RDBInfo *rdb, struct PartInfo *pi,
+                          ULONG old_hi)
 {
     struct EasyStruct es;
     char errbuf[256];  /* must hold FFS_GrowPartition diagnostic - keep in sync */
+    char umerr[80];    /* why unmount failed (in-use), for diagnostics          */
+    char rmerr[80];    /* why remount failed, for diagnostics                   */
+    BOOL can_remount;
+    int  rc = GROW_NEED_REBOOT;
+    umerr[0] = '\0';
+    rmerr[0] = '\0';
 
-    if (pi->high_cyl <= old_hi) return;
-    if (!FFS_IsSupportedType(pi->dos_type)) return;
-    if (!bd) return;
+    if (pi->high_cyl <= old_hi) return GROW_NONE;
+    if (!FFS_IsSupportedType(pi->dos_type)) return GROW_NONE;
+    if (!bd) return GROW_NONE;
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
@@ -719,7 +726,33 @@ void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
         "Grow FFS filesystem on partition %s?";
     es.es_GadgetFormat = (UBYTE *)"Grow Filesystem|Skip";
 
-    if (EasyRequest(win, &es, NULL, pi->drive_name) == 1) {
+    if (EasyRequest(win, &es, NULL, pi->drive_name) != 1) return GROW_NONE;
+
+    /* The grow writes filesystem blocks directly, so it MUST run offline: we
+       unmount the volume first, grow it, then remount with the new geometry
+       (no reboot).  We never grow a live volume - if it's in use we can't
+       unmount, so we refuse and leave everything untouched (growing under a
+       live handler corrupts the volume and triggers "insert volume"). */
+    can_remount = UnmountDevice(pi->drive_name, umerr, sizeof(umerr));
+    if (!can_remount) {
+        struct EasyStruct busy_es;
+        static char busy_msg[256];
+        pi->high_cyl = old_hi;                 /* undo the size change */
+        sprintf(busy_msg,
+                "Cannot resize %s: the volume is in use (%s).\n"
+                "Close all its windows, files and shells, then resize again.\n"
+                "No changes were made.",
+                pi->drive_name, umerr[0] ? umerr : "in use");
+        busy_es.es_StructSize   = sizeof(busy_es);
+        busy_es.es_Flags        = 0;
+        busy_es.es_Title        = (UBYTE *)"Resize - Volume In Use";
+        busy_es.es_TextFormat   = (UBYTE *)busy_msg;
+        busy_es.es_GadgetFormat = (UBYTE *)"OK";
+        EasyRequest(win, &busy_es, NULL);
+        return GROW_ABORTED;
+    }
+
+    {
         struct Screen *scr = win->WScreen;
         UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
         UWORD bor_t  = (UWORD)(scr->WBorTop + font_h + 1);
@@ -738,6 +771,7 @@ void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
         };
         struct Window *prog_win = OpenWindowTagList(NULL, prog_tags);
         struct GrowProgUD prog_ud;
+        char mnt[40];
         prog_ud.win   = prog_win;
         prog_ud.step  = 0;
         prog_ud.total = 13;  /* FFS_PROGRESS call count */
@@ -748,21 +782,42 @@ void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
         if (result) {
             struct EasyStruct ok_es;
             static char ok_msg[512];
-            sprintf(ok_msg,
-                    "FFS filesystem on %%s grown successfully.\n"
-                    "Write RDB to disk, then REBOOT to use the new space.\n"
-                    "(FFS picks up the new cylinder range only after reboot.)\n\n"
-                    "Diagnostic: %s", errbuf);
+
+            if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
+                /* Grown and remounted with the new geometry - no reboot. */
+                rc = GROW_REMOUNTED;
+                sprintf(ok_msg,
+                        "FFS filesystem on %s grown and remounted as %s:\n"
+                        "The new space is available now - no reboot needed.\n"
+                        "Click Write to save the RDB so it survives a reboot.\n\n"
+                        "Diagnostic: %s",
+                        pi->drive_name, mnt, errbuf);
+            } else {
+                /* Grow worked but the volume couldn't be remounted live. */
+                rc = GROW_NEED_REBOOT;
+                sprintf(ok_msg,
+                        "FFS filesystem on %s grown successfully.\n"
+                        "Remount failed (%s) - Write RDB and REBOOT to use it.\n\n"
+                        "Diagnostic: %s",
+                        pi->drive_name, rmerr[0] ? rmerr : "?", errbuf);
+            }
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
             ok_es.es_Title        = (UBYTE *)"Filesystem Grown";
             ok_es.es_TextFormat   = (UBYTE *)ok_msg;
             ok_es.es_GadgetFormat = (UBYTE *)"OK";
-            EasyRequest(win, &ok_es, NULL, pi->drive_name);
+            EasyRequest(win, &ok_es, NULL);
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
-            sprintf(full_msg, "FFS grow failed:\n%s", errbuf);
+            /* Grow failed - restore the original size and remount so the user
+               keeps a working volume. */
+            pi->high_cyl = old_hi;
+            MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+            rc = GROW_ABORTED;
+            sprintf(full_msg,
+                    "FFS grow failed - volume restored at its original size.\n%s",
+                    errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
             err_es.es_Title        = (UBYTE *)"Filesystem Grow Failed";
@@ -771,18 +826,21 @@ void offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             EasyRequest(win, &err_es, NULL);
         }
     }
+    return rc;
 }
 
-void offer_pfs_grow(struct Window *win, struct BlockDev *bd,
-                           const struct RDBInfo *rdb, struct PartInfo *pi,
-                           ULONG old_hi)
+int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
+                          const struct RDBInfo *rdb, struct PartInfo *pi,
+                          ULONG old_hi)
 {
     struct EasyStruct es;
     char errbuf[256];
 
-    if (pi->high_cyl <= old_hi) return;
-    if (!PFS_IsSupportedType(pi->dos_type)) return;
-    if (!bd) return;
+    /* PFS grow keeps its own Inhibit/RDB-write handling and still requires a
+       reboot; the unmount/remount no-reboot path is FFS-only for now. */
+    if (pi->high_cyl <= old_hi) return GROW_NONE;
+    if (!PFS_IsSupportedType(pi->dos_type)) return GROW_NONE;
+    if (!bd) return GROW_NONE;
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
@@ -844,19 +902,23 @@ void offer_pfs_grow(struct Window *win, struct BlockDev *bd,
             err_es.es_GadgetFormat = (UBYTE *)"OK";
             EasyRequest(win, &err_es, NULL);
         }
+        return GROW_NEED_REBOOT;
     }
+    return GROW_NONE;
 }
 
-void offer_sfs_grow(struct Window *win, struct BlockDev *bd,
+int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
                            struct RDBInfo *rdb, struct PartInfo *pi,
                            ULONG old_hi)
 {
     struct EasyStruct es;
     char errbuf[256];
 
-    if (pi->high_cyl <= old_hi) return;
-    if (!SFS_IsSupportedType(pi->dos_type)) return;
-    if (!bd) return;
+    /* SFS grow auto-writes the RDB and leaves the volume inhibited; it still
+       requires a reboot.  No-reboot remount is FFS-only for now. */
+    if (pi->high_cyl <= old_hi) return GROW_NONE;
+    if (!SFS_IsSupportedType(pi->dos_type)) return GROW_NONE;
+    if (!bd) return GROW_NONE;
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
@@ -934,6 +996,8 @@ void offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             err_es.es_GadgetFormat = (UBYTE *)"OK";
             EasyRequest(win, &err_es, NULL);
         }
+        return GROW_NEED_REBOOT;
     }
+    return GROW_NONE;
 }
 

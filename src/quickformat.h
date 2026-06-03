@@ -26,6 +26,13 @@
 BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
                            char *mounted_name, char *errbuf, ULONG errlen);
 
+/* Mount the partition described by pi (with its current geometry) WITHOUT
+ * formatting - used to remount after a resize so the handler picks up the new
+ * cylinder range.  Returns TRUE on success; mounted_name (>=40 bytes, optional)
+ * gets the DOS name used.  Real-device backend only. */
+BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
+                    char *mounted_name, char *errbuf, ULONG errlen);
+
 /* Unmount a DOS device by name (no colon) so a deleted partition doesn't need a
  * reboot to disappear.  Flushes and asks the handler to die (ACTION_DIE), then
  * removes the device node.  REFUSES (returns FALSE, errbuf set) if the volume is

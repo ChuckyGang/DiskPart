@@ -57,6 +57,9 @@ scripting interface.
 
  GROW
  * Grow of FFS, PFS and SFS partitions is supported.  (EXPERIMENTAL)
+ * FFS grow unmounts the volume first, grows it, then remounts with the new
+   size - no reboot needed (unless the volume is in use, then it falls back to
+   the grow-then-reboot path).  PFS and SFS grow still require a reboot.
  * SHRINKING of filesystems is NOT supported.
 
 

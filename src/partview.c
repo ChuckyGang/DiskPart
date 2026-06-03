@@ -1912,14 +1912,17 @@ BOOL partview_run(const char *devname, ULONG unit)
                                         ULONG old_hi = rdb->parts[sel].high_cyl;
                                         if (partition_dialog(&rdb->parts[sel],
                                                              "Edit Partition", rdb, FALSE)) {
-                                            offer_ffs_grow(win, bd, rdb,
+                                            {
+                                            int g = offer_ffs_grow(win, bd, rdb,
                                                            &rdb->parts[sel], old_hi);
-                                            offer_pfs_grow(win, bd, rdb,
+                                            if (g == GROW_NONE) g = offer_pfs_grow(win, bd, rdb,
                                                            &rdb->parts[sel], old_hi);
-                                            offer_sfs_grow(win, bd, rdb,
+                                            if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                            &rdb->parts[sel], old_hi);
                                             dirty        = TRUE;
-                                            needs_reboot = TRUE;
+                                            /* Clean FFS grow remounts live; else reboot. */
+                                            if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                            }
                                             refresh_listview(win, lv_gad, rdb, sel);
                                             draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                                         ix, iy, iw, bx, by, bw, bh,
@@ -2056,21 +2059,25 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     rdb->parts[confirmed_part].low_cyl  = drag_orig_lo;
                                     rdb->parts[confirmed_part].high_cyl = drag_orig_hi;
                                 } else {
-                                    dirty = TRUE; needs_reboot = TRUE;
+                                    dirty = TRUE;
                                     if (is_grow && r == 1) {
                                         /* Resize: extend partition + grow FS */
-                                        offer_ffs_grow(win, bd, rdb,
+                                        int g = offer_ffs_grow(win, bd, rdb,
                                                        &rdb->parts[confirmed_part],
                                                        drag_orig_hi);
-                                        offer_pfs_grow(win, bd, rdb,
+                                        if (g == GROW_NONE) g = offer_pfs_grow(win, bd, rdb,
                                                        &rdb->parts[confirmed_part],
                                                        drag_orig_hi);
-                                        offer_sfs_grow(win, bd, rdb,
+                                        if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                        &rdb->parts[confirmed_part],
                                                        drag_orig_hi);
+                                        /* FFS remount avoids the reboot; else need it. */
+                                        if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                    } else {
+                                        /* cyl change committed without an FS grow
+                                           (is_grow&&r==0, or shrink&&r==1) */
+                                        needs_reboot = TRUE;
                                     }
-                                    /* is_grow && r==0: commit cyl change, skip FS grow
-                                       shrink && r==1: commit cyl change, user accepted loss */
                                 }
                             }
                             refresh_listview(win, lv_gad, rdb, sel);
@@ -2270,14 +2277,17 @@ BOOL partview_run(const char *devname, ULONG unit)
                             ULONG old_hi = rdb->parts[sel].high_cyl;
                             if (partition_dialog(&rdb->parts[sel],
                                                  "Edit Partition", rdb, FALSE)) {
-                                offer_ffs_grow(win, bd, rdb,
+                                {
+                                int g = offer_ffs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
-                                offer_pfs_grow(win, bd, rdb,
+                                if (g == GROW_NONE) g = offer_pfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
-                                offer_sfs_grow(win, bd, rdb,
+                                if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
                                 dirty        = TRUE;
-                                needs_reboot = TRUE;
+                                /* Clean FFS grow remounts live; else reboot. */
+                                if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                }
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,
@@ -2527,14 +2537,17 @@ BOOL partview_run(const char *devname, ULONG unit)
                             ULONG old_hi = rdb->parts[sel].high_cyl;
                             if (partition_dialog(&rdb->parts[sel],
                                                  "Edit Partition", rdb, FALSE)) {
-                                offer_ffs_grow(win, bd, rdb,
+                                {
+                                int g = offer_ffs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
-                                offer_pfs_grow(win, bd, rdb,
+                                if (g == GROW_NONE) g = offer_pfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
-                                offer_sfs_grow(win, bd, rdb,
+                                if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
                                 dirty        = TRUE;
-                                needs_reboot = TRUE;
+                                /* Clean FFS grow remounts live; else reboot. */
+                                if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                }
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,

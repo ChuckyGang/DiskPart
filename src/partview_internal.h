@@ -91,13 +91,19 @@ void  check_ffs_root(struct Window *win, struct BlockDev *bd,
 BOOL  offer_move_partition(struct Window *win, struct BlockDev *bd,
                            struct RDBInfo *rdb, struct PartInfo *pi,
                            ULONG default_lo);
-void  offer_ffs_grow(struct Window *win, struct BlockDev *bd,
+/* offer_*_grow return codes: tell the caller whether a reboot is still needed. */
+#define GROW_NONE        0   /* nothing grown (not applicable / user skipped)   */
+#define GROW_REMOUNTED   1   /* grown and remounted live - no reboot needed     */
+#define GROW_NEED_REBOOT 2   /* grown but couldn't remount live - reboot needed */
+#define GROW_ABORTED     3   /* refused (volume in use) or failed+restored      */
+
+int   offer_ffs_grow(struct Window *win, struct BlockDev *bd,
                      const struct RDBInfo *rdb, struct PartInfo *pi,
                      ULONG old_hi);
-void  offer_pfs_grow(struct Window *win, struct BlockDev *bd,
+int   offer_pfs_grow(struct Window *win, struct BlockDev *bd,
                      const struct RDBInfo *rdb, struct PartInfo *pi,
                      ULONG old_hi);
-void  offer_sfs_grow(struct Window *win, struct BlockDev *bd,
+int   offer_sfs_grow(struct Window *win, struct BlockDev *bd,
                      struct RDBInfo *rdb, struct PartInfo *pi,
                      ULONG old_hi);
 

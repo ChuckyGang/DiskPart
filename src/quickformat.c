@@ -126,12 +126,11 @@ static void apply_patch(struct DeviceNode *node, const struct FsPatch *fp)
     if (p & 0x0100) node->dn_GlobalVec = fp->global_vec;
 }
 
-BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
-                           char *mounted_name, char *errbuf, ULONG errlen)
+BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
+                    char *mounted_name, char *errbuf, ULONG errlen)
 {
     LONG  parmpkt[24];
     char  devname[40];
-    char  withcolon[44];
     struct DeviceNode *node;
     struct FsPatch     fp;
     ULONG eff_heads, eff_secs;
@@ -144,7 +143,7 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
         return FALSE;
     }
     if (!bd || bd->backend != BD_DEVICE) {
-        set_err(errbuf, errlen, "image files can't be OS-formatted");
+        set_err(errbuf, errlen, "image files can't be mounted");
         return FALSE;
     }
 
@@ -154,8 +153,7 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
     find_filesys(pi->dos_type, &fp);
     if (!fp.found) {
         char msg[96];
-        sprintf(msg, "no handler for type 0x%08lX - reboot & format in WB",
-                (unsigned long)pi->dos_type);
+        sprintf(msg, "no handler for type 0x%08lX", (unsigned long)pi->dos_type);
         set_err(errbuf, errlen, msg);
         return FALSE;
     }
@@ -223,12 +221,28 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
         strncpy(mounted_name, devname, 39);
         mounted_name[39] = '\0';
     }
+    set_err(errbuf, errlen, "");
+    return TRUE;
+}
+
+BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
+                           char *mounted_name, char *errbuf, ULONG errlen)
+{
+    char mnt[40];
+    char withcolon[44];
+
+    if (!MountPartition(bd, pi, mnt, errbuf, errlen))
+        return FALSE;             /* errbuf already set */
+    if (mounted_name) {
+        strncpy(mounted_name, mnt, 39);
+        mounted_name[39] = '\0';
+    }
 
     /* Let the handler come up before formatting (cf. the Delay before Inhibit
        in pfsresize.c). */
     Delay(25);
 
-    sprintf(withcolon, "%s:", devname);
+    sprintf(withcolon, "%s:", mnt);
 
     /* ACTION_FORMAT requires the filesystem to be inhibited first - otherwise
        the just-started handler is busy validating the (garbage) partition and
@@ -237,11 +251,8 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
     Inhibit((CONST_STRPTR)withcolon, DOSTRUE);
     if (!Format((CONST_STRPTR)withcolon, (CONST_STRPTR)pi->volume_name,
                 pi->dos_type)) {
-        char msg[96];
-        LONG ioerr = IoErr();
-        sprintf(msg, "Format err %ld (sl=%lx pf=%lx)",
-                (long)ioerr, (unsigned long)node->dn_SegList,
-                (unsigned long)fp.patch_flags);
+        char msg[64];
+        sprintf(msg, "Format err %ld", (long)IoErr());
         set_err(errbuf, errlen, msg);
         Inhibit((CONST_STRPTR)withcolon, DOSFALSE);
         return FALSE;   /* left mounted; user can format it manually */
