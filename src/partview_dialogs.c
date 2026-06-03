@@ -114,6 +114,44 @@ ULONG parse_num(const char *s)
     return val;
 }
 
+/*
+ * Parse a partition size entered in the "Size (MB)" field, returning MB.
+ *   - A bare number ("700") is an absolute size in MB (unchanged behaviour).
+ *   - An optional K/M/G suffix scales the number (K rounds up to whole MB,
+ *     M = MB, G = 1024 MB). A bare number is treated as MB to match the
+ *     field label.
+ *   - A leading '+' or '-' makes the value relative to cur_mb, so "+500M"
+ *     grows the current partition by 500 MB and "-200" shrinks it by 200 MB.
+ * Result is clamped to >= 1 MB (and never underflows below 0).
+ */
+static ULONG parse_size_mb(const char *s, ULONG cur_mb)
+{
+    int   sign = 0;            /* 0 = absolute, +1 = add, -1 = subtract */
+    UQUAD val  = 0;
+    UQUAD mb;
+
+    while (*s == ' ') s++;
+    if      (*s == '+') { sign =  1; s++; }
+    else if (*s == '-') { sign = -1; s++; }
+    while (*s == ' ') s++;
+
+    while (*s >= '0' && *s <= '9') val = val * 10ULL + (UQUAD)(*s++ - '0');
+
+    if      (*s == 'K' || *s == 'k') mb = (val + 1023ULL) / 1024ULL;
+    else if (*s == 'G' || *s == 'g') mb = val * 1024ULL;
+    else                             mb = val;   /* M or no suffix = MB */
+
+    if (sign == 0) return (ULONG)mb;
+
+    if (sign > 0) {
+        mb += (UQUAD)cur_mb;
+    } else {
+        mb = (mb >= (UQUAD)cur_mb) ? 0ULL : (UQUAD)cur_mb - mb;
+    }
+    if (mb < 1ULL) mb = 1ULL;
+    return (ULONG)mb;
+}
+
 /* Parse signed decimal (handles leading '-') */
 LONG parse_long(const char *s)
 {
@@ -759,7 +797,12 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                             }
                             si = (struct StringInfo *)sizemb_gad->SpecialInfo;
                             if (bytes_per_cyl > 0) {
-                                ULONG size_mb    = parse_num((char *)si->Buffer);
+                                /* current size in MB - base for relative "+/-" entries */
+                                ULONG cur_cyls   = (pi->high_cyl >= pi->low_cyl)
+                                                   ? (pi->high_cyl - pi->low_cyl + 1) : 1;
+                                ULONG cur_mb     = (ULONG)(((UQUAD)cur_cyls * bytes_per_cyl)
+                                                           / (1024ULL * 1024ULL));
+                                ULONG size_mb    = parse_size_mb((char *)si->Buffer, cur_mb);
                                 UQUAD bytes_need = (UQUAD)size_mb * 1024ULL * 1024ULL;
                                 ULONG cyls = (ULONG)((bytes_need + bytes_per_cyl - 1)
                                                      / bytes_per_cyl);
