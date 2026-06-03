@@ -273,8 +273,8 @@ static ULONG lv_render(void)
         LV_RIGHT(LVCOL_SIZE, sz, strlen(sz));
     }
 
-    /* Boot priority */
-    sprintf(tmp, "%ld", (long)pi->boot_pri);
+    /* Boot priority - prefix "* " when the partition is bootable. */
+    sprintf(tmp, "%s%ld", (pi->flags & 1) ? "* " : "", (long)pi->boot_pri);
     LV_TEXT(LVCOL_BOOT, tmp, strlen(tmp));
 
 #undef LV_TEXT
@@ -308,8 +308,36 @@ static void offer_reboot(struct Window *win, const char *msg)
     es.es_TextFormat   = (UBYTE *)msg;
     es.es_GadgetFormat = (UBYTE *)"Reboot|Later";
     if (EasyRequest(win, &es, NULL) == 1) {
-        Delay(150);      /* 3 seconds - let the system settle before reboot */
+        /* Show a small window during the settle delay so the pause before the
+           machine resets isn't a mystery. */
+        struct Screen *scr = win ? win->WScreen : NULL;
+        struct Window *rw  = NULL;
+        if (scr) {
+            UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
+            UWORD w = 260;
+            UWORD h = (UWORD)(scr->WBorTop + font_h + 1 + font_h + 8 + scr->WBorBottom);
+            struct TagItem wt[] = {
+                { WA_Left,      (ULONG)((scr->Width  - w) / 2) },
+                { WA_Top,       (ULONG)((scr->Height - h) / 2) },
+                { WA_Width,     (ULONG)w }, { WA_Height, (ULONG)h },
+                { WA_Title,     (ULONG)"Please wait" },
+                { WA_PubScreen, (ULONG)scr },
+                { WA_Flags,     WFLG_DRAGBAR | WFLG_SIMPLE_REFRESH },
+                { WA_IDCMP,     0 },
+                { TAG_DONE,     0 }
+            };
+            rw = OpenWindowTagList(NULL, wt);
+            if (rw) {
+                const char *t = "Rebooting the system...";
+                SetAPen(rw->RPort, 1);
+                Move(rw->RPort, (WORD)(rw->BorderLeft + 6),
+                                (WORD)(rw->BorderTop + font_h));
+                Text(rw->RPort, (CONST_STRPTR)t, (LONG)strlen(t));
+            }
+        }
+        Delay(100);      /* ~2 seconds - let the system settle before reboot */
         ColdReboot();
+        if (rw) CloseWindow(rw);   /* unreached unless ColdReboot is a no-op */
     }
 }
 
@@ -322,7 +350,7 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
 
     for (i = 0; i < rdb->num_parts; i++) {
         struct PartInfo *pi = &rdb->parts[i];
-        char dt[16], sz[16];
+        char dt[16], sz[16], boot[12];
         ULONG cyls  = (pi->high_cyl >= pi->low_cyl)
                       ? pi->high_cyl - pi->low_cyl + 1 : 0;
         ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
@@ -334,14 +362,17 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
         FriendlyDosType(pi->dos_type, dt);
         FormatSize(bytes, sz);
 
+        /* Boot column: "*" before the priority when the partition is bootable. */
+        sprintf(boot, "%s%ld", (pi->flags & 1) ? "*" : "", (long)pi->boot_pri);
+
         /* ">" marker for selected row, space otherwise */
-        sprintf(part_strs[i], "%c %-7s %9lu %9lu  %-12s  %9s   %4ld",
+        sprintf(part_strs[i], "%c %-7s %9lu %9lu  %-12s  %9s   %4s",
                 ((WORD)i == sel) ? '>' : ' ',
                 nm,
                 (unsigned long)pi->low_cyl,
                 (unsigned long)pi->high_cyl,
                 dt, sz,
-                (long)pi->boot_pri);
+                boot);   /* boot = "*<pri>" if bootable, "<pri>" otherwise */
 
         part_nodes[i].ln_Name = part_strs[i];
         part_nodes[i].ln_Type = NT_USER;
@@ -1213,7 +1244,7 @@ static BOOL build_gadgets(APTR vi,
             cx += lv_cols[LVCOL_SIZE].w + gap + 8;
 
             lv_cols[LVCOL_BOOT].x = cx;
-            lv_cols[LVCOL_BOOT].w = MAXW("-128", 4, "Boot", 4);
+            lv_cols[LVCOL_BOOT].w = MAXW("* -128", 6, "Boot", 4);
 
 #undef MAXW
             CloseFont(tf);
@@ -1414,6 +1445,27 @@ static BOOL format_pending_partitions(struct Window *win, struct BlockDev *bd,
         EasyRequest(win, &es, NULL);
     }
     return need_reboot;
+}
+
+/* Redraw all gadgets (incl. the bottom button row) - call after an operation
+   opened sub-windows/requesters over the main window. */
+static void refresh_all_gadgets(struct Window *win, struct Gadget *glist)
+{
+    if (glist) {
+        RefreshGList(glist, win, NULL, -1);
+        GT_RefreshWindow(win, NULL);
+    }
+}
+
+/* Update the window titlebar to flag unsaved (pending-write) changes. */
+static void set_title_dirty(struct Window *win, const char *devname, ULONG unit,
+                            BOOL dirty)
+{
+    static char t[96];
+    sprintf(t, DISKPART_VERTITLE " - %s unit %lu%s",
+            devname, (unsigned long)unit,
+            dirty ? "  -  UNSAVED CHANGES (Write to save)" : "");
+    SetWindowTitles(win, (UBYTE *)t, (UBYTE *)~0UL);  /* leave screen title */
 }
 
 /* Case-insensitive equality for drive names. */
@@ -1704,6 +1756,7 @@ BOOL partview_run(const char *devname, ULONG unit)
     /* ---- Event loop ---- */
     {
         BOOL running = TRUE;
+        BOOL last_dirty = FALSE;   /* tracks titlebar "unsaved changes" marker */
         while (running) {
             struct IntuiMessage *imsg;
             WaitPort(win->UserPort);
@@ -1922,6 +1975,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                             dirty        = TRUE;
                                             /* Clean FFS grow remounts live; else reboot. */
                                             if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                            if (g != GROW_NONE) refresh_all_gadgets(win, glist);
                                             }
                                             refresh_listview(win, lv_gad, rdb, sel);
                                             draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
@@ -2073,6 +2127,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                        drag_orig_hi);
                                         /* FFS remount avoids the reboot; else need it. */
                                         if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                            if (g != GROW_NONE) refresh_all_gadgets(win, glist);
                                     } else {
                                         /* cyl change committed without an FS grow
                                            (is_grow&&r==0, or shrink&&r==1) */
@@ -2097,6 +2152,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.heads        = rdb->heads;
                                 new_pi.sectors      = rdb->sectors;
                                 new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
+                                /* First partition on the disk: bootable by default. */
+                                if (rdb->num_parts == 0) new_pi.flags |= 1UL; /* PBFF_BOOTABLE */
                                 new_pi.reserved_blks = 2;
                                 new_pi.interleave    = 0;
                                 recommend_new_part_defaults(rdb,
@@ -2287,6 +2344,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 dirty        = TRUE;
                                 /* Clean FFS grow remounts live; else reboot. */
                                 if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                            if (g != GROW_NONE) refresh_all_gadgets(win, glist);
                                 }
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
@@ -2506,6 +2564,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                         new_pi.heads        = rdb->heads;
                         new_pi.sectors      = rdb->sectors;
                         new_pi.boot_pri      = (rdb->num_parts == 0) ? 0 : -128;
+                        /* First partition on the disk: bootable by default. */
+                        if (rdb->num_parts == 0) new_pi.flags |= 1UL; /* PBFF_BOOTABLE */
                         new_pi.reserved_blks = 2;
                         new_pi.interleave    = 0;
                         recommend_new_part_defaults(rdb,
@@ -2547,6 +2607,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 dirty        = TRUE;
                                 /* Clean FFS grow remounts live; else reboot. */
                                 if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                            if (g != GROW_NONE) refresh_all_gadgets(win, glist);
                                 }
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
@@ -2856,8 +2917,18 @@ BOOL partview_run(const char *devname, ULONG unit)
                     draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                 ix, iy, iw, bx, by, bw, bh,
                                 hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                    /* Redraw every gadget (incl. the bottom button row) - GadTools
+                       only auto-refreshes the damaged region, which can leave
+                       buttons blank after sub-windows (grow progress / requesters)
+                       overlapped them. */
+                    if (glist) RefreshGList(glist, win, NULL, -1);
                     break;
                 }
+            }
+            /* Flag/clear pending writes in the titlebar when the state changes. */
+            if (dirty != last_dirty) {
+                set_title_dirty(win, devname, unit, dirty);
+                last_dirty = dirty;
             }
         }
     }

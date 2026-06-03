@@ -41,4 +41,10 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
  * expansion.library needed, so it works in CLI/script mode too. */
 BOOL UnmountDevice(const char *name, char *errbuf, ULONG errlen);
 
+/* Bring a just-mounted volume online (Lock+UnLock its root) so that any lock
+ * orphaned while it was briefly absent (e.g. during a resize) revalidates
+ * against it silently, instead of popping an "insert volume" requester.
+ * Suppresses our own process's requesters while doing so. */
+void MaterializeVolume(const char *name);
+
 #endif /* QUICKFORMAT_H */

@@ -264,6 +264,25 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
     return TRUE;
 }
 
+void MaterializeVolume(const char *name)
+{
+    struct Process *me;
+    APTR  oldwin;
+    char  wc[44];
+    BPTR  l;
+
+    if (!name || !name[0]) return;
+    me = (struct Process *)FindTask(NULL);
+
+    Delay(25);                          /* give the handler time to start */
+    oldwin = me->pr_WindowPtr;
+    me->pr_WindowPtr = (APTR)-1;        /* suppress our own DOS requesters */
+    sprintf(wc, "%s:", name);
+    l = Lock((CONST_STRPTR)wc, SHARED_LOCK);   /* brings the volume online */
+    if (l) UnLock(l);
+    me->pr_WindowPtr = oldwin;
+}
+
 BOOL UnmountDevice(const char *name, char *errbuf, ULONG errlen)
 {
     struct DosList *dl, *de;

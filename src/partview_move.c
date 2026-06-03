@@ -785,6 +785,10 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
 
             if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
                 /* Grown and remounted with the new geometry - no reboot. */
+                /* Bring the volume online now so a lock orphaned during the
+                   grow (e.g. Workbench's icon lock) revalidates silently
+                   rather than popping an "insert volume" requester. */
+                MaterializeVolume(mnt);
                 rc = GROW_REMOUNTED;
                 sprintf(ok_msg,
                         "FFS filesystem on %s grown and remounted as %s:\n"
