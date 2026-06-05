@@ -83,6 +83,9 @@ struct WBStartup *DiskPart_WBStartup = NULL;
 #define GID_SZ_OK   11
 #define GID_SZ_CANC 12
 
+/* Gadget ID for the probe-progress window's Cancel button */
+#define GID_PROBE_CANCEL 13
+
 /* ------------------------------------------------------------------ */
 /* Static data (too large for stack)                                   */
 /* ------------------------------------------------------------------ */
@@ -453,6 +456,9 @@ cleanup:
 
 struct ProbeWin {
     struct Window *win;
+    APTR           vi;        /* GadTools visual info (Cancel button) */
+    struct Gadget *glist;     /* gadget context list to free          */
+    BOOL           cancelled; /* set TRUE once Cancel is clicked       */
     UWORD  x;           /* left text margin */
     UWORD  baseline;    /* font baseline from top of cell */
     UWORD  line_h;      /* pixels per text row             */
@@ -462,14 +468,14 @@ struct ProbeWin {
     char   title[80];   /* Intuition keeps a pointer - must outlive win */
 };
 
-static void probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
+static BOOL probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
 {
     struct ProbeWin *pw = (struct ProbeWin *)ud;
     struct RastPort *rp;
     char   buf[128];
     WORD   len, pad;
 
-    if (!pw->win) return;
+    if (!pw->win) return TRUE;   /* no window -> nothing to cancel with */
     rp = pw->win->RPort;
 
     switch (phase) {
@@ -499,12 +505,30 @@ static void probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
         break;
     }
 
+    /* Drain any pending input. A Cancel click aborts the rest of the scan.
+       Note: this can only be serviced between units - while a single unit's
+       DoIO() is blocked in the driver, no message is processed. */
+    {
+        struct IntuiMessage *imsg;
+        while ((imsg = GT_GetIMsg(pw->win->UserPort)) != NULL) {
+            ULONG          cls = imsg->Class;
+            struct Gadget *gad = (struct Gadget *)imsg->IAddress;
+            GT_ReplyIMsg(imsg);
+            if (cls == IDCMP_GADGETUP && gad &&
+                gad->GadgetID == GID_PROBE_CANCEL)
+                pw->cancelled = TRUE;
+        }
+    }
+
+    return (BOOL)!pw->cancelled;
 }
 
 static void probe_win_open(struct ProbeWin *pw, const char *devname)
 {
     struct Screen *scr;
+    struct Gadget *gctx = NULL;
     UWORD fh, bor_l, bor_t, bor_r, bor_b, pad, lh, win_w, win_h, rows;
+    UWORD btn_h, btn_w, btn_y;
 
     memset(pw, 0, sizeof(*pw));
     {
@@ -524,8 +548,33 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
     lh    = fh + 2;
     /* 1 header row + 1 status row + result rows */
     rows  = 2 + PROBE_WIN_MAX_RESULTS;
+    btn_h = fh + 6;
+    btn_w = 100;
     win_w = 420;
-    win_h = bor_t + pad + rows * lh + pad + bor_b;
+    /* room for header/status/results, then a Cancel button row */
+    win_h = bor_t + pad + rows * lh + pad + btn_h + pad + bor_b;
+    btn_y = bor_t + pad + rows * lh + pad;
+
+    /* Build the Cancel button. If GadTools setup fails we still open the
+       window without a button - probing just can't be cancelled then. */
+    pw->vi = GetVisualInfoA(scr, NULL);
+    if (pw->vi) {
+        gctx = CreateContext(&pw->glist);
+        if (gctx) {
+            struct NewGadget ng;
+            struct TagItem   bt[] = { { TAG_DONE, 0 } };
+            memset(&ng, 0, sizeof(ng));
+            ng.ng_VisualInfo = pw->vi;
+            ng.ng_TextAttr   = scr->Font;
+            ng.ng_LeftEdge   = (win_w - btn_w) / 2;
+            ng.ng_TopEdge    = btn_y;
+            ng.ng_Width      = btn_w;
+            ng.ng_Height     = btn_h;
+            ng.ng_GadgetText = GS(MSG_CANCEL);
+            ng.ng_GadgetID   = GID_PROBE_CANCEL;
+            CreateGadgetA(BUTTON_KIND, gctx, &ng, bt);
+        }
+    }
 
     {
         struct TagItem win_tags[] = {
@@ -535,7 +584,8 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
             { WA_Height,    win_h  },
             { WA_Title,     (ULONG)pw->title },
             { WA_PubScreen, (ULONG)scr },
-            { WA_IDCMP,     0 },
+            { WA_Gadgets,   (ULONG)pw->glist },
+            { WA_IDCMP,     pw->glist ? IDCMP_GADGETUP : 0 },
             { WA_Flags,     WFLG_DRAGBAR | WFLG_DEPTHGADGET | WFLG_SMART_REFRESH },
             { TAG_DONE,     0 }
         };
@@ -544,6 +594,9 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
 
     UnlockPubScreen(NULL, scr);
     if (!pw->win) return;
+
+    if (pw->glist)
+        GT_RefreshWindow(pw->win, NULL);
 
     pw->x        = bor_l + pad;
     pw->line_h   = lh;
@@ -571,7 +624,13 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
 
 static void probe_win_close(struct ProbeWin *pw)
 {
-    if (pw->win) { CloseWindow(pw->win); pw->win = NULL; }
+    if (pw->win) {
+        if (pw->glist) RemoveGList(pw->win, pw->glist, -1);
+        CloseWindow(pw->win);
+        pw->win = NULL;
+    }
+    if (pw->glist) { FreeGadgets(pw->glist); pw->glist = NULL; }
+    if (pw->vi)    { FreeVisualInfo(pw->vi); pw->vi    = NULL; }
 }
 
 /* ------------------------------------------------------------------ */

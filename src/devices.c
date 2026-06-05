@@ -427,11 +427,11 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
 
         if (ul->count >= MAX_KNOWN_DEVICES) break;
 
-        if (cb) cb(cb_data, unit, PROBE_START, NULL);
+        if (cb && !cb(cb_data, unit, PROBE_START, NULL)) break;
 
         bd = BlockDev_Open(devname, unit);
         if (!bd) {
-            if (cb) cb(cb_data, unit, PROBE_EMPTY, NULL);
+            if (cb && !cb(cb_data, unit, PROBE_EMPTY, NULL)) break;
             continue;
         }
 
@@ -497,10 +497,13 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
             sprintf(ue->display, GS(MSG_DEV_UNIT_FMT), (unsigned long)unit);
         }
 
-        if (cb) cb(cb_data, unit, PROBE_FOUND, ue->display);
-
-        BlockDev_Close(bd);
-        ul->count++;
+        {
+            BOOL keep_going = TRUE;
+            if (cb) keep_going = cb(cb_data, unit, PROBE_FOUND, ue->display);
+            BlockDev_Close(bd);
+            ul->count++;                 /* keep the unit we just found */
+            if (!keep_going) break;      /* user cancelled - stop here  */
+        }
     }
 
     FreeVec(rdb);

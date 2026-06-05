@@ -52,12 +52,16 @@ void DevNameList_FormatDisplay(struct DevNameList *nl, UWORD col_chars);
  * phase PROBE_START : about to probe this unit  (info = NULL)
  * phase PROBE_FOUND : unit responded            (info = display string)
  * phase PROBE_EMPTY : unit not present          (info = NULL)
+ *
+ * Returns TRUE to keep probing, FALSE to abort the scan early (e.g. the user
+ * clicked Cancel). The abort can only take effect between units - a unit
+ * whose driver I/O is currently blocked is not interrupted.
  */
 #define PROBE_START  0
 #define PROBE_FOUND  1
 #define PROBE_EMPTY  2
 
-typedef void (*UnitProbeCallback)(void *ud, ULONG unit, UWORD phase,
+typedef BOOL (*UnitProbeCallback)(void *ud, ULONG unit, UWORD phase,
                                   const char *info);
 
 /*
