@@ -1,0 +1,3123 @@
+## DiskPart.cd - catalog description (single source of truth for all
+## translatable strings).  CatComp/FlexCat-compatible.
+##
+## Generate the C header:   python3 support/gencat.py header DiskPart.cd ../src/diskpart_strings.h
+## Make a translation tmpl:  python3 support/gencat.py ct DiskPart.cd deutsch.ct deutsch
+## Compile a .catalog:        python3 support/gencat.py catalog DiskPart.cd deutsch.ct DiskPart.catalog
+##
+## RULES FOR EDITORS:
+##   * Append new messages at the END of their section, never insert in the
+##     middle - ids are positional and must stay stable for existing catalogs.
+##   * Keep printf-style %-placeholders identical in translations.
+##
+#language english
+#version 1
+#name DiskPart
+;
+;==========================================================================
+; Common / shared
+;==========================================================================
+MSG_OK
+OK
+;
+MSG_CANCEL
+Cancel
+;
+MSG_YES
+Yes
+;
+MSG_NO
+No
+;
+MSG_CONTINUE
+Continue
+;
+MSG_ABORT
+Abort
+;
+MSG_RETRY
+Retry
+;
+MSG_CLOSE
+Close
+;
+MSG_OK_CANCEL
+OK|Cancel
+;
+MSG_YES_NO
+Yes|No
+;
+MSG_CONTINUE_ABORT
+Continue|Abort
+;
+MSG_ERROR_TITLE
+DiskPart Error
+;
+MSG_WARNING_TITLE
+DiskPart Warning
+;
+MSG_INFO_TITLE
+DiskPart
+;
+;==========================================================================
+; main.c - device/unit selection, image-file creation, startup warning
+;==========================================================================
+MSG_MAIN_EXIT_BODY
+Exit DiskPart?
+;
+MSG_MAIN_MANUAL_DEV
+Manual device name:
+;
+MSG_MAIN_SELECT
+Select
+;
+MSG_MAIN_FILTER
+Filter
+;
+MSG_MAIN_SHOWALL
+Show All
+;
+MSG_MAIN_USE_IMAGE
+Use Image
+;
+MSG_MAIN_QUIT
+Quit
+;
+MSG_MAIN_BACK
+Back
+;
+; Window-title suffixes appended to "DiskPart Vx.y"
+MSG_MAIN_TITLE_SELECT_DEV
+ - Select Device
+;
+MSG_MAIN_TITLE_PROBING_FMT
+ - Probing %s
+;
+MSG_MAIN_TITLE_DASH_FMT
+ - %s
+;
+MSG_MAIN_TESTING_UNIT_FMT
+Testing unit %lu...
+;
+MSG_MAIN_UNIT_FMT
+Unit %lu  %s
+;
+MSG_MAIN_FOUND
+found
+;
+MSG_MAIN_DEVICE_FMT
+Device: %s
+;
+MSG_MAIN_ASL_UNAVAIL
+asl.library not available.\nCannot open file requester.
+;
+MSG_MAIN_ASL_TITLE
+Select or name an image file
+;
+MSG_MAIN_IMG_NOEXIST_FMT
+File \"%s\" does not exist.\nEnter size for the new image:
+;
+MSG_MAIN_SIZE_PROMPT
+Size (e.g. 100M, 2G):
+;
+MSG_MAIN_CREATE
+Create
+;
+MSG_MAIN_NEW_IMAGE_TITLE
+DiskPart - New Image
+;
+MSG_MAIN_SIZE_MIN
+Size must be at least 512 bytes.
+;
+MSG_MAIN_SIZE_MAX
+Size exceeds the 2 GB dos.library image-file limit.
+;
+MSG_MAIN_IMG_CREATE_FAIL_FMT
+Failed to create image file:\n%s
+;
+MSG_MAIN_WARN_TITLE
+DiskPart - WARNING
+;
+MSG_MAIN_WARN_BODY
+EXPERIMENTAL SOFTWARE\nDiskPart %s  (built %s)\n\nDiskPart can modify the partition table\nof your hard drive or other block device.\n\nIncorrect use WILL cause permanent data loss.\n\nMake sure you have a FULL BACKUP of any disk\nyou intend to work with before proceeding.\n\nThe author accepts NO responsibility for\nany loss of data caused by this software.
+;
+MSG_MAIN_WARN_GADGETS
+I have a backup - Continue|Quit
+;
+;==========================================================================
+; cli.c
+;==========================================================================
+MSG_CLI_IMAGE_PATH_BAD
+ERROR: IMAGE path is empty or too long.\n
+;
+MSG_CLI_NEED_DEV_OR_IMAGE
+This command requires DEV <device>:<unit> or IMAGE <path>.\n
+;
+MSG_CLI_DEV_FORMAT_BAD
+ERROR: DEV format must be <device>:<unit> (e.g. uaehf.device:3).\n
+;
+MSG_CLI_CREATE_NEED_IMAGE
+ERROR: CREATE requires IMAGE=<path>.\n
+;
+MSG_CLI_CREATE_NEED_SIZE
+ERROR: CREATE requires SIZE=<n>[K|M|G].\n
+;
+MSG_CLI_SIZE_MIN
+ERROR: SIZE must be at least 512 bytes.\n
+;
+MSG_CLI_SIZE_MAX
+ERROR: SIZE exceeds the 2 GB dos.library image-file limit.\n
+;
+MSG_CLI_CREATING_IMAGE
+Creating image \"%s\" (%s)...\n
+;
+MSG_CLI_CREATE_IMAGE_FAIL
+ERROR: failed to create image file.\n
+;
+MSG_CLI_PROMPT_YN_FORCED
+%s (Y/N): Y\n
+;
+MSG_CLI_PROMPT_YN
+%s (Y/N): 
+;
+MSG_CLI_DEVICE_LINE_BRAND
+Device : %s unit %lu  [%s  %s]\n
+;
+MSG_CLI_DEVICE_LINE
+Device : %s unit %lu  [%s]\n
+;
+MSG_CLI_NO_BLOCK_DEVS
+No block devices found.\n
+;
+MSG_CLI_BLOCK_DEVS_COUNT
+Block devices: %u\n\n
+;
+MSG_CLI_PROBING_UNITS
+  Probing units for %s...\n
+;
+MSG_CLI_NO_UNITS_FOUND
+  (no units found)\n
+;
+MSG_CLI_OPENING
+Opening %s unit %lu...\n
+;
+MSG_CLI_CANNOT_OPEN
+ERROR: Cannot open %s unit %lu.\n
+;
+MSG_CLI_OUT_OF_MEMORY
+ERROR: Out of memory.\n
+;
+MSG_CLI_SMART_NO_SCSICMD
+ERROR: Device does not support HD_SCSICMD (not a SCSI device).\n
+;
+MSG_CLI_SMART_CMD_FAILED
+ERROR: SMART command failed  (io_Error=%d, scsi_Status=%u).\nThe drive may not support SMART or ATA PASS-THROUGH.\n
+;
+MSG_CLI_SMART_HDR_BRAND
+SMART - %s  (revision %u)\n\n
+;
+MSG_CLI_SMART_HDR
+SMART - %s unit %lu  (revision %u)\n\n
+;
+MSG_CLI_SMART_TABLE_HDR
+ID  Attribute                 Cur Wst Raw\n
+;
+MSG_CLI_SMART_TABLE_SEP
+--- ------------------------- --- --- ----------\n
+;
+MSG_CLI_SMART_PREFAIL
+ PRE-FAIL
+;
+MSG_CLI_NO_RDB_FOUND
+No valid RDB found.\n
+;
+MSG_CLI_INFO_GEOMETRY
+Geometry   : %lu cyls x %lu heads x %lu sectors  (%s)\n
+;
+MSG_CLI_INFO_RDB_BLOCKS
+RDB blocks : %lu-%lu  |  Partition area: cyls %lu-%lu\n
+;
+MSG_CLI_INFO_PARTITIONS
+\nPartitions : %u\n
+;
+MSG_CLI_INFO_PART_ROW
+  %2u: %-6s  cyls %4lu-%4lu  %-8s  pri %4ld  %s\n
+;
+MSG_CLI_INFO_FILESYSTEMS
+\nFilesystems: %u\n
+;
+MSG_CLI_NO_RDB_NOTHING_BACKUP
+ERROR: No valid RDB found. Nothing to backup.\n
+;
+MSG_CLI_READING_RDB_BLOCK
+Reading RDB block %lu... 
+;
+MSG_CLI_FAILED
+FAILED.\n
+;
+MSG_CLI_OK
+OK.\n
+;
+MSG_CLI_SAVING_TO
+Saving to %s... 
+;
+MSG_CLI_FAILED_CREATE_FILE
+FAILED (cannot create file).\n
+;
+MSG_CLI_FAILED_WRITE_ERROR
+FAILED (write error).\n
+;
+MSG_CLI_RESTORE_WARNING
+WARNING: This will OVERWRITE block 0 on the disk!\nRestoring an incorrect backup WILL cause data loss.\n\n
+;
+MSG_CLI_ASK_RESTORE
+Are you sure you want to restore?
+;
+MSG_CLI_CANNOT_OPEN_FILE
+ERROR: Cannot open \"%s\".\n
+;
+MSG_CLI_FILESIZE_NE_BLOCKSIZE
+ERROR: File size (%ld) != block size (%lu). Aborted.\n
+;
+MSG_CLI_FILE_READ_ERROR
+ERROR: File read error.\n
+;
+MSG_CLI_LAST_CHANCE_BLOCK0
+LAST CHANCE: Write backup to block 0 of %s unit %lu?
+;
+MSG_CLI_ABORTED
+Aborted.\n
+;
+MSG_CLI_WRITING_BLOCK0
+Writing block 0... 
+;
+MSG_CLI_RDB_RESTORED_REBOOT
+RDB restored. Please reboot.\n
+;
+MSG_CLI_CANNOT_READ_RDSK
+ERROR: Cannot read RDSK block.\n
+;
+MSG_CLI_BACKING_UP_BLOCKS
+Backing up %lu blocks (%lu-%lu) to %s...\n
+;
+MSG_CLI_CANNOT_CREATE_FILE
+ERROR: Cannot create file.\n
+;
+MSG_CLI_WRITE_ERROR_HEADER
+ERROR: Write error (header).\n
+;
+MSG_CLI_WRITE_ERROR_AT_BLOCK
+ERROR: Write error at block %lu.\n
+;
+MSG_CLI_EXT_BACKUP_SAVED
+Extended backup saved: %lu blocks (%lu-%lu).\n
+;
+MSG_CLI_RESTOREEXT_WARNING
+WARNING: This will OVERWRITE multiple RDB blocks on the disk!\nAn incorrect backup WILL destroy the disk layout.\n\n
+;
+MSG_CLI_NOT_VALID_EXT_BACKUP
+ERROR: Not a valid extended RDB backup.\n
+;
+MSG_CLI_BLOCKSIZE_MISMATCH_ABORT
+ERROR: Block size mismatch. Aborted.\n
+;
+MSG_CLI_FILESIZE_MISMATCH_CORRUPT
+ERROR: File size mismatch - backup may be corrupt. Aborted.\n
+;
+MSG_CLI_LAST_CHANCE_BLOCKS
+LAST CHANCE: Write %lu blocks (%lu-%lu) to %s unit %lu?
+;
+MSG_CLI_READ_ERROR_AT_OFFSET
+ERROR: Read error at offset %lu.\n
+;
+MSG_CLI_WRITE_FAILED_AT_BLOCK
+ERROR: Write failed at block %lu.\n
+;
+MSG_CLI_EXT_RESTORE_COMPLETE
+Extended restore complete: %lu blocks written.\n
+;
+MSG_CLI_REBOOT_TO_TAKE_EFFECT
+Please reboot for changes to take effect.\n
+;
+MSG_CLI_ADDPART_NEED_NAME
+ADDPART requires NAME=<drivename>.\n
+;
+MSG_CLI_ADDPART_NAME_EMPTY
+ADDPART: NAME is empty.\n
+;
+MSG_CLI_ADDPART_NEED_LOW
+ADDPART requires LOW=.\n
+;
+MSG_CLI_ADDPART_NEED_HIGH
+ADDPART requires HIGH=.\n
+;
+MSG_CLI_ADDPART_BAD_TYPE
+ADDPART: unrecognised TYPE.\n
+;
+MSG_CLI_NO_RDB_RUN_INIT
+ERROR: No valid RDB found. Run INIT NEW first.\n
+;
+MSG_CLI_PART_TABLE_FULL
+ERROR: Partition table full.\n
+;
+MSG_CLI_HIGH_INVALID
+ERROR: HIGH value invalid or size too small.\n
+;
+MSG_CLI_LOW_GT_HIGH
+ERROR: LOW > HIGH.\n
+;
+MSG_CLI_LOW_BELOW_RESERVED
+ERROR: LOW %lu below reserved area (lo_cyl=%lu).\n
+;
+MSG_CLI_HIGH_EXCEEDS_DISK
+ERROR: HIGH %lu exceeds disk (hi_cyl=%lu).\n
+;
+MSG_CLI_CYLS_OVERLAP
+ERROR: cyls %lu-%lu overlap partition %s (%lu-%lu).\n
+;
+MSG_CLI_ADDING_PART
+Adding: %-6s  cyls %lu-%lu  %s  (%s)\n
+;
+MSG_CLI_WRITE_RDB_PROMPT
+Write RDB? (%u partition(s), %u filesystem(s))
+;
+MSG_CLI_ABORTED_NO_CHANGES
+Aborted. No changes written.\n
+;
+MSG_CLI_WRITING_RDB
+Writing RDB... 
+;
+MSG_CLI_VOLNAME_IGNORED
+VOLNAME ignored: image files can't be OS-formatted.\n
+;
+MSG_CLI_FORMATTED_AS
+Formatted %s as \"%s\".\n
+;
+MSG_CLI_FORMAT_FAILED
+Format failed: %s\n
+;
+MSG_CLI_ADDFS_NEED_TYPE
+ADDFS requires TYPE=<dostype>.\n
+;
+MSG_CLI_FS_TABLE_FULL
+ERROR: Filesystem table full.\n
+;
+MSG_CLI_LOADING
+Loading %s... 
+;
+MSG_CLI_FAILED_OPEN_FILE
+FAILED (cannot open file).\n
+;
+MSG_CLI_FAILED_EMPTY_SEEK
+FAILED (empty or seek error).\n
+;
+MSG_CLI_FAILED_OUT_OF_MEMORY
+FAILED (out of memory).\n
+;
+MSG_CLI_FAILED_READ_ERROR
+FAILED (read error).\n
+;
+MSG_CLI_OK_SIZE
+OK (%s)\n
+;
+MSG_CLI_ADDING_FS_VER
+Adding FS: %s  v%lu.%lu\n
+;
+MSG_CLI_ADDING_FS
+Adding FS: %s\n
+;
+MSG_CLI_ERR_NO_RDB_FOUND
+ERROR: No valid RDB found.\n
+;
+MSG_CLI_VERIFY_NEED_FILE
+VERIFY requires a FILE path.\n
+;
+MSG_CLI_CANNOT_OPEN_BACKUP
+ERROR: Cannot open backup file.\n
+;
+MSG_CLI_FILESIZE_NE_BLOCKSIZE2
+ERROR: File size (%ld) != block size (%lu).\n
+;
+MSG_CLI_CANNOT_READ_RDB_DISK
+ERROR: Cannot read RDB block from disk.\n
+;
+MSG_CLI_VERIFY_MATCH
+VERIFY: MATCH - backup matches RDB block on disk.\n
+;
+MSG_CLI_VERIFY_MISMATCH
+VERIFY: MISMATCH - %lu byte(s) differ, first at offset %lu.\n
+;
+MSG_CLI_VERIFYEXT_NEED_FILE
+VERIFYEXT requires a FILE path.\n
+;
+MSG_CLI_NOT_VALID_ERDB
+ERROR: Not a valid ERDB backup (bad magic/version).\n
+;
+MSG_CLI_BLOCKSIZE_MISMATCH_DETAIL
+ERROR: Block size mismatch: backup=%lu, device=%lu.\n
+;
+MSG_CLI_UNREASONABLE_BLOCK_COUNT
+ERROR: Unreasonable block count in header.\n
+;
+MSG_CLI_VERIFYING_BLOCKS
+Verifying %lu blocks from block %lu...\n
+;
+MSG_CLI_BLK_FILE_READ_ERROR
+  Blk %lu: FILE READ ERROR\n
+;
+MSG_CLI_BLK_DISK_READ_ERROR
+  Blk %lu: DISK READ ERROR\n
+;
+MSG_CLI_BLK_MATCH
+  Blk %lu: MATCH\n
+;
+MSG_CLI_BLK_MISMATCH
+  Blk %lu: MISMATCH  %lu byte(s), first @ 0x%04lX\n
+;
+MSG_CLI_VERIFY_PASS
+VERIFY: PASS  All %lu blocks match.\n
+;
+MSG_CLI_VERIFY_FAIL
+VERIFY: FAIL  %lu/%lu blocks have differences.\n
+;
+MSG_CLI_DELPART_NEED_NAME
+DELPART requires NAME=<drivename>.\n
+;
+MSG_CLI_DELPART_NAME_EMPTY
+DELPART: NAME is empty.\n
+;
+MSG_CLI_DELETE_CONFIRM
+Delete: %-6s  cyls %lu-%lu  - are you sure?
+;
+MSG_CLI_UNMOUNTED
+%s unmounted.\n
+;
+MSG_CLI_STILL_MOUNTED
+%s still mounted (%s); reboot to free it.\n
+;
+MSG_CLI_PART_NOT_FOUND
+ERROR: Partition \"%s\" not found.\n
+;
+MSG_CLI_INIT_EXISTING_RDB
+WARNING: existing RDB found  (%lu cylinders, %u partition(s)).\n
+;
+MSG_CLI_INIT_Q_DESTROY
+Destroy existing RDB and write a new one?
+;
+MSG_CLI_INIT_Q_NEW
+Write new RDB?
+;
+MSG_CLI_CANNOT_READ_GEOMETRY
+ERROR: Cannot read disk geometry.\n
+;
+MSG_CLI_GEOMETRY_LINE
+Geometry : %lu cyls x %lu heads x %lu sectors  (%s)\n
+;
+MSG_CLI_RDB_WRITTEN_NO_PARTS
+RDB written. No partitions yet.\n
+;
+MSG_CLI_NO_RDB_USE_INIT
+ERROR: No valid RDB found. Use INIT NEW first.\n
+;
+MSG_CLI_RDB_INVALID_GEOMETRY
+ERROR: RDB has invalid geometry (heads or sectors = 0).\n
+;
+MSG_CLI_CANNOT_DETERMINE_SIZE
+ERROR: Cannot determine actual disk size.\n
+;
+MSG_CLI_NEWGEO_COMPARE
+RDB geometry : %lu cylinders  (%s)\nDisk reports : %lu cylinders  (%s)\n
+;
+MSG_CLI_NEWGEO_NO_UPDATE
+Disk is not larger than RDB geometry. No update needed.\n
+;
+MSG_CLI_NEWGEO_CHANGE
+Cylinder count will change: %lu -> %lu\n
+;
+MSG_CLI_NEWGEO_ASK_UPDATE
+Update RDB cylinder count?
+;
+MSG_CLI_WRITING_UPDATED_RDB
+Writing updated RDB... 
+;
+MSG_CLI_RDB_UPDATED_CYLS
+RDB updated to %lu cylinders (%s).\n
+;
+MSG_CLI_INIT_UNKNOWN_MODE
+INIT: unknown mode \"%s\". Use NEW or NEWGEO.\n
+;
+MSG_CLI_CANCELLED
+\n** Cancelled.\n
+;
+MSG_CLI_PROGRESS_PCT
+  %lu%% (%lu / %lu blocks)\n
+;
+MSG_CLI_PROGRESS_BLOCKS
+  %lu blocks copied\n
+;
+MSG_CLI_IMAGEOUT_LARGE_WARN
+WARNING: source is %s (>2 GB).\n  Destination filesystem must support large files\n  (SFS, PFS3, FFS-NSD or FFS post-OS3.5) - older\n  FFS will fail near the 2 GB mark.\n
+;
+MSG_CLI_SOURCE_SIZE
+Source size: %s\n
+;
+MSG_CLI_WRITING_IMAGE_TO
+Writing image to: %s\n
+;
+MSG_CLI_DUMP_FAILED
+ERROR: dump failed: %s\n
+;
+MSG_CLI_UNKNOWN
+(unknown)
+;
+MSG_CLI_DONE
+Done.\n
+;
+MSG_CLI_IMAGEIN_WARNING
+WARNING: This will OVERWRITE the destination from block 0.\nAll existing partitions and data on the target will be lost.\n\n
+;
+MSG_CLI_READING_IMAGE_FROM
+Reading image from: %s\n
+;
+MSG_CLI_RESTORE_FAILED
+ERROR: restore failed: %s\n
+;
+MSG_CLI_DONE_REBOOT
+Done. A reboot may be required for the new layout.\n
+;
+;
+;==========================================================================
+; devices.c - device version display + unit description lines
+;==========================================================================
+MSG_DEV_VERSION_FMT
+v%u.%u
+;
+MSG_DEV_SIZE_MB_FMT
+ (%lu MB)
+;
+MSG_DEV_UNIT_BRAND2_SIZE_FMT
+Unit %lu   %s %s   %s
+;
+MSG_DEV_UNIT_BRAND1_SIZE_FMT
+Unit %lu   %s   %s
+;
+MSG_DEV_UNIT_BRAND2_FMT
+Unit %lu   %s %s
+;
+MSG_DEV_UNIT_BRAND1_FMT
+Unit %lu   %s
+;
+MSG_DEV_UNIT_SIZE_FMT
+Unit %lu   %s
+;
+MSG_DEV_UNIT_FMT
+Unit %lu
+;
+;==========================================================================
+; partview.c
+;==========================================================================
+MSG_PV_COL_DRIVE
+Drive
+;
+MSG_PV_COL_LOCYL
+Lo Cyl
+;
+MSG_PV_COL_HICYL
+Hi Cyl
+;
+MSG_PV_COL_FILESYSTEM
+FileSystem
+;
+MSG_PV_COL_SIZE
+Size
+;
+MSG_PV_COL_BOOT
+Boot
+;
+MSG_PV_NONE
+(none)
+;
+MSG_PV_REBOOT_LATER
+Reboot|Later
+;
+MSG_PV_PLEASE_WAIT
+Please wait
+;
+MSG_PV_REBOOTING
+Rebooting the system...
+;
+MSG_PV_MAP_NO_RDB
+No RDB - use Init RDB to create partitions
+;
+MSG_PV_CYL_FMT
+Cyl %lu
+;
+MSG_PV_MAP_HINT
+drag edges to resize  ·  drag body to move  ·  drag free area to add
+;
+MSG_PV_DRAG_INFO_FMT
+%s: Cyl %lu - %lu  (%s)
+;
+MSG_PV_NEW_INFO_FMT
+New: Cyl %lu - %lu  (%s)
+;
+MSG_PV_UNKNOWN
+unknown
+;
+MSG_PV_INFO_LINE1_MODEL
+Device: %s/%lu    Size: %s    Model: %s
+;
+MSG_PV_INFO_LINE1
+Device: %s/%lu    Size: %s
+;
+MSG_PV_INFO_GEOMETRY_FMT
+Geometry: %lu x %lu x %lu  (CYL x HD x SEC)
+;
+MSG_PV_INFO_GEOM_UNKNOWN
+Geometry: unknown
+;
+MSG_PV_INFO_RDB_FMT
+RDB: %u partition%s         Free: %s
+;
+MSG_PV_INFO_RDB_NOTFOUND
+RDB: Not found
+;
+MSG_PV_MENU_ABOUT
+About...
+;
+MSG_PV_MENU_ADVANCED
+Advanced
+;
+MSG_PV_MENU_BACKUP_RDB
+Backup RDB Block
+;
+MSG_PV_MENU_RESTORE_RDB
+Restore RDB Block
+;
+MSG_PV_MENU_EXT_BACKUP
+Extended Backup...
+;
+MSG_PV_MENU_EXT_RESTORE
+Extended Restore...
+;
+MSG_PV_MENU_VERIFY_RDB
+Verify RDB Block...
+;
+MSG_PV_MENU_VERIFY_EXT
+Verify Extended...
+;
+MSG_PV_MENU_INTEGRITY
+RDB Integrity Check
+;
+MSG_PV_MENU_DUMP_IMAGE
+Dump Disk to Image...
+;
+MSG_PV_MENU_RESTORE_IMAGE
+Restore Image to Disk...
+;
+MSG_PV_MENU_HEALTH
+Health
+;
+MSG_PV_MENU_SMART
+SMART Status
+;
+MSG_PV_MENU_BADBLOCK
+Bad Block Scan...
+;
+MSG_PV_MENU_DEBUG
+Debug
+;
+MSG_PV_MENU_VIEW_RDB
+View RDB Block
+;
+MSG_PV_MENU_RAW_SCAN
+Raw Block Scan...
+;
+MSG_PV_MENU_HEX_DUMP
+Hex Dump Blocks...
+;
+MSG_PV_MENU_RAW_READ
+Raw Disk Read...
+;
+MSG_PV_MENU_CHECK_FFS
+Check FFS Root...
+;
+MSG_PV_FMT_SKIPPED_IMAGE
+%s: format skipped (image file).\n
+;
+MSG_PV_FMT_FORMATTED
+%s: formatted as \"%s\".\n
+;
+MSG_PV_FMT_FAILED
+%s: format failed - %s\n
+;
+MSG_PV_TITLE_UNIT_FMT
+ - %s unit %lu%s
+;
+MSG_PV_TITLE_UNSAVED
+  -  UNSAVED CHANGES (Write to save)
+;
+MSG_PV_UNMOUNTED
+%s: unmounted.\n
+;
+MSG_PV_STILL_MOUNTED
+%s: still mounted - %s\n
+;
+MSG_PV_BTN_INITRDB
+Init RDB
+;
+MSG_PV_BTN_ADD
+Add
+;
+MSG_PV_BTN_EDIT
+Edit
+;
+MSG_PV_BTN_DELETE
+Delete
+;
+MSG_PV_BTN_MOVE
+Move
+;
+MSG_PV_BTN_FILESYS
+FileSys
+;
+MSG_PV_BTN_WRITE
+Write
+;
+MSG_PV_BTN_BACK
+Back
+;
+MSG_PV_CHK_LASTDISK
+Last Disk
+;
+MSG_PV_CHK_LASTLUN
+Last LUN
+;
+MSG_PV_UNSAVED_BODY
+You have unsaved changes.\nWrite partition table to disk?
+;
+MSG_PV_WRITE_DISCARD_CANCEL
+Write|Discard|Cancel
+;
+MSG_PV_REBOOT_WRITTEN
+Partition table written.\nReboot now for changes to take effect.
+;
+MSG_PV_WRITE_FAILED_FMT
+Write failed (err %d)!\nCheck device and try again.
+;
+MSG_PV_REBOOT_LAYOUT
+Disk layout has changed.\nReboot now for changes to take effect.
+;
+MSG_PV_EXIT_BODY
+Exit DiskPart?
+;
+MSG_PV_NORESIZE_START_TITLE
+Cannot Resize From Start
+;
+MSG_PV_NORESIZE_START_BODY
+Filesystem resize is only possible when\nthe start cylinder is left unchanged.\n\nTo grow a partition, drag the right edge instead.
+;
+MSG_PV_DLG_EDIT_PART
+Edit Partition
+;
+MSG_PV_DLG_ADD_PART
+Add Partition
+;
+MSG_PV_RESIZE_GROWN_BODY
+Partition %s has been grown.\nResize filesystem to use the new space?\n\n(\"Grow without resize\" extends the partition\nbut leaves the filesystem unchanged - the\nfilesystem will NOT mount until the root block\nis moved, so DATA WILL BE LOST.)
+;
+MSG_PV_RESIZE_GROW_GADGETS
+Resize|Cancel|     Grow without resize     
+;
+MSG_PV_RESIZE_SHRUNK_BODY
+Partition %s has been shrunk or moved.\nALL EXISTING DATA WILL BE LOST!\nKeep this change?
+;
+MSG_PV_RESIZE_SHRUNK_GADGETS
+Yes, destroy data|Cancel
+;
+MSG_PV_RESIZE_TITLE
+Resize Partition
+;
+MSG_PV_INIT_DRIVER_WARN
+\nDrive reports %s, driver reports %s.\nDriver may be limited (old scsi.device?).\nI/O beyond driver limit may fail.
+;
+MSG_PV_INIT_HAS_RDB_BODY
+Disk already has an RDB with %u partition%s.\n\nDevice geometry: %lu cyl x %lu hd x %lu sec\nRDB geometry:    %lu cyl x %lu hd x %lu sec\n\nRe-init: wipe all partitions, create fresh RDB.\nUpdate Geometry (EXPERIMENTAL): keep partitions,\n  update RDB to match device size.\nManual...: enter geometry by hand.%s
+;
+MSG_PV_INIT_TITLE
+Init RDB
+;
+MSG_PV_INIT_HAS_RDB_GADGETS
+Re-init|Update Geometry|Manual...|Cancel
+;
+MSG_PV_INIT_NO_RDB_BODY
+Create a new RDB on this disk?\nAll existing data will be lost.\n\nManual...: enter geometry by hand.%s
+;
+MSG_PV_INIT_NO_RDB_GADGETS
+Yes|Manual...|No
+;
+MSG_PV_DELETE_BODY
+Delete partition %s?\nAll data on this partition will be lost!
+;
+MSG_PV_DELETE_TITLE
+Delete Partition
+;
+MSG_PV_NO_RDB_INIT_FIRST
+No RDB found.\nInit RDB first.
+;
+MSG_PV_WRITE_CONFIRM_BODY
+Write partition table to disk?\nAll existing data may be lost!
+;
+MSG_PV_WRITE_CANCEL
+Write|Cancel
+;
+MSG_PV_OVERFLOW_INCREASE_BODY
+Metadata overflow:\nneed %lu blocks, only %lu available\n(lo_cyl=%lu, %lu blks/cyl).\n\nIncrease reserved area to lo_cyl=%lu\nand write now?
+;
+MSG_PV_OVERFLOW_INCREASE_GADGETS
+Increase & Write|Cancel
+;
+MSG_PV_WRITE_FAILED_LOCYL
+Write failed after lo_cyl increase (err %d).
+;
+MSG_PV_OVERFLOW_BLOCKED
+Metadata overflow: need lo_cyl=%lu,\nbut %s starts at cyl %lu.\n\nMove %s to cyl %lu or later first.
+;
+MSG_PV_OVERFLOW_PLAIN
+Metadata overflow: need %lu blocks, only %lu available.
+;
+MSG_PV_VERIFY_FAIL_FMT
+Verify fail blk %lu off %lu\nW:%02X%02X%02X%02X R:%02X%02X%02X%02X
+;
+MSG_PV_MBR_FOUND_BODY
+PC partition table (MBR) found on block 0.\nErase it?
+;
+MSG_PV_MBR_ERASE_KEEP
+Erase|Keep
+;
+;==========================================================================
+; partview_dialogs.c
+;==========================================================================
+MSG_DLG_RESERVED_BLKS
+Reserved Blks
+;
+MSG_DLG_INTERLEAVE
+Interleave
+;
+MSG_DLG_BUFFERS
+Buffers
+;
+MSG_DLG_BUF_MEM_TYPE
+Buf Mem Type
+;
+MSG_DLG_BUFMEM_ANY
+Any
+;
+MSG_DLG_BUFMEM_PUBLIC
+Public
+;
+MSG_DLG_BUFMEM_CHIP
+Chip
+;
+MSG_DLG_BUFMEM_FAST
+Fast
+;
+MSG_DLG_BUFMEM_24BIT_DMA
+24-bit DMA
+;
+MSG_DLG_BOOT_BLOCKS
+Boot Blocks
+;
+MSG_DLG_MAXTRANSFER
+MaxTransfer
+;
+MSG_DLG_MASK
+Mask
+;
+MSG_DLG_CONTROL
+Control
+;
+MSG_DLG_DEV_FLAGS
+Dev Flags
+;
+MSG_DLG_ADV_TITLE
+Advanced Partition Settings
+;
+MSG_DLG_NAME
+Name
+;
+MSG_DLG_CYLINDER
+Cylinder
+;
+MSG_DLG_LOCYL_FMT
+Lo: %lu
+;
+MSG_DLG_SIZE_MB
+Size (MB)
+;
+MSG_DLG_FILESYSTEM
+FileSystem
+;
+MSG_DLG_BLOCK_SIZE
+Block Size
+;
+MSG_DLG_BOOT_PRIORITY
+Boot Priority
+;
+MSG_DLG_BOOTABLE
+Bootable
+;
+MSG_DLG_AUTOMOUNT
+Automount
+;
+MSG_DLG_DIRECT_SCSI
+Direct SCSI
+;
+MSG_DLG_SYNC_SCSI
+Sync SCSI
+;
+MSG_DLG_VOLUME_NAME
+Volume name
+;
+MSG_DLG_VOLNAME_DEFAULT
+Empty
+;
+MSG_DLG_DO_NOT_FORMAT
+Do not format
+;
+MSG_DLG_ADVANCED
+Advanced...
+;
+MSG_DLG_WARN_SUFFIX
+ - Warning
+;
+MSG_DLG_DESTROY_BODY
+Changing the filesystem or block size\nwill DESTROY ALL DATA on %s.\n\nContinue?
+;
+MSG_DLG_DESTROY_GADGETS
+Yes, destroy data|Cancel
+;
+MSG_DLG_REBOOT_BODY
+Filesystem or block size changed.\nA reboot is required for this\npartition to be recognised correctly.
+;
+MSG_DLG_ABOUT_PREFIX
+About 
+;
+MSG_DLG_ABOUT_BODY
+DiskPart %s\nBuilt: %s\nAmigaOS 2.x RDB Hard Disk Partition Editor\n\nA native GadTools application with full RDB support.\nNo external library dependencies beyond the ROM.\n\nDirector: John Hertell\nCode: Claude Code (Anthropic)\n\nhttps://github.com/ChuckyGang/DiskPart\n\nMIT License \xa9 2026 John Hertell
+;
+MSG_DLG_CYLINDERS
+Cylinders
+;
+MSG_DLG_HEADS
+Heads
+;
+MSG_DLG_SECTORS_TRK
+Sectors/Trk
+;
+MSG_DLG_SIZE_EG
+Size (e.g. 2G)
+;
+MSG_DLG_CALC
+Calc
+;
+MSG_DLG_GEOM_TITLE
+Manual Geometry Entry
+;
+MSG_DLG_GEOM_WARN1
+WARNING: Incorrect values may cause data loss.
+;
+MSG_DLG_GEOM_WARN2
+Use only when automatic detection fails.
+;
+;
+;==========================================================================
+; partview_fs.c
+;==========================================================================
+MSG_FS_NULL_DRIVER
+NULL driver
+;
+MSG_FS_ERROR_TITLE
+Error
+;
+MSG_FS_CANNOT_OPEN
+Cannot open file.
+;
+MSG_FS_FILE_SIZE_BAD
+File is empty or too large\n(limit: 1 MB).
+;
+MSG_FS_FILE_READ_ERR
+File read error.
+;
+MSG_FS_DOSTYPE_LBL
+DosType
+;
+MSG_FS_FILE_LBL
+File
+;
+MSG_FS_BROWSE
+Browse...
+;
+MSG_FS_NULL_DRIVER_CB
+NULL driver (no code)
+;
+MSG_FS_EDIT_TITLE
+Edit FileSystem Driver
+;
+MSG_FS_ADD_TITLE
+Add FileSystem Driver
+;
+MSG_FS_SELECT_DRIVER
+Select FileSystem Driver
+;
+MSG_FS_ADD
+Add
+;
+MSG_FS_EDIT
+Edit
+;
+MSG_FS_DELETE
+Delete
+;
+MSG_FS_DONE
+Done
+;
+MSG_FS_MGR_TITLE
+FileSystem Drivers
+;
+MSG_FS_LIST_HEADER
+DosType       Version   Code
+;
+MSG_FS_DELETE_INUSE_FMT
+Filesystem %s is in use by:\n%s\n\nAffected partition(s) will be\nchanged to FFS. Delete anyway?
+;
+MSG_FS_DELETE_CONFIRM_FMT
+Delete filesystem driver %s?
+;
+MSG_FS_DELETE_TITLE
+Delete FS Driver
+;
+;
+;==========================================================================
+; partview_image.c
+;==========================================================================
+MSG_IMG_PROGRESS_PCT_FMT
+%lu / %lu blocks  (%lu%%)
+;
+MSG_IMG_PROGRESS_COPIED_FMT
+%lu blocks copied
+;
+MSG_IMG_DUMP_TITLE
+Dump Disk to Image
+;
+MSG_IMG_DEV_NOT_ACCESSIBLE
+Device is not accessible.
+;
+MSG_IMG_DUMP_LARGE_WARN_FMT
+This disk is %s - larger than 2 GB.\n\nThe destination filesystem MUST support files\nlarger than 2 GB (SFS, PFS3, FFS-NSD or\nFFS post-OS3.5).  On older FFS the dump will\nstop with a write error near the 2 GB mark.\n\nContinue?
+;
+MSG_IMG_DUMP_WARN_TITLE
+Dump Disk to Image - WARNING
+;
+MSG_IMG_CONTINUE_CANCEL
+Continue|Cancel
+;
+MSG_IMG_ASL_UNAVAIL
+asl.library not available.\nCannot open file requester.
+;
+MSG_IMG_SAVE_REQ_TITLE
+Save Disk Image
+;
+MSG_IMG_DUMP_PROGRESS_TITLE_FMT
+Dumping to %s
+;
+MSG_IMG_DUMP_OK_FMT
+Image written to:\n%s
+;
+MSG_IMG_DUMP_CANCELLED_FMT
+Dump cancelled.\n\nThe partial file at:\n%s\nhas been left on disk.
+;
+MSG_IMG_DUMP_FAILED_FMT
+Dump failed:\n%s
+;
+MSG_IMG_UNKNOWN_ERROR
+(unknown error)
+;
+MSG_IMG_RESTORE_TITLE
+Restore Image to Disk
+;
+MSG_IMG_RESTORE_WARN_TITLE
+Restore Image to Disk - WARNING
+;
+MSG_IMG_RESTORE_WARN_BODY
+WARNING: This will OVERWRITE every block of the\ndestination starting at block 0 with the contents\nof the chosen image file.\n\nExisting partitions, filesystems and ALL DATA will\nbe destroyed.  Make sure the image is correct for\nthis disk.\n\nAre you absolutely sure?
+;
+MSG_IMG_RESTORE_WARN_GADGETS
+Yes, restore|Cancel
+;
+MSG_IMG_LOAD_REQ_TITLE
+Select Image File to Restore
+;
+MSG_IMG_RESTORE_PROGRESS_TITLE_FMT
+Restoring from %s
+;
+MSG_IMG_RESTORE_OK
+Image written to disk.\n\nReboot may be required for the new\npartition layout to be picked up.
+;
+MSG_IMG_RESTORE_CANCELLED
+Restore cancelled.\n\nWARNING: the destination disk has been\npartially overwritten and is in an\ninconsistent state.
+;
+MSG_IMG_RESTORE_FAILED_FMT
+Restore failed:\n%s
+;
+;
+;==========================================================================
+; script.c
+;==========================================================================
+MSG_SCR_ERROR_LINE_FMT
+ERROR line %lu: %s\n
+;
+MSG_SCR_WARNING_LINE_FMT
+WARNING line %lu: %s\n
+;
+MSG_SCR_YN_FORCE_FMT
+%s (Y/N): Y\n
+;
+MSG_SCR_YN_PROMPT_FMT
+%s (Y/N): 
+;
+MSG_SCR_OPEN_BRAND_SIZE_FMT
+  %s  %s\n
+;
+MSG_SCR_OPEN_SIZE_FMT
+  %s\n
+;
+MSG_SCR_EXISTING_RDB_FMT
+  Existing RDB: %lu cylinders, %u partition(s), %u filesystem(s).\n
+;
+MSG_SCR_NO_RDB_FOUND
+  No RDB found.\n
+;
+MSG_SCR_PREV_UNSAVED
+Previous device had unsaved changes.
+;
+MSG_SCR_OPENING_IMAGE_FMT
+Opening image file \"%s\"...\n
+;
+MSG_SCR_CANNOT_OPEN_IMAGE
+Cannot open image file.
+;
+MSG_SCR_OPEN_USAGE
+OPEN requires <device> <unit> or FILE <path>
+;
+MSG_SCR_OPENING_DEV_FMT
+Opening %s unit %lu...\n
+;
+MSG_SCR_CANNOT_OPEN_DEV
+Cannot open device.
+;
+MSG_SCR_CREATE_USAGE
+CREATE requires FILE <path> SIZE=<n>[K|M|G]
+;
+MSG_SCR_CREATE_NEED_SIZE
+CREATE requires SIZE=<n>[K|M|G]
+;
+MSG_SCR_CREATE_SIZE_MIN
+CREATE SIZE must be at least 512 bytes.
+;
+MSG_SCR_CREATE_SIZE_MAX
+CREATE SIZE exceeds the 2 GB dos.library image-file limit.
+;
+MSG_SCR_CREATING_IMAGE_FMT
+Creating image file \"%s\" (%s)...\n
+;
+MSG_SCR_CANNOT_CREATE_IMAGE
+Cannot create image file.
+;
+MSG_SCR_INIT_USAGE
+INIT requires NEW or NEWGEO.
+;
+MSG_SCR_NO_DEV_OPEN
+No device open. Use OPEN first.
+;
+MSG_SCR_INIT_EXISTING_RDB_FMT
+WARNING line %lu: existing RDB found (%lu cylinders, %u partition(s)).\n
+;
+MSG_SCR_INIT_DESTROY_ASK
+Destroy existing RDB and write a new one?
+;
+MSG_SCR_ABORTED
+Aborted.\n
+;
+MSG_SCR_CANNOT_READ_GEO
+Cannot read disk geometry.
+;
+MSG_SCR_RDB_INIT_FMT
+  RDB initialised: %lu cyls x %lu heads x %lu sectors  (%s)\n
+;
+MSG_SCR_NO_RDB_INIT
+No RDB. Use INIT NEW first.
+;
+MSG_SCR_RDB_GEO_INVALID
+RDB geometry invalid (heads/sectors = 0).
+;
+MSG_SCR_CANNOT_DET_SIZE
+Cannot determine disk size.
+;
+MSG_SCR_NEWGEO_NOCHANGE_FMT
+  Disk not larger than RDB (%lu cyls / %s vs %lu cyls / %s). No change.\n
+;
+MSG_SCR_NEWGEO_CHANGE_FMT
+  Geometry: %lu cyls (%s)  ->  %lu cyls (%s)\n
+;
+MSG_SCR_INIT_UNKNOWN_MODE
+INIT: unknown mode. Use NEW or NEWGEO.
+;
+MSG_SCR_PART_TABLE_FULL
+Partition table full.
+;
+MSG_SCR_ADDPART_NEED_NAME
+ADDPART requires NAME=<drivename>.
+;
+MSG_SCR_ADDPART_NAME_EMPTY
+ADDPART: NAME is empty.
+;
+MSG_SCR_ADDPART_NEED_LOW
+ADDPART requires LOW=<cyl|NEXT>.
+;
+MSG_SCR_ADDPART_NEED_HIGH
+ADDPART requires HIGH=<cyl|END|+size>.
+;
+MSG_SCR_ADDPART_HIGH_INVALID
+ADDPART: HIGH value invalid or size too small.
+;
+MSG_SCR_ADDPART_BAD_TYPE
+ADDPART: unrecognised TYPE.
+;
+MSG_SCR_ADDPART_LOW_GT_HIGH
+ADDPART: LOW > HIGH.
+;
+MSG_SCR_ADDPART_LOW_RESERVED_FMT
+ADDPART: LOW %lu below reserved area (lo_cyl=%lu).
+;
+MSG_SCR_ADDPART_HIGH_EXCEEDS_FMT
+ADDPART: HIGH %lu exceeds disk (hi_cyl=%lu).
+;
+MSG_SCR_ADDPART_OVERLAP_FMT
+ADDPART: cyls %lu-%lu overlap partition %s (%lu-%lu).
+;
+MSG_SCR_ADDPART_ADDED_FMT
+  Added: %-6s  cyls %lu-%lu  %s  (%s)\n
+;
+MSG_SCR_NO_RDB_OPEN_INIT
+No RDB. Use OPEN or INIT NEW first.
+;
+MSG_SCR_DELPART_NEED_NAME
+DELPART requires NAME=<drivename>.
+;
+MSG_SCR_DELPART_NAME_EMPTY
+DELPART: NAME is empty.
+;
+MSG_SCR_DELPART_DELETED_FMT
+  Deleted: %-6s  cyls %lu-%lu\n
+;
+MSG_SCR_DELPART_NOT_FOUND_FMT
+DELPART: partition \"%s\" not found.
+;
+MSG_SCR_NO_RDB_OPEN
+No RDB. Use OPEN first.
+;
+MSG_SCR_VERIFYRDB_NEED_FILE
+VERIFYRDB requires FILE=<path>.
+;
+MSG_SCR_VERIFYRDB_CANT_OPEN
+VERIFYRDB: Cannot open file.
+;
+MSG_SCR_VERIFYRDB_SIZE_FMT
+VERIFYRDB: File size (%ld) != block size (%lu).
+;
+MSG_SCR_VERIFYRDB_READ_ERR
+VERIFYRDB: File read error.
+;
+MSG_SCR_VERIFYRDB_DISK_ERR
+VERIFYRDB: Cannot read RDB block from disk.
+;
+MSG_SCR_VERIFYRDB_MATCH
+VERIFYRDB: MATCH\n
+;
+MSG_SCR_VERIFYRDB_MISMATCH_FMT
+VERIFYRDB: MISMATCH - %lu byte(s) differ, first @ offset %lu.\n
+;
+MSG_SCR_VERIFYEXT_NEED_FILE
+VERIFYEXT requires FILE=<path>.
+;
+MSG_SCR_VERIFYEXT_CANT_OPEN
+VERIFYEXT: Cannot open file.
+;
+MSG_SCR_VERIFYEXT_BAD_MAGIC
+VERIFYEXT: Not a valid ERDB backup (bad magic/version).
+;
+MSG_SCR_VERIFYEXT_BSIZE_FMT
+VERIFYEXT: Block size mismatch: backup=%lu, device=%lu.
+;
+MSG_SCR_VERIFYEXT_BAD_COUNT
+VERIFYEXT: Unreasonable block count in header.
+;
+MSG_SCR_VERIFYEXT_CHECKING_FMT
+VERIFYEXT: Checking %lu blocks from block %lu...\n
+;
+MSG_SCR_VERIFYEXT_FILE_RERR_FMT
+  Blk %lu: FILE READ ERROR\n
+;
+MSG_SCR_VERIFYEXT_DISK_RERR_FMT
+  Blk %lu: DISK READ ERROR\n
+;
+MSG_SCR_VERIFYEXT_BLK_MATCH_FMT
+  Blk %lu: MATCH\n
+;
+MSG_SCR_VERIFYEXT_BLK_MISMATCH_FMT
+  Blk %lu: MISMATCH  %lu byte(s), first @ 0x%04lX\n
+;
+MSG_SCR_VERIFYEXT_PASS_FMT
+VERIFYEXT: PASS  All %lu blocks match.\n
+;
+MSG_SCR_VERIFYEXT_FAIL_FMT
+VERIFYEXT: FAIL  %lu/%lu blocks have differences.\n
+;
+MSG_SCR_FS_TABLE_FULL
+Filesystem table full.
+;
+MSG_SCR_ADDFS_NEED_TYPE
+ADDFS requires TYPE=<dostype>.
+;
+MSG_SCR_ADDFS_LOADING_FMT
+  Loading %s...\n
+;
+MSG_SCR_ADDFS_CANT_OPEN_FMT
+ADDFS: cannot open \"%s\".
+;
+MSG_SCR_ADDFS_EMPTY
+ADDFS: FILE is empty or seek failed.
+;
+MSG_SCR_ADDFS_NOMEM
+ADDFS: not enough memory to load FILE.
+;
+MSG_SCR_ADDFS_READ_ERR
+ADDFS: read error.
+;
+MSG_SCR_ADDFS_LOADED_FMT
+  Loaded %s\n
+;
+MSG_SCR_ADDFS_ADDED_VER_FMT
+  Added FS: %s  v%lu.%lu\n
+;
+MSG_SCR_ADDFS_ADDED_FMT
+  Added FS: %s\n
+;
+MSG_SCR_WRITE_NO_DEV
+No device open.
+;
+MSG_SCR_WRITE_NO_RDB
+No RDB to write. Use INIT NEW first.
+;
+MSG_SCR_WRITE_DRYRUN_FMT
+DRYRUN: would write RDB  (%u partition(s), %u filesystem(s)).\n
+;
+MSG_SCR_WRITE_ABOUT_FMT
+About to write RDB  (%u partition(s), %u filesystem(s)).\n
+;
+MSG_SCR_WRITE_ASK
+Write RDB to disk?
+;
+MSG_SCR_WRITING_RDB
+Writing RDB... 
+;
+MSG_SCR_FAILED
+FAILED.\n
+;
+MSG_SCR_OK_DOT
+OK.\n
+;
+MSG_SCR_FMT_SKIPPED_FMT
+  %s: format skipped (image file).\n
+;
+MSG_SCR_FORMATTED_FMT
+  Formatted %s as \"%s\".\n
+;
+MSG_SCR_FMT_FAILED_FMT
+  %s: format failed - %s\n
+;
+MSG_SCR_UNMOUNTED_FMT
+  %s unmounted.\n
+;
+MSG_SCR_STILL_MOUNTED_FMT
+  %s still mounted (%s); reboot to free it.\n
+;
+MSG_SCR_CANCELLED
+\n** Cancelled.\n
+;
+MSG_SCR_PROG_PCT_FMT
+  %lu%% (%lu / %lu blocks)\n
+;
+MSG_SCR_PROG_BLOCKS_FMT
+  %lu blocks copied\n
+;
+MSG_SCR_IMAGEOUT_NEED_FILE
+IMAGEOUT requires FILE=<path>.
+;
+MSG_SCR_IMAGEOUT_DRYRUN_FMT
+DRYRUN: would dump device to \"%s\".\n
+;
+MSG_SCR_WRITING_IMAGE_FMT
+Writing image to: %s\n
+;
+MSG_SCR_DUMP_FAILED_FMT
+Dump failed: %s\n
+;
+MSG_SCR_UNKNOWN
+(unknown)
+;
+MSG_SCR_DONE
+Done.\n
+;
+MSG_SCR_IMAGEIN_NEED_FILE
+IMAGEIN requires FILE=<path>.
+;
+MSG_SCR_IMAGEIN_DRYRUN_FMT
+DRYRUN: would restore image \"%s\" to device.\n
+;
+MSG_SCR_IMAGEIN_WARN
+WARNING: this will OVERWRITE the open device from block 0.\n
+;
+MSG_SCR_IMAGEIN_ASK
+Are you sure you want to restore?
+;
+MSG_SCR_READING_IMAGE_FMT
+Reading image from: %s\n
+;
+MSG_SCR_RESTORE_FAILED_FMT
+Restore failed: %s\n
+;
+MSG_SCR_INFO_NO_RDB
+No RDB loaded.\n
+;
+MSG_SCR_INFO_GEO_FMT
+Geometry  : %lu cyls x %lu heads x %lu sectors  (%s)\n
+;
+MSG_SCR_INFO_RESERVED_FMT
+Reserved  : cyls 0-%lu\n
+;
+MSG_SCR_INFO_PARTS_FMT
+Partitions: %u\n
+;
+MSG_SCR_INFO_PART_ROW_FMT
+  %2u: %-6s  cyls %4lu-%4lu  %-8s  pri %4ld  %s\n
+;
+MSG_SCR_INFO_FS_COUNT_FMT
+Filesystems: %u\n
+;
+MSG_SCR_INFO_FS_VER_SZ_FMT
+  %2u: %-8s  v%lu.%lu  %s\n
+;
+MSG_SCR_INFO_FS_SZ_FMT
+  %2u: %-8s  %s\n
+;
+MSG_SCR_INFO_FS_VER_FMT
+  %2u: %-8s  v%lu.%lu\n
+;
+MSG_SCR_INFO_FS_FMT
+  %2u: %-8s\n
+;
+MSG_SCR_CLOSE_UNSAVED
+Closing with unsaved changes (WRITE not called).
+;
+MSG_SCR_DEVICE_CLOSED
+Device closed.\n
+;
+MSG_SCR_REBOOT_ASK
+Reboot now?
+;
+MSG_SCR_REBOOT_SKIPPED
+Reboot skipped.\n
+;
+MSG_SCR_REBOOTING
+Rebooting in 3 seconds...\n
+;
+MSG_SCR_COUNTDOWN_FMT
+%u...\n
+;
+MSG_SCR_UNKNOWN_CMD_FMT
+Unknown command \"%s\".
+;
+MSG_SCR_PRINTFAULT_HDR
+DiskPart SCRIPT
+;
+MSG_SCR_DRYRUN_SUPPRESSED
+DRYRUN: disk writes suppressed.\n\n
+;
+MSG_SCR_SCRIPT_HDR_FMT
+Script: %s\n\n
+;
+MSG_SCR_ENDED_UNSAVED
+WARNING: script ended with unsaved changes.\n
+;
+MSG_SCR_COMPLETED
+\nScript completed.\n
+;
+MSG_SCR_ABORTED_RUN
+\nScript aborted.\n
+;
+;==========================================================================
+; partview_move.c
+;==========================================================================
+MSG_MOVE_CHK_ROOT_TITLE
+Check FFS Root
+;
+MSG_MOVE_NO_DEVICE
+No device open.
+;
+MSG_MOVE_NO_PART_SEL
+No partition selected.\nSelect a partition from the list first.
+;
+MSG_MOVE_GEOM_ZERO
+Cannot check: partition geometry\nhas heads=0 or sectors=0.
+;
+MSG_MOVE_OUT_OF_MEM
+Out of memory.
+;
+MSG_MOVE_CHK_READ_FAIL_FMT
+Partition %s\npart_abs=%lu  num_blks=%lu\nExpected root: rel=%lu abs=%lu\n\nREAD FAILED at abs %lu
+;
+MSG_MOVE_CHK_REPORT_FMT
+Partition %s  heads=%lu secs=%lu\nExpected root: rel=%lu abs=%lu\nBoot bb[2]=%lu  (0=use num_blks/2)\n\nL[0]  type    =0x%lX  (%s)\nL[1]  own_key =%lu  (expect %lu)%s\nL[4]  disk_sz =%lu  (expect %lu)%s\nL[5]  chksum  ok=%s\nL[78] bm_flag =0x%lX  (%s)\nL[127]sec_type=0x%lX  (%s)\nL[79] bm[0]   =%lu\nL[104]bm_ext  =%lu\n\n%s
+;
+MSG_MOVE_CHK_OK
+ok
+;
+MSG_MOVE_CHK_WRONG_2
+WRONG,expect 2
+;
+MSG_MOVE_CHK_WRONG_1
+WRONG,expect 1
+;
+MSG_MOVE_CHK_FFS_IGNORES
+ (FFS ignores)
+;
+MSG_MOVE_CHK_MISMATCH
+ MISMATCH
+;
+MSG_MOVE_CHK_YES
+YES
+;
+MSG_MOVE_CHK_NO
+NO
+;
+MSG_MOVE_CHK_VALID
+valid
+;
+MSG_MOVE_CHK_INVALID
+INVALID
+;
+MSG_MOVE_CHK_ROOT_VALID
+==> ROOT IS VALID
+;
+MSG_MOVE_CHK_ROOT_INVALID
+==> ROOT IS INVALID
+;
+MSG_MOVE_WARN_L1
+WARNING:  MOVING A PARTITION COPIES ALL DATA ON DISK.
+;
+MSG_MOVE_WARN_PART_FMT
+Partition %s (cyl %lu-%lu) will be physically
+;
+MSG_MOVE_WARN_COPIED
+copied to the cylinder you enter above.
+;
+MSG_MOVE_WARN_POWER1
+POWER LOSS OR CRASH DURING THIS PROCESS WILL
+;
+MSG_MOVE_WARN_POWER2
+PERMANENTLY DESTROY YOUR DATA.  No rollback.
+;
+MSG_MOVE_WARN_TIME1
+THIS WILL TAKE A VERY LONG TIME - PLAN FOR HOURS.
+;
+MSG_MOVE_WARN_TIME2
+1 GB ~ 20-60 min.  Large disks may take MUCH longer.
+;
+MSG_MOVE_WARN_TIME3
+Do NOT power off, interrupt or close DiskPart!
+;
+MSG_MOVE_NEW_START_CYL
+New start cyl
+;
+MSG_MOVE_BACKUP_CHK_FMT
+I have a current backup of %s
+;
+MSG_MOVE_BTN_MOVE
+Move Partition
+;
+MSG_MOVE_DLG_TITLE
+WARNING: Move Partition - Data Hazard
+;
+MSG_MOVE_TICK_BACKUP
+Tick the backup confirmation checkbox\nbefore proceeding.
+;
+MSG_MOVE_CANNOT_MOVE_TITLE
+Cannot Move Partition
+;
+MSG_MOVE_PROG_TITLE
+Moving Partition...
+;
+MSG_MOVE_OK_RDB_WRITTEN_FMT
+Partition %s moved successfully.\nRDB written automatically.\nReboot to use the moved partition.\n\n%s
+;
+MSG_MOVE_OK_RDB_FAILED_FMT
+Partition %s moved successfully.\nWARNING: RDB write FAILED.\nClick Write to save the RDB.\n\n%s
+;
+MSG_MOVE_MOVED_TITLE
+Partition Moved
+;
+MSG_MOVE_FAILED_FMT
+Move FAILED:\n%s\n\nData may be partially written.\nRestore from backup before rebooting.
+;
+MSG_MOVE_FAILED_TITLE
+Move Failed
+;
+MSG_MOVE_GROW_TITLE
+EXPERIMENTAL: Grow Filesystem
+;
+MSG_MOVE_GROW_GADGETS
+Grow Filesystem|Skip
+;
+MSG_MOVE_GROW_FFS_BODY_FMT
+This will write FFS bitmap blocks directly to disk.\nThis feature is EXPERIMENTAL and may corrupt data.\nAlways have a backup before proceeding.\n\nGrow FFS filesystem on partition %s?
+;
+MSG_MOVE_BUSY_FMT
+Cannot resize %s: the volume is in use (%s).\nClose all its windows, files and shells, then resize again.\nNo changes were made.
+;
+MSG_MOVE_IN_USE
+in use
+;
+MSG_MOVE_BUSY_TITLE
+Resize - Volume In Use
+;
+MSG_MOVE_GROW_FFS_PROG_TITLE
+Growing FFS Filesystem...
+;
+MSG_MOVE_FFS_REMOUNTED_FMT
+FFS filesystem on %s grown and remounted as %s:\nThe new space is available now - no reboot needed.\nClick Write to save the RDB so it survives a reboot.\n\nDiagnostic: %s
+;
+MSG_MOVE_FFS_REMOUNT_FAIL_FMT
+FFS filesystem on %s grown successfully.\nRemount failed (%s) - Write RDB and REBOOT to use it.\n\nDiagnostic: %s
+;
+MSG_MOVE_QMARK
+?
+;
+MSG_MOVE_GROWN_TITLE
+Filesystem Grown
+;
+MSG_MOVE_FFS_FAIL_RESTORED_FMT
+FFS grow failed - volume restored at its original size.\n%s
+;
+MSG_MOVE_GROW_FAIL_TITLE
+Filesystem Grow Failed
+;
+MSG_MOVE_GROW_PFS_BODY_FMT
+This will update PFS3/PFS2 filesystem metadata directly on disk.\nThis feature is EXPERIMENTAL and may corrupt data.\nAlways have a backup before proceeding.\n\nGrow PFS filesystem on partition %s?
+;
+MSG_MOVE_GROW_PFS_PROG_TITLE
+Growing PFS Filesystem...
+;
+MSG_MOVE_PFS_OK_FMT
+PFS filesystem on %%s grown successfully.\nWrite RDB to disk, then REBOOT to use the new space.\n\nDiagnostic: %s
+;
+MSG_MOVE_PFS_FAIL_FMT
+PFS grow failed:\n%s
+;
+MSG_MOVE_GROW_SFS_BODY_FMT
+This will update SmartFileSystem metadata directly on disk.\nThis feature is EXPERIMENTAL and may corrupt data.\nAlways have a backup before proceeding.\n\nGrow SFS filesystem on partition %s?
+;
+MSG_MOVE_GROW_SFS_PROG_TITLE
+Growing SFS Filesystem...
+;
+MSG_MOVE_SFS_OK_RDB_WRITTEN_FMT
+SFS filesystem on %s grown successfully.\nRDB written automatically.\n%s: is INHIBITED (inaccessible) until reboot.\nReboot NOW to use the new space.\n\nDiagnostic: %s
+;
+MSG_MOVE_SFS_OK_RDB_FAILED_FMT
+SFS filesystem on %s grown successfully.\nWARNING: RDB write FAILED.\nClick Write to save the RDB before rebooting.\n%s: is INHIBITED (inaccessible) until reboot.\n1. Click Write (save RDB)\n2. Reboot NOW\n\nDiagnostic: %s
+;
+MSG_MOVE_SFS_FAIL_FMT
+SFS grow failed:\n%s
+;
+;==========================================================================
+; rdb.c
+;==========================================================================
+MSG_RDBC_CHECKSUM_BAD
+    CHECKSUM BAD
+;
+MSG_RDBC_CHECKSUM_OK
+    Checksum: OK
+;
+MSG_RDBC_CHECKSUM_SKIPPED
+    Checksum: skipped (SummedLongs=%lu)
+;
+MSG_RDBC_NO_VALID_RDB
+No valid RDB.
+;
+MSG_RDBC_OUT_OF_MEMORY
+Out of memory.
+;
+MSG_RDBC_DEVICE_UNIT
+Device: %s unit %lu
+;
+MSG_RDBC_RDSK_BLOCK
+RDSK block %lu:
+;
+MSG_RDBC_READ_FAILED_2
+  READ FAILED
+;
+MSG_RDBC_ID_WRONG_RDSK
+  ID WRONG: 0x%08lX (expected RDSK)
+;
+MSG_RDBC_GEOMETRY
+  Geometry: %lu x %lu x %lu  cyls %lu-%lu
+;
+MSG_RDBC_RDB_BLOCKS
+  RDB blocks: %lu-%lu
+;
+MSG_RDBC_ERR_ZERO_GEOM
+  ERROR: zero geometry field
+;
+MSG_RDBC_ERR_LOCYL_GT_HICYL
+  ERROR: lo_cyl %lu > hi_cyl %lu
+;
+MSG_RDBC_PARTITIONS
+Partitions: %u
+;
+MSG_RDBC_PART_ENTRY
+  [%u] %-6s  blk %lu  cyls %lu-%lu  %s
+;
+MSG_RDBC_READ_FAILED_4
+    READ FAILED
+;
+MSG_RDBC_ID_WRONG_4
+    ID WRONG: 0x%08lX
+;
+MSG_RDBC_ERR_LOWCYL_GT_HIGHCYL
+    ERROR: low_cyl %lu > high_cyl %lu
+;
+MSG_RDBC_WARN_HIGHCYL_GT_DISK
+    WARN: high_cyl %lu > disk hi_cyl %lu
+;
+MSG_RDBC_OVERLAP
+  OVERLAP: %s (%lu-%lu) and %s (%lu-%lu)
+;
+MSG_RDBC_OVERLAP_PASS
+  Overlap check: PASS
+;
+MSG_RDBC_FILESYSTEMS
+Filesystems: %u
+;
+MSG_RDBC_FS_ENTRY
+  [%u] %-8s  blk %lu
+;
+MSG_RDBC_LSEG_EXCEEDS
+    LSEG chain exceeds %u blocks (truncated)
+;
+MSG_RDBC_LSEG_LOOP
+    LSEG LOOP at block %lu
+;
+MSG_RDBC_LSEG_READ_FAILED
+    LSEG blk %lu: READ FAILED
+;
+MSG_RDBC_LSEG_ID_WRONG
+    LSEG blk %lu: ID WRONG 0x%08lX
+;
+MSG_RDBC_LSEG_BAD_OK
+    LSEG: %lu bad / %lu OK
+;
+MSG_RDBC_LSEG_BLOCKS_OK
+    LSEG: %lu blocks  OK
+;
+MSG_RDBC_LSEG_NO_CODE
+    LSEG: (no code)
+;
+MSG_RDBC_SEPARATOR
+----------------------------
+;
+MSG_RDBC_RESULT_PASS
+Result: PASS  (no errors)
+;
+MSG_RDBC_RESULT_FAIL
+Result: FAIL  (%lu error(s))
+;
+;
+;==========================================================================
+; ffsresize.c
+;==========================================================================
+MSG_FFS_INVALID_GEOMETRY
+Invalid partition geometry (heads=%lu secs=%lu)
+;
+MSG_FFS_ONLY_512_SECTORS
+Only 512-byte device sectors supported (got %lu)
+;
+MSG_FFS_UNSUPPORTED_BLOCKSIZE
+Unsupported FS block size %lu (spb=%lu).\nMust be a power of two in 512..16384.
+;
+MSG_FFS_PART_TOO_SMALL
+Partition is too small to contain a valid FFS filesystem\n(old_blocks=%lu <= reserved=%lu).
+;
+MSG_FFS_NEWPART_TOO_SMALL
+New partition size is too small for FFS\n(new_blocks=%lu <= reserved=%lu).
+;
+MSG_FFS_OUT_OF_MEMORY
+Out of memory
+;
+MSG_FFS_PROG_INHIBITING
+Inhibiting filesystem handler...
+;
+MSG_FFS_PROG_READING_BOOT
+Reading boot block...
+;
+MSG_FFS_CANNOT_READ_BOOT
+Cannot read partition boot block (abs %lu)
+;
+MSG_FFS_BOOT_DOSTYPE_MISMATCH
+Boot block DosType mismatch (0x%08lX)
+;
+MSG_FFS_PROG_READING_ROOT
+Reading root block...
+;
+MSG_FFS_CANNOT_READ_ROOT
+Cannot read root block (abs %lu, rel %lu)
+;
+MSG_FFS_ROOT_WRONG_TYPE
+Root block wrong type/sec_type (0x%lX/0x%lX)\npartabs=%lu bb[2]=%lu rootblk=%lu old_blks=%lu spb=%lu
+;
+MSG_FFS_ROOT_CHECKSUM_INVALID
+Root block checksum invalid (stored 0x%08lX calc 0x%08lX)
+;
+MSG_FFS_BITMAP_NOT_VALID
+Bitmap not valid in root block (flag=0x%08lX)
+;
+MSG_FFS_PROG_READING_BITMAP
+Reading bitmap chain...
+;
+MSG_FFS_CANNOT_READ_EXT
+Cannot read bm_ext block %lu
+;
+MSG_FFS_BITMAP_CHAIN_SHORT
+Bitmap chain has %lu blocks, expected at least %lu
+;
+MSG_FFS_TOO_MANY_EXT
+Grow requires %lu new ext blocks (max %u). Partition is too large for this implementation.
+;
+MSG_FFS_NO_ROOM_EXT
+No room in new partition space for ext block %lu
+;
+MSG_FFS_PROG_EXTENDING_BM
+Extending last bitmap block...
+;
+MSG_FFS_CANNOT_READ_LAST_BM
+Cannot read last bm block %lu
+;
+MSG_FFS_WRITE_UPDATED_BM_FAIL
+Failed to write updated bm block %lu
+;
+MSG_FFS_PROG_WRITING_BM
+Writing new bitmap blocks...
+;
+MSG_FFS_WRITE_NEW_BM_FAIL
+Failed to write new bm block %lu (abs %lu)
+;
+MSG_FFS_PROG_UPDATING_CHAIN
+Updating bitmap chain in root...
+;
+MSG_FFS_REREAD_EXT_FAIL
+Cannot re-read last ext block %lu
+;
+MSG_FFS_WRITE_UPDATED_EXT_FAIL
+Failed to write updated ext block %lu
+;
+MSG_FFS_WRITE_NEW_EXT_FAIL
+Failed to write new ext block %lu (abs %lu)
+;
+MSG_FFS_PROG_RELOCATING_ROOT
+Relocating root block...
+;
+MSG_FFS_NEWROOT_LT_RESERVED
+new_root %lu < reserved %lu - impossible geometry
+;
+MSG_FFS_NEWROOT_BM_OOR
+new_root bm index %lu out of range (bm_count=%lu)
+;
+MSG_FFS_READ_BM_RELOC_FAIL
+Cannot read bm block %lu (root relocation)
+;
+MSG_FFS_WRITE_BM_RELOC_FAIL
+Failed to write bm block %lu (root relocation)
+;
+MSG_FFS_READ_BM_FREEROOT_FAIL
+Cannot read bm block %lu (free old root)
+;
+MSG_FFS_WRITE_BM_FREEROOT_FAIL
+Failed to write bm block %lu (free old root)
+;
+MSG_FFS_WRITE_ROOT_FAIL
+Failed to write root block at %lu (abs %lu)
+;
+MSG_FFS_ROOT_WRITE_READBACK_FAIL
+Root write failed: cannot read back abs %lu.\nThe filesystem was not modified.
+;
+MSG_FFS_ROOT_WRITE_VERIFY_FAIL
+Root write verification failed at abs %lu.\nThe block was not written or was overwritten before\nverification (Inhibit may have failed for '%s').\nThe filesystem was not modified.
+;
+MSG_FFS_PROG_UPDATING_PARENTS
+Updating file/directory parent pointers...
+;
+MSG_FFS_UPDATE_PARENT_FAIL
+Failed to update fhb_Parent in block %lu (abs %lu)
+;
+MSG_FFS_PROG_UPDATING_BOOT
+Updating boot block...
+;
+MSG_FFS_UPDATE_BOOT_FAIL
+Failed to update boot block bb[2] at abs %lu
+;
+MSG_FFS_STAMP_OLDROOT_WARN
+Warning: could not stamp bm_flag on old root at rel %lu\nFFS may run bitmap validator after Inhibit release.\nFilesystem written; reboot and verify.
+;
+MSG_FFS_ROOT_READBACK_PRE_FAIL
+Root readback failed (abs %lu) before Inhibit release
+;
+MSG_FFS_ROOT_CORRUPTED_PHASE9
+Root corrupted by Phase 9 writes at abs %lu.\ntype=0x%lX L[1]=%lu L[4]=%lu sec_type=0x%lX\nA parent-pointer or old-root update overwrote new root.
+;
+MSG_FFS_ROOT_CHECKSUM_PRE_WRONG
+Root checksum WRONG before Inhibit release\nstored=0x%08lX calc=0x%08lX at abs %lu
+;
+MSG_FFS_PROG_VERIFY_PRE
+Verifying root block (pre-release)...
+;
+MSG_FFS_PROG_WAITING_RESUME
+Waiting for FFS to resume (5 sec)...
+;
+MSG_FFS_PROG_VERIFY_POST
+Verifying root block (post-resume)...
+;
+MSG_FFS_ROOT_READBACK_POST_FAIL
+Root readback FAILED after Inhibit release (abs %lu)\nFFS may have overwritten the new root block!
+;
+MSG_FFS_ROOT_CORRUPTED_POST
+Root CORRUPTED after Inhibit(FALSE)!\ntype=0x%lX L[1]=%lu L[4]=%lu sec_type=0x%lX\nFFS overwrote abs %lu with non-root data
+;
+MSG_FFS_ROOT_CHECKSUM_POST_CORRUPT
+Root checksum CORRUPTED after Inhibit(FALSE)!\nstored=0x%08lX calc=0x%08lX\nFFS overwrote root checksum at abs %lu
+;
+MSG_FFS_BM_UNREADABLE_POST
+BM block %lu (abs %lu) unreadable after Inhibit(FALSE)
+;
+MSG_FFS_BM_CHECKSUM_BAD_POST
+BM block %lu CHECKSUM BAD after Inhibit(FALSE)!\nstored=0x%08lX calc=0x%08lX\nFFS validator will run and free new_root=%lu\n-> root will be overwritten on next file write
+;
+MSG_FFS_BM_NEWROOT_FREE_POST
+BM block %lu: new_root=%lu marked FREE after Inhibit(FALSE)!\n(off=%lu in bm block)\nFFS will allocate new_root for file data -> root overwritten
+;
+MSG_FFS_SUCCESS_DIAG
+old_root=%lu  new_root=%lu (abs %lu)\npart_abs=%lu  new_blks=%lu  spb=%lu\nheads=%lu  secs=%lu  reserved=%lu\nht_entries=%lu  bm_blocks=%lu\nbm_blk_for_root=%lu  bm_off=%lu
+;
+;
+;==========================================================================
+; sfsresize.c
+;==========================================================================
+MSG_SFS_INVALID_GEOMETRY
+Invalid geometry (h=%lu s=%lu)
+;
+MSG_SFS_READING_ROOT
+Reading SFS root block...
+;
+MSG_SFS_CANNOT_READ_BLOCK0
+Cannot read SFS block 0 (phys %lu)
+;
+MSG_SFS_BLOCK0_BAD_ID
+SFS block 0 id=0x%08lX (expected 0x%08lX).\nNot SFS or wrong partition start.\nphys=%lu low=%lu h=%lu s=%lu
+;
+MSG_SFS_BLOCKSIZE_INVALID
+SFS blocksize=%lu invalid.
+;
+MSG_SFS_OOM_BUFFERS
+Out of memory (6x%lu bytes)
+;
+MSG_SFS_INHIBITING
+Inhibiting SFS handler...
+;
+MSG_SFS_CANNOT_READ_ROOT0
+Cannot read SFS root block 0
+;
+MSG_SFS_ROOT0_BAD_CHECKSUM
+SFS root block 0 bad checksum.
+;
+MSG_SFS_ROOT_BAD_VERSION
+SFS root version=%u (expected 3).
+;
+MSG_SFS_ROOT0_BAD_OWNBLOCK
+SFS root block 0 ownblock=%lu (expected 0).
+;
+MSG_SFS_TOTALBLOCKS_SMALL
+SFS totalblocks=%lu too small.
+;
+MSG_SFS_READING_END_ROOT
+Reading SFS end root...
+;
+MSG_SFS_BLOCKSIZE_SMALL_BITMAP
+SFS blocksize too small for bitmap.
+;
+MSG_SFS_CHECKING_POSITIONS
+Checking new bitmap block positions...
+;
+MSG_SFS_OOM_BMB_CACHE
+Out of memory (bmb cache)
+;
+MSG_SFS_CANNOT_READ_BMB
+Cannot read bitmap block %lu
+;
+MSG_SFS_BAD_BMB
+Bad bitmap block %lu
+;
+MSG_SFS_WRITING_BMB_NATURAL
+Writing bitmap blocks (natural)...
+;
+MSG_SFS_CANNOT_WRITE_BMB
+Cannot write bitmap block %lu.
+;
+MSG_SFS_WRITING_NEW_BMB
+Writing new bitmap blocks...
+;
+MSG_SFS_CANNOT_WRITE_NEW_BMB
+Cannot write new bitmap block %lu.
+;
+MSG_SFS_EXT_AREA_TOO_SMALL
+Extended area (%lu blks) too small for relocated\nbitmap (%lu bmb blocks). Need delta > %lu.\nGrow by a larger amount to use bitmap relocation.
+;
+MSG_SFS_RELOCATING_BITMAP
+Relocating SFS bitmap...
+;
+MSG_SFS_CANNOT_READ_OLD_BMB
+Cannot read old bitmap block %lu.
+;
+MSG_SFS_CANNOT_WRITE_RELOC_BMB
+Cannot write relocated bitmap block %lu.
+;
+MSG_SFS_READING_BMB
+Reading bitmap block...
+;
+MSG_SFS_WRITING_BMB
+Writing bitmap blocks...
+;
+MSG_SFS_WRITING_NEW_END_ROOT
+Writing new SFS end root...
+;
+MSG_SFS_CANNOT_WRITE_END_ROOT
+Cannot write new SFS end root at block %lu.
+;
+MSG_SFS_WRITING_START_ROOT
+Writing updated SFS start root...
+;
+MSG_SFS_CANNOT_WRITE_START_ROOT
+Cannot write updated SFS start root.\nRun 'SFScheck %s:' after reboot.
+;
+MSG_SFS_INVALIDATING_OLD_ROOT
+Invalidating old end root...
+;
+MSG_SFS_UPDATING_FREE_CACHE
+Updating free block cache...
+;
+MSG_SFS_VERIFYING_WRITES
+Verifying writes...
+;
+MSG_SFS_DIAG_SUMMARY
+%s\ncyl+%lu bpc=%lu delta=%lu\nblks %lu->%lu\nbmb_base %lu->%lu\nVRF:tb=%lu bm=%lu bmbLFree=%lu\nVRF2:newbmFree=%lu (exp %lu)\nOldRoot: %s\nFreeBlks: %s (%lu->%lu)\nDH0: stays inhibited until reboot.
+;
+MSG_SFS_DIAG_RELOCATED
+Bitmap relocated.
+;
+MSG_SFS_DIAG_EXTENDED
+Bitmap extended.
+;
+MSG_SFS_DIAG_INVALIDATED
+invalidated
+;
+MSG_SFS_DIAG_NOT_INVALIDATED
+WARN: not invalidated
+;
+MSG_SFS_DIAG_OBJC_OK
+OK
+;
+MSG_SFS_DIAG_OBJC_FAIL
+WARN:fail
+;
+;
+;==========================================================================
+; pfsresize.c
+;==========================================================================
+MSG_PFS_INVALID_GEOMETRY
+Invalid geometry (heads=%lu secs=%lu)
+;
+MSG_PFS_READING_ROOTBLOCK
+Reading PFS rootblock...
+;
+MSG_PFS_CANNOT_READ_ROOTBLOCK
+Cannot read PFS rootblock (abs %lu)
+;
+MSG_PFS_NOT_ROOTBLOCK
+Block 0 is not a PFS3 rootblock (disktype=0x%08lX).\nExpected 0x%08lX (PFS\\1) or 0x%08lX (PFS\\2).
+;
+MSG_PFS_RBLKCLUSTER_ZERO
+PFS rootblock has rblkcluster=0.\npart_abs=%lu  blksz=%lu  phys_per_lb=%lu\nlow=%lu  heads=%lu  secs=%lu\nbytes[60..67]: %02X%02X%02X%02X %02X%02X%02X%02X\ndisktype=0x%08lX  options=0x%08lX
+;
+MSG_PFS_UNEXPECTED_BLKSIZE
+Unexpected reserved_blksize=%u
+;
+MSG_PFS_READING_CLUSTER
+Reading rootblock cluster...
+;
+MSG_PFS_OUT_OF_MEMORY
+Out of memory (need %lu bytes for rootblock cluster)
+;
+MSG_PFS_CANNOT_READ_CLUSTER
+Cannot read rootblock cluster (%u phys-secs at abs %lu)
+;
+MSG_PFS_SUPERINDEX
+PFS partition uses SUPERINDEX (options=0x%08lX).\nThis index structure is not supported by this grow tool.
+;
+MSG_PFS_RESERVED_TOO_SMALL
+PFS reserved area too small for this grow.\nNeed %lu new reserved blocks, only %lu free.\n\nMax safe target: cyl ~%lu (+%lu cyls instead of +%lu).\n\nTo grow further, use PFSDoctor to\nexpand the reserved area, then try again.
+;
+MSG_PFS_TOO_LARGE
+Partition too large for PFS3.\nPFS3 supports at most ~%lu MB with this block size.\nUse a smaller high cylinder.
+;
+MSG_PFS_METADATA_CORRUPT
+PFS3 metadata corrupted (prev. grow attempt).\nbfree=%lu > dsz=%lu\nRun 'PFSDoctor %s:' to repair,\nthen grow again.
+;
+MSG_PFS_OVERFLOW
+Overflow: bfree(%lu)+delta(%lu)>4G\nh=%lu s=%lu cyl+%lu
+;
+MSG_PFS_WRITING_CLUSTER
+Writing rootblock cluster...
+;
+MSG_PFS_CANNOT_WRITE
+Cannot write PFS rootblock (device error).\n\nAfter writing the RDB and rebooting, open a Shell and run:\n  PFSDoctor %s:\n\nPFSDoctor will fix the free space count automatically.
+;
+MSG_PFS_SIZEFIELD_CLEAR_FAIL
+Warning: MODE_SIZEFIELD clear failed.
+;
+MSG_PFS_FLUSHING_CACHE
+Flushing PFS cache (please wait)...
+;
+MSG_PFS_SUCCESS
+cyl+%lu bpc=%lu db=%lu\nbfree %lu->%lu\ndsz   %lu->%lu
+;
+;==========================================================================
+; quickformat.c
+;==========================================================================
+MSG_QF_NO_EXPANSION
+expansion.library not available
+;
+MSG_QF_IMAGE_NO_MOUNT
+image files can't be mounted
+;
+MSG_QF_NO_HANDLER_FMT
+no handler for type 0x%08lX
+;
+MSG_QF_MAKEDOSNODE_FAIL
+MakeDosNode failed (out of memory)
+;
+MSG_QF_ADDDOSNODE_FAIL
+AddDosNode failed
+;
+MSG_QF_FORMAT_ERR_FMT
+Format err %ld
+;
+MSG_QF_NO_NAME
+no name
+;
+MSG_QF_VOLUME_IN_USE
+volume in use - close its windows/files
+;
+;
+;==========================================================================
+; partmove.c
+;==========================================================================
+MSG_PM_INVALID_CYL_RANGE
+Partition has invalid cylinder range (%lu-%lu).
+;
+MSG_PM_ALREADY_AT_CYL
+Partition is already at cylinder %lu.
+;
+MSG_PM_START_BELOW_LOWEST
+New start cylinder %lu is below the lowest\nallowed partition cylinder (%lu).
+;
+MSG_PM_END_EXCEEDS_DISK
+New end cylinder %lu exceeds the disk limit (%lu).
+;
+MSG_PM_POSITION_OVERLAPS
+New position (cyl %lu-%lu) overlaps\npartition %s (cyl %lu-%lu).
+;
+MSG_PM_INVALID_GEOMETRY
+Invalid geometry (h=%lu s=%lu).
+;
+MSG_PM_OUT_OF_MEMORY_BYTES
+Out of memory (%lu bytes).
+;
+MSG_PM_COPYING_BLOCKS
+Copying blocks...
+;
+MSG_PM_READ_ERROR_AT_BLOCK
+Read error at phys block %lu (after %lu blocks copied).
+;
+MSG_PM_WRITE_ERROR_AT_BLOCK
+Write error at phys block %lu (after %lu blocks copied).
+;
+MSG_PM_UPDATING_SFS
+Updating SFS location...
+;
+MSG_PM_SFS_CANT_READ_ROOT0
+SFS: cannot read new root block 0.
+;
+MSG_PM_SFS_ROOT_ID_MISMATCH
+SFS: root id mismatch after copy - metadata not updated.\nRun SFScheck %s: after reboot.
+;
+MSG_PM_SFS_INVALID_BLOCKSIZE
+SFS: invalid blocksize %lu.
+;
+MSG_PM_OUT_OF_MEMORY_SFS
+Out of memory (SFS root buffer).
+;
+MSG_PM_SFS_ROOT0_CHECKSUM
+SFS: root block 0 read/checksum error after copy.
+;
+MSG_PM_SFS_PRIMARY_WRITE_FAIL
+SFS: failed to write primary root block after move.\nData was copied but SFS location metadata not updated.\nRun SFScheck %s: after reboot.
+;
+MSG_PM_SFS_BACKUP_WRITE_FAIL
+SFS: backup root write failed (block %lu).\nPrimary root is correct; volume should mount.\nRun SFScheck %s: after reboot to repair backup.
+;
+MSG_PM_MOVED_SUMMARY
+Moved %lu cylinders of data.\ncyl %lu-%lu -> %lu-%lu\nphys blocks: %lu -> %lu (%lu blocks)
+;
+;
+;==========================================================================
+; imagecopy.c
+;==========================================================================
+MSG_IC_BAD_PARAMETERS
+Bad parameters.
+;
+MSG_IC_ZERO_BLOCKS
+Source has zero blocks.
+;
+MSG_IC_CANNOT_CREATE_FILE
+Cannot create image file.
+;
+MSG_IC_OUT_OF_MEMORY
+Out of memory.
+;
+MSG_IC_WRITE_ERROR
+Write error.
+;
+MSG_IC_CANCELLED
+Cancelled by user.
+;
+MSG_IC_CANNOT_OPEN_FILE
+Cannot open image file.
+;
+MSG_IC_READ_ERROR
+Read error.
+;
+MSG_IC_NOT_BLOCK_ALIGNED
+Image size not block-aligned.
+;
+MSG_IC_IMAGE_TOO_LARGE
+Image is larger than the destination.
+;
+MSG_IC_IMAGE_EMPTY
+Image file is empty.
+;
+;
+;==========================================================================
+; partview_rdb.c
+;==========================================================================
+MSG_RDB_BACKUP_TITLE
+Backup RDB Block
+;
+MSG_RDB_RESTORE_TITLE
+Restore RDB Block
+;
+MSG_RDB_RESTORE_TITLE_WARN
+Restore RDB Block - WARNING
+;
+MSG_RDB_RESTORE_TITLE_FINAL
+Restore RDB Block - FINAL WARNING
+;
+MSG_RDB_EXT_BACKUP_TITLE
+Extended Backup
+;
+MSG_RDB_EXT_RESTORE_TITLE
+Extended Restore
+;
+MSG_RDB_EXT_RESTORE_TITLE_WARN
+Extended Restore - WARNING
+;
+MSG_RDB_EXT_RESTORE_TITLE_FINAL
+Extended Restore - FINAL WARNING
+;
+MSG_RDB_VIEW_TITLE
+View RDB Block
+;
+MSG_RDB_VIEW_WINTITLE
+RDB Block - View
+;
+MSG_RDB_RAWSCAN_TITLE
+Raw Block Scan
+;
+MSG_RDB_RAWREAD_TITLE
+Raw Disk Read
+;
+MSG_RDB_HEXDUMP_TITLE
+Hex Dump
+;
+MSG_RDB_HEXDUMP_WINTITLE
+Hex Dump - Raw Blocks (SCSI/CMD)
+;
+MSG_RDB_SMART_TITLE
+SMART Status
+;
+MSG_RDB_BADBLOCKLIST_TITLE
+Bad Block List
+;
+MSG_RDB_BBSCAN_TITLE
+Bad Block Scan
+;
+MSG_RDB_BBSCAN_RESULTS_TITLE
+Bad Block Scan Results
+;
+MSG_RDB_INTEGRITY_TITLE
+RDB Integrity Check
+;
+MSG_RDB_VERIFY_TITLE
+Verify RDB Block
+;
+MSG_RDB_VERIFY_EXT_TITLE
+Verify Extended Backup
+;
+MSG_RDB_DEV_NOT_ACCESSIBLE
+Device is not accessible.
+;
+MSG_RDB_NO_DEVICE_OPEN
+No device open.
+;
+MSG_RDB_NO_RDB_FOUND
+No RDB found on this disk.
+;
+MSG_RDB_NO_RDB_NOTHING
+No RDB found on this disk.\nNothing to backup.
+;
+MSG_RDB_NO_DEV_OR_RDB
+No device or RDB loaded.
+;
+MSG_RDB_ASL_UNAVAIL
+asl.library not available.\nCannot open file requester.
+;
+MSG_RDB_READ_RDB_FAILED
+Failed to read RDB block from disk.
+;
+MSG_RDB_READ_BLOCK_FAILED
+Failed to read block from disk.
+;
+MSG_RDB_CANT_CREATE_BACKUP
+Cannot create backup file.
+;
+MSG_RDB_CANT_OPEN_BACKUP
+Cannot open backup file.
+;
+MSG_RDB_FILE_READ_ERROR
+File read error.
+;
+MSG_RDB_BLOCK_SAVED
+RDB block saved successfully.
+;
+MSG_RDB_BLOCK_RESTORED
+RDB block restored to block 0.\nPlease reboot for changes to take effect.
+;
+MSG_RDB_WRITE_BLOCK_FAILED
+Failed to write block to disk.
+;
+MSG_RDB_BACKUP_SIZE_MISMATCH
+Backup file size does not match\nthe device block size. Aborted.
+;
+MSG_RDB_RESTORE_WARN_BODY
+WARNING: This will OVERWRITE block 0\non the disk with data from the backup file!\n\nRestoring an incorrect or mismatched backup\nWILL cause permanent data loss.\n\nEnsure the backup matches THIS disk.\n\nAre you absolutely sure?
+;
+MSG_RDB_EXT_RESTORE_WARN_BODY
+WARNING: This will OVERWRITE multiple blocks\n(RDB, partitions, filesystems) on the disk!\n\nAn incorrect backup WILL destroy the disk layout.\nEnsure the backup matches THIS disk.\n\nAre you absolutely sure?
+;
+MSG_RDB_YES_RESTORE_CANCEL
+Yes, restore|Cancel
+;
+MSG_RDB_WRITE_IT_CANCEL
+Write it|Cancel
+;
+MSG_RDB_LAST_CHANCE_BLOCK0_FMT
+LAST CHANCE\n\nWrite backup to block 0 of\n%s unit %lu ?\n\nThis CANNOT be undone.
+;
+MSG_RDB_LAST_CHANCE_NBLKS_FMT
+LAST CHANCE\n\nWrite %lu blocks (blocks %lu-%lu) to\n%s unit %lu ?\n\nThis CANNOT be undone.
+;
+MSG_RDB_ASL_SAVE_BLOCK
+Save RDB Block Backup
+;
+MSG_RDB_ASL_SELECT_BLOCK
+Select RDB Block Backup File
+;
+MSG_RDB_ASL_SAVE_EXT
+Save Extended RDB Backup
+;
+MSG_RDB_ASL_SELECT_EXT
+Select Extended RDB Backup File
+;
+MSG_RDB_ASL_SELECT_VERIFY
+Select RDB Block Backup to Verify
+;
+MSG_RDB_ASL_SELECT_EXT_VERIFY
+Select Extended Backup File to Verify
+;
+MSG_RDB_WRITE_ERR_HEADER
+Write error saving header.
+;
+MSG_RDB_WRITE_ERR_BLOCKDATA
+Write error saving block data.
+;
+MSG_RDB_EXT_BACKUP_SAVED_FMT
+Extended RDB backup saved.\n%lu blocks (blocks %lu-%lu).
+;
+MSG_RDB_FILE_TOO_SMALL
+File too small - not a valid extended backup.
+;
+MSG_RDB_NOT_VALID_EXT_BACKUP
+Not a valid extended RDB backup.\n(Bad magic or unsupported version.)
+;
+MSG_RDB_BLOCKSIZE_MISMATCH
+Block size mismatch between backup\nand this device. Aborted.
+;
+MSG_RDB_FILESIZE_MISMATCH_HDR
+File size does not match header.\nBackup may be corrupt. Aborted.
+;
+MSG_RDB_READ_ERR_BACKUP
+Read error on backup file.
+;
+MSG_RDB_WRITE_FAILED_BLK_FMT
+Write failed on block %lu.
+;
+MSG_RDB_EXT_RESTORED_OK
+Extended RDB restored successfully.\nPlease reboot for changes to take effect.
+;
+MSG_RDB_NO_VALID_RAW0
+*** No valid RDB found - showing raw block 0 ***
+;
+MSG_RDB_HDR_INST_FS_FMT
+--- Installed Filesystems (%u) -----------------------
+;
+MSG_RDB_NONE_INDENT
+  (none)
+;
+MSG_RDB_NO_CODE
+no code
+;
+MSG_RDB_FS_LINE_FMT
+  %-12s  %-8s  %s  (blk %lu)
+;
+MSG_RDB_HDR_IDENTITY
+--- Identity -----------------------------------------
+;
+MSG_RDB_BLOCK_NUMBER_FMT
+  Block number  : %lu
+;
+MSG_RDB_ID_FMT
+  ID            : %s  (0x%08lX)
+;
+MSG_RDB_SUMMEDLONGS_FMT
+  SummedLongs   : %lu  (%lu bytes covered)
+;
+MSG_RDB_CHECKSUM_FMT
+  Checksum      : 0x%08lX  [%s]
+;
+MSG_RDB_VALID
+VALID
+;
+MSG_RDB_INVALID
+INVALID
+;
+MSG_RDB_HOSTID_FMT
+  HostID        : %lu
+;
+MSG_RDB_BLOCKBYTES_FMT
+  BlockBytes    : %lu
+;
+MSG_RDB_HDR_FLAGS_FMT
+--- Flags: 0x%08lX ---------------------------
+;
+MSG_RDB_BIT0_LAST_FMT
+  Bit0 LAST      : %s
+;
+MSG_RDB_BIT1_LASTLUN_FMT
+  Bit1 LASTLUN   : %s
+;
+MSG_RDB_BIT2_LASTTID_FMT
+  Bit2 LASTTID   : %s
+;
+MSG_RDB_BIT3_NORESELECT_FMT
+  Bit3 NORESELECT: %s
+;
+MSG_RDB_BIT4_DISKID_FMT
+  Bit4 DISKID    : %s
+;
+MSG_RDB_BIT5_CTRLRID_FMT
+  Bit5 CTRLRID   : %s
+;
+MSG_RDB_BIT6_SYNCH_FMT
+  Bit6 SYNCH     : %s
+;
+MSG_RDB_NOT_SET
+not set
+;
+MSG_RDB_FLAG_SET_NOMORE_DISKS
+SET  (no more disks after this)
+;
+MSG_RDB_FLAG_SET_NOMORE_LUNS
+SET  (no more LUNs at this target)
+;
+MSG_RDB_FLAG_SET_NOMORE_TIDS
+SET  (no more target IDs on this bus)
+;
+MSG_RDB_FLAG_SET_NORESELECT
+SET  (no reselect)
+;
+MSG_RDB_FLAG_SET_DISKID_VALID
+SET  (disk identification valid)
+;
+MSG_RDB_NOT_SET_DISKID_GARBAGE
+not set (disk ID fields may be garbage)
+;
+MSG_RDB_FLAG_SET_CTRLID_VALID
+SET  (controller ID valid)
+;
+MSG_RDB_NOT_SET_CTRLID_GARBAGE
+not set (ctrl ID fields may be garbage)
+;
+MSG_RDB_FLAG_SET_SYNCH
+SET  (SCSI synchronous mode)
+;
+MSG_RDB_HDR_BLOCKLISTS
+--- Block List Heads ---------------------------------
+;
+MSG_RDB_NONE
+none
+;
+MSG_RDB_BADBLOCKLIST_FMT
+  BadBlockList   : %s  (0x%08lX)
+;
+MSG_RDB_PARTITIONLIST_FMT
+  PartitionList  : %s  (0x%08lX)
+;
+MSG_RDB_FILESYSHDRLIST_FMT
+  FileSysHdrList : %s  (0x%08lX)
+;
+MSG_RDB_DRIVEINIT_FMT
+  DriveInit      : %s  (0x%08lX)
+;
+MSG_RDB_HDR_PHYSICAL
+--- Physical Drive Characteristics -------------------
+;
+MSG_RDB_CYLINDERS_FMT
+  Cylinders      : %lu
+;
+MSG_RDB_SECTORS_TRACK_FMT
+  Sectors/track  : %lu
+;
+MSG_RDB_HEADS_FMT
+  Heads          : %lu
+;
+MSG_RDB_INTERLEAVE_FMT
+  Interleave     : %lu
+;
+MSG_RDB_PARK_CYL_FMT
+  Park cylinder  : %lu
+;
+MSG_RDB_NOT_USED
+not used
+;
+MSG_RDB_WRITEPRECOMP_FMT
+  WritePreComp   : %s
+;
+MSG_RDB_REDUCEDWRITE_FMT
+  ReducedWrite   : %s
+;
+MSG_RDB_STEPRATE_FMT
+  StepRate       : %lu
+;
+MSG_RDB_HDR_LOGICAL
+--- Logical Drive Characteristics --------------------
+;
+MSG_RDB_RDBBLOCKSLO_FMT
+  RDBBlocksLo    : %lu
+;
+MSG_RDB_RDBBLOCKSHI_FMT
+  RDBBlocksHi    : %lu
+;
+MSG_RDB_LOCYLINDER_FMT
+  LoCylinder     : %lu
+;
+MSG_RDB_HICYLINDER_FMT
+  HiCylinder     : %lu
+;
+MSG_RDB_CYLBLOCKS_FMT
+  CylBlocks      : %lu  (%lu sectors x %lu heads)
+;
+MSG_RDB_AUTOPARKSECS_FMT
+  AutoParkSecs   : %lu
+;
+MSG_RDB_HIGHRDSKBLOCK_FMT
+  HighRDSKBlock  : %lu
+;
+MSG_RDB_HDR_DRIVE_ID
+--- Drive Identification -----------------------------
+;
+MSG_RDB_DISK_VENDOR_FMT
+  Disk Vendor    : %s
+;
+MSG_RDB_DISK_PRODUCT_FMT
+  Disk Product   : %s
+;
+MSG_RDB_DISK_REVISION_FMT
+  Disk Revision  : %s
+;
+MSG_RDB_CTRL_VENDOR_FMT
+  Ctrl Vendor    : %s
+;
+MSG_RDB_CTRL_PRODUCT_FMT
+  Ctrl Product   : %s
+;
+MSG_RDB_CTRL_REVISION_FMT
+  Ctrl Revision  : %s
+;
+MSG_RDB_DRIVEINITNAME_FMT
+  DriveInitName  : %s
+;
+MSG_RDB_HDR_RESERVED
+--- Reserved Fields ----------------------------------
+;
+MSG_RDB_RESERVED1_FMT
+  Reserved1[%u]  : 0x%08lX%s
+;
+MSG_RDB_RESERVED2_FMT
+  Reserved2[%u]  : 0x%08lX%s
+;
+MSG_RDB_RESERVED3_FMT
+  Reserved3[%u]  : 0x%08lX%s
+;
+MSG_RDB_RESERVED4_FMT
+  Reserved4     : 0x%08lX%s
+;
+MSG_RDB_MODIFIED_MARK
+  <-- modified
+;
+MSG_RDB_HDR_EXTRA_DATA
+--- Extra Block Data (bytes 256-511) -----------------
+;
+MSG_RDB_EXTRA_NO_BYTES
+  (block size matches struct size - no extra bytes)
+;
+MSG_RDB_EXTRA_ALL_FILL_FMT
+  %u bytes - all 0x00 or 0xFF (nothing stored here)
+;
+MSG_RDB_EXTRA_HAS_DATA_FMT
+  %u bytes, contains data:
+;
+MSG_RDB_SCAN_SINGLE_HDR
+--- CMD_READ scan (single read), blocks 0-15 ---
+;
+MSG_RDB_SCAN_DOUBLE_HDR
+--- CMD_READ scan (double read = read2), blocks 0-15 ---
+;
+MSG_RDB_SCAN_BLK0_DUMP_HDR
+--- Block 0 hex dump (bytes 0-127) ---
+;
+MSG_RDB_SCAN_BLK_ERR_FMT
+Blk %2lu: err=%ld
+;
+MSG_RDB_SCAN_BLK_OK_FMT
+Blk %2lu: OK  id=%s 0x%08lX  %s
+;
+MSG_RDB_REREAD_BLK0_FAILED
+(re-read block 0 failed)
+;
+MSG_RDB_RDSK_NOT_FOUND
+--- RDSK: not found in blocks 0-15 ---
+;
+MSG_RDB_RDSK_KEYFIELDS_FMT
+--- RDSK key fields (block %lu) ---
+;
+MSG_RDB_PARTLIST_CYLS_FMT
+PartList=blk %lu  Cyls=%lu  Secs=%lu  Heads=%lu
+;
+MSG_RDB_PART_ENDOFLIST
+--- PART: PartitionList = end-of-list ---
+;
+MSG_RDB_PART_BLOCK_AT_FMT
+--- PART block at blk %lu ---
+;
+MSG_RDB_READ_ERR_SHORT
+  read err
+;
+MSG_RDB_PART_ID_NAMELEN_FMT
+  ID=0x%08lX  namelen=%lu
+;
+MSG_RDB_NAME_RAW_PREFIX
+  name raw [36..43]:
+;
+MSG_RDB_PART_NAME_FMT
+  Name='%s'
+;
+MSG_RDB_ENV_TABLESZ_FMT
+  env[0]=TableSz=%lu  env[1]=SizeBlk=%lu
+;
+MSG_RDB_ENV_HEADS_FMT
+  env[3]=Heads=%lu  env[5]=Secs=%lu
+;
+MSG_RDB_ENV_LOCYL_FMT
+  env[9]=LoCyl=%lu  env[10]=HiCyl=%lu
+;
+MSG_RDB_ENV_NUMBUF_FMT
+  env[11]=NumBuf=%lu  env[15]=BootPri=%lu
+;
+MSG_RDB_ENV_DOSTYPE_FMT
+  env[16]=DosType=0x%08lX  raw@0xC0: %02lX %02lX %02lX %02lX
+;
+MSG_RDB_ENV_MAXXFER_FMT
+  env[13]=MaxXfer=0x%08lX  env[14]=Mask=0x%08lX
+;
+MSG_RDB_ENV_HEX_HDR
+  env hex (bytes 0x80-0xCF):
+;
+MSG_RDB_DOSLIST_HDR
+--- DosList entries (this device+unit) ---
+;
+MSG_RDB_DOSLIST_ENTRY_FMT
+  %s: unit=%lu dev=%s lo=%lu hi=%lu
+;
+MSG_RDB_MULTIREAD_HDR
+--- Multi-read stability test (A3000 DMA check) ---
+;
+MSG_RDB_ALLOCVEC_FAILED
+  (AllocVec MEMF_PUBLIC failed)
+;
+MSG_RDB_RDSK_NOTFOUND_SKIP
+  (RDSK not found - skipping)
+;
+MSG_RDB_MREAD_BLOCK_FMT
+  Block %lu (%s): 4 reads
+;
+MSG_RDB_MREAD_READ_ERROR
+    read error
+;
+MSG_RDB_MREAD_RVS_FMT
+    R%d vs R1: %lu differ
+;
+MSG_RDB_MREAD_CSUM_FMT
+    csum: SL=%lu sum=0x%08lX %s
+;
+MSG_RDB_MREAD_CYLS_FMT
+    Cyls=%lu Heads=%lu Secs=%lu PartList=%lu
+;
+MSG_RDB_MREAD_NAME_FMT
+    n[36]: len=%u '%s' raw:%02X %02X %02X %02X
+;
+MSG_RDB_MREAD_DOSTYPE_FMT
+    DosType[C0]: %02X %02X %02X %02X = 0x%08lX
+;
+MSG_RDB_NO_PART_ENDMARK
+  (no PART block - PartList is end-mark)
+;
+MSG_RDB_INTERLEAVED_FMT
+  Interleaved RDSK re-read: %lu differ
+;
+MSG_RDB_HDR_GETGEOMETRY
+=== TD_GETGEOMETRY ===
+;
+MSG_RDB_GEO_TOTALSECTORS_FMT
+  TotalSectors : %lu
+;
+MSG_RDB_GEO_CYLINDERS_FMT
+  Cylinders    : %lu
+;
+MSG_RDB_GEO_HEADS_FMT
+  Heads        : %lu
+;
+MSG_RDB_GEO_TRACKSECTORS_FMT
+  TrackSectors : %lu
+;
+MSG_RDB_GEO_SECTORSIZE_FMT
+  SectorSize   : %lu
+;
+MSG_RDB_GEO_DEVICETYPE_FMT
+  DeviceType   : %lu  Flags: 0x%lX
+;
+MSG_RDB_GEO_FAILED
+  TD_GETGEOMETRY failed (error or unsupported)
+;
+MSG_RDB_HDR_INQUIRY
+=== SCSI INQUIRY (HD_SCSICMD, direct to device) ===
+;
+MSG_RDB_NOT_SUPPORTED_NONSCSI
+  Not supported (non-SCSI device)
+;
+MSG_RDB_ERROR_FMT
+  Error: %ld
+;
+MSG_RDB_INQ_DEVTYPE_FMT
+  DevType : 0x%02X  Vendor  : \"%s\"
+;
+MSG_RDB_INQ_PRODUCT_FMT
+  Product : \"%s\"  Rev: \"%s\"
+;
+MSG_RDB_HDR_READCAPACITY
+=== SCSI READ CAPACITY(10) (HD_SCSICMD, direct to device) ===
+;
+MSG_RDB_RC_LASTLBA_FMT
+  LastLBA   : %lu  (TotalBlocks: %lu)
+;
+MSG_RDB_RC_BLOCKSIZE_FMT
+  BlockSize : %lu bytes
+;
+MSG_RDB_RC_TOTALSIZE_FMT
+  TotalSize : %s
+;
+MSG_RDB_RC_HEX_FMT
+  Hex: %02X %02X %02X %02X  %02X %02X %02X %02X
+;
+MSG_RDB_HDR_CAPPROBE
+=== Real capacity probe (HD_SCSICMD binary search) ===
+;
+MSG_RDB_CAPPROBE_SKIPPED
+  Skipped (HD_SCSICMD not available)
+;
+MSG_RDB_CAPPROBE_PROBES_FMT
+  Probes used  : %lu
+;
+MSG_RDB_CAPPROBE_LASTLBA_FMT
+  Last readable LBA : %lu
+;
+MSG_RDB_CAPPROBE_REALCAP_FMT
+  Real capacity     : %s  (%lu sectors)
+;
+MSG_RDB_CAPPROBE_WRONG_FMT
+  READ CAPACITY said: %s - WRONG!
+;
+MSG_RDB_CAPPROBE_USE_MANUAL
+  *** Driver/DMA reports wrong size - use Manual Geometry! ***
+;
+MSG_RDB_CAPPROBE_AGREES
+  READ CAPACITY agrees - reported size is correct.
+;
+MSG_RDB_HDR_RAWBLOCKS
+=== Blocks 0-15: single CMD_READ, no fixups ===
+;
+MSG_RDB_RAWBLK_READ_ERR_FMT
+Block %2lu: CMD_READ error %ld
+;
+MSG_RDB_RAWBLK_STATUS_FMT
+Block %2lu  ID=%08lX (%s)  SL=%lu  csum=%s
+;
+MSG_RDB_SL_OUT_OF_RANGE
+?(SL out of range)
+;
+MSG_RDB_RAWBLK_RDSK_CYLS_FMT
+  Cyls=%lu  Heads=%lu  Secs=%lu
+;
+MSG_RDB_RAWBLK_RDSK_RDB_FMT
+  RDBlo=%lu  RDBhi=%lu  LoCyl=%lu  HiCyl=%lu
+;
+MSG_RDB_RAWBLK_RDSK_PART_FMT
+  PartList=%08lX  FSHDList=%08lX
+;
+MSG_RDB_RAWBLK_NAME_BSTR_FMT
+  Name BSTR raw [0x24]: len=0x%02X \"%s\"
+;
+MSG_RDB_RAWBLK_RAW24_FMT
+  Raw bytes 0x24-0x27: %02X %02X %02X %02X
+;
+MSG_RDB_RAWBLK_DOSTYPE_FMT
+  DosType [0xC0]: %08lX  LoCyl=%lu  HiCyl=%lu
+;
+MSG_RDB_RAWBLK_RAWC0_FMT
+  Raw bytes 0xC0-0xC3: %02X %02X %02X %02X
+;
+MSG_RDB_RAWBLK_NEXT_FLAGS_FMT
+  Next=%08lX  Flags=%08lX  DevFlags=%08lX
+;
+MSG_RDB_RAWBLK_FSHD_DOSTYPE_FMT
+  DosType=%08lX  Version=%lu.%lu
+;
+MSG_RDB_RAWBLK_FSHD_NEXT_FMT
+  Next=%08lX  SegListBlk=%08lX
+;
+MSG_RDB_RAWBLK_LSEG_NEXT_FMT
+  Next=%08lX
+;
+MSG_RDB_RAWBLK_RAW_FMT
+  Raw: %08lX %08lX %08lX %08lX
+;
+MSG_RDB_HEXDUMP_BLK_ERR_FMT
+=== Block %lu: read error ===
+;
+MSG_RDB_HEXDUMP_BLK_HDR_FMT
+=== Block %lu  ID=%s(0x%08lX)  csum=%s  [%s] ===
+;
+MSG_RDB_HDR_SMART
+=== SMART Status ===
+;
+MSG_RDB_DRIVE_FMT
+  Drive: %s
+;
+MSG_RDB_SMART_NOTSUP_1
+  ATA SMART not supported:
+;
+MSG_RDB_SMART_NOTSUP_2
+  Device or driver does not implement HD_SCSICMD /
+;
+MSG_RDB_SMART_NOTSUP_3
+  ATA PASS-THROUGH.
+;
+MSG_RDB_SMART_READFAIL_1
+  SMART READ DATA command failed.
+;
+MSG_RDB_SMART_READFAIL_2
+  Drive may not support SMART, or the driver does not
+;
+MSG_RDB_SMART_READFAIL_3
+  support ATA PASS-THROUGH CDBs.
+;
+MSG_RDB_SMART_ALLZERO_1
+  SMART returned all-zero data.
+;
+MSG_RDB_SMART_ALLZERO_2
+  Drive may not support SMART.
+;
+MSG_RDB_SMART_DATAREV_FMT
+  Data structure revision: 0x%02X%02X
+;
+MSG_RDB_SMART_HEALTH_FAILED
+  Overall health: ** FAILED ** (pre-failure threshold exceeded)
+;
+MSG_RDB_SMART_HEALTH_PASSED
+  Overall health: PASSED
+;
+MSG_RDB_SMART_HEALTH_UNKNOWN
+  Overall health: UNKNOWN (threshold data unavailable)
+;
+MSG_RDB_SMART_TABLE_HDR
+   ID Name                    Cur  Wst  Thr       Raw  Status
+;
+MSG_RDB_BADB_NO_SPACE
+Not enough space in the RDB\nreserved area for a bad block list.
+;
+MSG_RDB_BADB_WRITE_FAILED
+Failed to write BADB block to disk.
+;
+MSG_RDB_BADB_READ_RDSK_FAILED
+Failed to read RDSK block for update.
+;
+MSG_RDB_BADB_WRITE_RDSK_FAILED
+Failed to write updated RDSK block.
+;
+MSG_RDB_BBSCAN_NO_SIZE
+Cannot determine disk size.\nScan not possible.
+;
+MSG_RDB_BBSCAN_PROGRESS_FMT
+Bad Block Scan - %lu/%lu (%lu%%) Bad:%lu
+;
+MSG_RDB_HDR_BBSCAN_RESULTS
+=== Bad Block Scan Results ===
+;
+MSG_RDB_BBSCAN_SCANNED_FMT
+  Blocks scanned: %lu%s
+;
+MSG_RDB_BBSCAN_CANCELLED_SUFFIX
+ (cancelled)
+;
+MSG_RDB_BBSCAN_FOUND_FMT
+  Bad blocks found: %lu%s
+;
+MSG_RDB_BBSCAN_LIMIT_SUFFIX
+ (limit reached, more may exist)
+;
+MSG_RDB_BBSCAN_HEALTHY
+  No bad blocks found. Disk surface appears healthy.
+;
+MSG_RDB_BBSCAN_LIST_HDR
+  Bad block list:
+;
+MSG_RDB_BBSCAN_MORE_EXIST
+    ... (more bad blocks exist - limit reached)
+;
+MSG_RDB_BADB_OFFER_FMT
+%lu bad block(s) found.\nWrite bad block list to RDB?\n\nNote: entries will be cleared if\nyou write the partition table later.
+;
+MSG_RDB_WRITE_SKIP
+Write|Skip
+;
+MSG_RDB_BADB_WRITTEN
+Bad block list written to RDB.
+;
+MSG_RDB_HDR_INTEGRITY
+--- RDB Integrity Check ---
+;
+MSG_RDB_VERIFY_SIZE_MISMATCH_FMT
+File size (%ld) does not match\ndevice block size (%lu). Aborted.
+;
+MSG_RDB_VERIFY_MATCH_FMT
+MATCH\n\nBackup file matches RDB block %lu on disk.\n(%lu bytes compared)
+;
+MSG_RDB_VERIFY_MISMATCH_FMT
+MISMATCH\n\n%lu byte(s) differ.\nFirst difference at offset %lu (0x%04lX).
+;
+MSG_RDB_NOT_VALID_ERDB
+Not a valid ERDB backup file\n(bad magic or version).
+;
+MSG_RDB_VERIFY_BLKSZ_MISMATCH_FMT
+Block size mismatch:\nbackup=%lu, device=%lu. Aborted.
+;
+MSG_RDB_UNREASONABLE_BLKCOUNT
+Unreasonable block count in header. Aborted.
+;
+MSG_RDB_VE_HDR_FMT
+--- Verify Extended Backup: %lu blocks from blk %lu ---
+;
+MSG_RDB_VE_FILE_READ_ERR_FMT
+Blk %lu: FILE READ ERROR
+;
+MSG_RDB_VE_DISK_READ_ERR_FMT
+Blk %lu: DISK READ ERROR
+;
+MSG_RDB_VE_MATCH_FMT
+Blk %lu: MATCH
+;
+MSG_RDB_VE_MISMATCH_FMT
+Blk %lu: MISMATCH  %lu byte(s) differ, first @ 0x%04lX
+;
+MSG_RDB_VE_RESULT_PASS_FMT
+RESULT: PASS  All %lu blocks match.
+;
+MSG_RDB_VE_RESULT_FAIL_FMT
+RESULT: FAIL  %lu/%lu blocks have differences.
+;

@@ -27,6 +27,7 @@
 #include "partmove.h"
 #include "partview_internal.h"
 #include "quickformat.h"
+#include "locale_support.h"
 
 extern struct ExecBase      *SysBase;
 extern struct IntuitionBase *IntuitionBase;
@@ -42,16 +43,16 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
-    es.es_Title        = (UBYTE *)"Check FFS Root";
-    es.es_GadgetFormat = (UBYTE *)"OK";
+    es.es_Title        = (UBYTE *)GS(MSG_MOVE_CHK_ROOT_TITLE);
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
 
     if (!bd) {
-        es.es_TextFormat = (UBYTE *)"No device open.";
+        es.es_TextFormat = (UBYTE *)GS(MSG_MOVE_NO_DEVICE);
         EasyRequest(win, &es, NULL);
         return;
     }
     if (!rdb || sel < 0 || (ULONG)sel >= rdb->num_parts) {
-        es.es_TextFormat = (UBYTE *)"No partition selected.\nSelect a partition from the list first.";
+        es.es_TextFormat = (UBYTE *)GS(MSG_MOVE_NO_PART_SEL);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -61,14 +62,14 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
     ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
 
     if (heads == 0 || sectors == 0) {
-        es.es_TextFormat = (UBYTE *)"Cannot check: partition geometry\nhas heads=0 or sectors=0.";
+        es.es_TextFormat = (UBYTE *)GS(MSG_MOVE_GEOM_ZERO);
         EasyRequest(win, &es, NULL);
         return;
     }
 
     buf = (ULONG *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
     if (!buf) {
-        es.es_TextFormat = (UBYTE *)"Out of memory.";
+        es.es_TextFormat = (UBYTE *)GS(MSG_MOVE_OUT_OF_MEM);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -80,10 +81,7 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
 
     if (!BlockDev_ReadBlock(bd, root_abs, buf)) {
         sprintf(msg,
-                "Partition %s\n"
-                "part_abs=%lu  num_blks=%lu\n"
-                "Expected root: rel=%lu abs=%lu\n\n"
-                "READ FAILED at abs %lu",
+                GS(MSG_MOVE_CHK_READ_FAIL_FMT),
                 pi->drive_name,
                 (unsigned long)part_abs,
                 (unsigned long)num_blocks,
@@ -124,32 +122,25 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
     BOOL  dsz_ok      = (disk_size == num_blocks);
 
     sprintf(msg,
-            "Partition %s  heads=%lu secs=%lu\n"
-            "Expected root: rel=%lu abs=%lu\n"
-            "Boot bb[2]=%lu  (0=use num_blks/2)\n\n"
-            "L[0]  type    =0x%lX  (%s)\n"
-            "L[1]  own_key =%lu  (expect %lu)%s\n"
-            "L[4]  disk_sz =%lu  (expect %lu)%s\n"
-            "L[5]  chksum  ok=%s\n"
-            "L[78] bm_flag =0x%lX  (%s)\n"
-            "L[127]sec_type=0x%lX  (%s)\n"
-            "L[79] bm[0]   =%lu\n"
-            "L[104]bm_ext  =%lu\n\n"
-            "%s",
+            GS(MSG_MOVE_CHK_REPORT_FMT),
             pi->drive_name, (unsigned long)heads, (unsigned long)sectors,
             (unsigned long)root, (unsigned long)root_abs,
             (unsigned long)bb2,
-            (unsigned long)buf[0],  type_ok ? "ok" : "WRONG,expect 2",
+            (unsigned long)buf[0],  type_ok ? GS(MSG_MOVE_CHK_OK)
+                                            : GS(MSG_MOVE_CHK_WRONG_2),
             (unsigned long)buf[1],  (unsigned long)root,
-                own_ok ? "" : " (FFS ignores)",
+                own_ok ? "" : GS(MSG_MOVE_CHK_FFS_IGNORES),
             (unsigned long)disk_size, (unsigned long)num_blocks,
-                dsz_ok ? "" : " MISMATCH",
-            cs_ok ? "YES" : "NO",
-            (unsigned long)buf[78], bm_valid ? "valid" : "INVALID",
-            (unsigned long)buf[127], sec_ok ? "ok" : "WRONG,expect 1",
+                dsz_ok ? "" : GS(MSG_MOVE_CHK_MISMATCH),
+            cs_ok ? GS(MSG_MOVE_CHK_YES) : GS(MSG_MOVE_CHK_NO),
+            (unsigned long)buf[78], bm_valid ? GS(MSG_MOVE_CHK_VALID)
+                                             : GS(MSG_MOVE_CHK_INVALID),
+            (unsigned long)buf[127], sec_ok ? GS(MSG_MOVE_CHK_OK)
+                                            : GS(MSG_MOVE_CHK_WRONG_1),
             (unsigned long)buf[79],
             (unsigned long)buf[104],
-            looks_ok ? "==> ROOT IS VALID" : "==> ROOT IS INVALID");
+            looks_ok ? GS(MSG_MOVE_CHK_ROOT_VALID)
+                     : GS(MSG_MOVE_CHK_ROOT_INVALID));
 
     es.es_TextFormat = (UBYTE *)msg;
     EasyRequest(win, &es, NULL);
@@ -288,24 +279,24 @@ static void draw_move_warn_text(struct Window *pw,
 
     SetAPen(rp, 1);
 
-    WTEXT("WARNING:  MOVING A PARTITION COPIES ALL DATA ON DISK.")
+    WTEXT(GS(MSG_MOVE_WARN_L1))
     y = (WORD)(y + lh / 2);
 
-    sprintf(line, "Partition %s (cyl %lu-%lu) will be physically",
+    sprintf(line, GS(MSG_MOVE_WARN_PART_FMT),
             pname, (unsigned long)lo, (unsigned long)hi);
     WTEXT(line)
-    WTEXT("copied to the cylinder you enter above.")
+    WTEXT(GS(MSG_MOVE_WARN_COPIED))
 
     y = (WORD)(y + lh / 2);
 
-    WTEXT("POWER LOSS OR CRASH DURING THIS PROCESS WILL")
-    WTEXT("PERMANENTLY DESTROY YOUR DATA.  No rollback.")
+    WTEXT(GS(MSG_MOVE_WARN_POWER1))
+    WTEXT(GS(MSG_MOVE_WARN_POWER2))
 
     y = (WORD)(y + lh / 2);
 
-    WTEXT("THIS WILL TAKE A VERY LONG TIME - PLAN FOR HOURS.")
-    WTEXT("1 GB ~ 20-60 min.  Large disks may take MUCH longer.")
-    WTEXT("Do NOT power off, interrupt or close DiskPart!")
+    WTEXT(GS(MSG_MOVE_WARN_TIME1))
+    WTEXT(GS(MSG_MOVE_WARN_TIME2))
+    WTEXT(GS(MSG_MOVE_WARN_TIME3))
 
 #undef WTEXT
 }
@@ -386,7 +377,7 @@ BOOL offer_move_partition(struct Window *win,
         ng.ng_TopEdge    = str_y;
         ng.ng_Width      = (UWORD)(gad_w / 2);
         ng.ng_Height     = row_h;
-        ng.ng_GadgetText = "New start cyl";
+        ng.ng_GadgetText = GS(MSG_MOVE_NEW_START_CYL);
         ng.ng_GadgetID   = MVDLG_NEWCYL;
         ng.ng_Flags      = PLACETEXT_LEFT;
         cyl_gad = CreateGadgetA(STRING_KIND, gctx, &ng, st);
@@ -398,7 +389,7 @@ BOOL offer_move_partition(struct Window *win,
         struct NewGadget ng;
         struct TagItem cbt[] = { { GTCB_Checked, FALSE }, { TAG_DONE, 0 } };
         static char chk_lbl[48];
-        sprintf(chk_lbl, "I have a current backup of %s", pi->drive_name);
+        sprintf(chk_lbl, GS(MSG_MOVE_BACKUP_CHK_FMT), pi->drive_name);
         memset(&ng, 0, sizeof(ng));
         ng.ng_VisualInfo = vi;
         ng.ng_TextAttr   = scr->Font;
@@ -428,14 +419,14 @@ BOOL offer_move_partition(struct Window *win,
         ng.ng_Flags      = PLACETEXT_IN;
 
         ng.ng_LeftEdge   = (UWORD)(bor_l + pad);
-        ng.ng_GadgetText = "Move Partition";
+        ng.ng_GadgetText = GS(MSG_MOVE_BTN_MOVE);
         ng.ng_GadgetID   = MVDLG_MOVE;
         btn_move = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
         if (!btn_move) goto mv_cleanup;
         prev = btn_move;
 
         ng.ng_LeftEdge   = (UWORD)(bor_l + pad * 2 + half);
-        ng.ng_GadgetText = "Cancel";
+        ng.ng_GadgetText = GS(MSG_CANCEL);
         ng.ng_GadgetID   = MVDLG_CANCEL;
         if (!CreateGadgetA(BUTTON_KIND, prev, &ng, bt)) goto mv_cleanup;
     }
@@ -446,7 +437,7 @@ BOOL offer_move_partition(struct Window *win,
             { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
             { WA_Width,     win_w  },
             { WA_Height,    win_h  },
-            { WA_Title,     (ULONG)"WARNING: Move Partition - Data Hazard" },
+            { WA_Title,     (ULONG)GS(MSG_MOVE_DLG_TITLE) },
             { WA_Gadgets,   (ULONG)glist },
             { WA_PubScreen, (ULONG)scr   },
             { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP | IDCMP_REFRESHWINDOW },
@@ -508,24 +499,23 @@ BOOL offer_move_partition(struct Window *win,
                     }
 
                     if (!backup_ok) {
-                        struct EasyStruct es = {
-                            sizeof(struct EasyStruct), 0,
-                            "Move Partition",
-                            "Tick the backup confirmation checkbox\n"
-                            "before proceeding.",
-                            "OK"
-                        };
+                        struct EasyStruct es;
+                        es.es_StructSize   = sizeof(struct EasyStruct);
+                        es.es_Flags        = 0;
+                        es.es_Title        = (UBYTE *)GS(MSG_MOVE_BTN_MOVE);
+                        es.es_TextFormat   = (UBYTE *)GS(MSG_MOVE_TICK_BACKUP);
+                        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                         EasyRequest(dlg, &es, NULL);
                         break;
                     }
 
                     if (!PART_CanMove(rdb, pi, new_lo, &new_hi_tmp, can_err)) {
-                        struct EasyStruct es = {
-                            sizeof(struct EasyStruct), 0,
-                            "Cannot Move Partition",
-                            can_err,
-                            "OK"
-                        };
+                        struct EasyStruct es;
+                        es.es_StructSize   = sizeof(struct EasyStruct);
+                        es.es_Flags        = 0;
+                        es.es_Title        = (UBYTE *)GS(MSG_MOVE_CANNOT_MOVE_TITLE);
+                        es.es_TextFormat   = (UBYTE *)can_err;
+                        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                         EasyRequest(dlg, &es, NULL);
                         break;
                     }
@@ -557,7 +547,7 @@ BOOL offer_move_partition(struct Window *win,
                 { WA_Top,       (ULONG)((pscr->Height - pw_h) / 2) },
                 { WA_Width,     pw_w  },
                 { WA_Height,    pw_h  },
-                { WA_Title,     (ULONG)"Moving Partition..." },
+                { WA_Title,     (ULONG)GS(MSG_MOVE_PROG_TITLE) },
                 { WA_PubScreen, (ULONG)pscr },
                 { WA_Flags,     WFLG_DRAGBAR },
                 { WA_IDCMP,     0 },
@@ -580,39 +570,31 @@ BOOL offer_move_partition(struct Window *win,
                 static char ok_msg[384];
                 if (wrote_rdb) {
                     sprintf(ok_msg,
-                        "Partition %s moved successfully.\n"
-                        "RDB written automatically.\n"
-                        "Reboot to use the moved partition.\n\n"
-                        "%s",
+                        GS(MSG_MOVE_OK_RDB_WRITTEN_FMT),
                         pi->drive_name, err_buf);
                 } else {
                     sprintf(ok_msg,
-                        "Partition %s moved successfully.\n"
-                        "WARNING: RDB write FAILED.\n"
-                        "Click Write to save the RDB.\n\n"
-                        "%s",
+                        GS(MSG_MOVE_OK_RDB_FAILED_FMT),
                         pi->drive_name, err_buf);
                 }
                 ok_es.es_StructSize   = sizeof(ok_es);
                 ok_es.es_Flags        = 0;
-                ok_es.es_Title        = (UBYTE *)"Partition Moved";
+                ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_MOVED_TITLE);
                 ok_es.es_TextFormat   = (UBYTE *)ok_msg;
-                ok_es.es_GadgetFormat = (UBYTE *)"OK";
+                ok_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                 EasyRequest(win, &ok_es, NULL);
                 result = TRUE;
             } else {
                 struct EasyStruct err_es;
                 static char err_msg[384];
                 sprintf(err_msg,
-                    "Move FAILED:\n%s\n\n"
-                    "Data may be partially written.\n"
-                    "Restore from backup before rebooting.",
+                    GS(MSG_MOVE_FAILED_FMT),
                     err_buf);
                 err_es.es_StructSize   = sizeof(err_es);
                 err_es.es_Flags        = 0;
-                err_es.es_Title        = (UBYTE *)"Move Failed";
+                err_es.es_Title        = (UBYTE *)GS(MSG_MOVE_FAILED_TITLE);
                 err_es.es_TextFormat   = (UBYTE *)err_msg;
-                err_es.es_GadgetFormat = (UBYTE *)"OK";
+                err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                 EasyRequest(win, &err_es, NULL);
             }
         }
@@ -718,13 +700,9 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
-    es.es_Title        = (UBYTE *)"EXPERIMENTAL: Grow Filesystem";
-    es.es_TextFormat   = (UBYTE *)
-        "This will write FFS bitmap blocks directly to disk.\n"
-        "This feature is EXPERIMENTAL and may corrupt data.\n"
-        "Always have a backup before proceeding.\n\n"
-        "Grow FFS filesystem on partition %s?";
-    es.es_GadgetFormat = (UBYTE *)"Grow Filesystem|Skip";
+    es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_TITLE);
+    es.es_TextFormat   = (UBYTE *)GS(MSG_MOVE_GROW_FFS_BODY_FMT);
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_GROW_GADGETS);
 
     if (EasyRequest(win, &es, NULL, pi->drive_name) != 1) return GROW_NONE;
 
@@ -739,15 +717,13 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
         static char busy_msg[256];
         pi->high_cyl = old_hi;                 /* undo the size change */
         sprintf(busy_msg,
-                "Cannot resize %s: the volume is in use (%s).\n"
-                "Close all its windows, files and shells, then resize again.\n"
-                "No changes were made.",
-                pi->drive_name, umerr[0] ? umerr : "in use");
+                GS(MSG_MOVE_BUSY_FMT),
+                pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
         busy_es.es_StructSize   = sizeof(busy_es);
         busy_es.es_Flags        = 0;
-        busy_es.es_Title        = (UBYTE *)"Resize - Volume In Use";
+        busy_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
         busy_es.es_TextFormat   = (UBYTE *)busy_msg;
-        busy_es.es_GadgetFormat = (UBYTE *)"OK";
+        busy_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &busy_es, NULL);
         return GROW_ABORTED;
     }
@@ -763,7 +739,7 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
             { WA_Width,     (ULONG)pw_w  },
             { WA_Height,    (ULONG)pw_h  },
-            { WA_Title,     (ULONG)"Growing FFS Filesystem..." },
+            { WA_Title,     (ULONG)GS(MSG_MOVE_GROW_FFS_PROG_TITLE) },
             { WA_PubScreen, (ULONG)scr   },
             { WA_Flags,     (ULONG)WFLG_DRAGBAR },
             { WA_IDCMP,     0             },
@@ -791,25 +767,20 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
                 MaterializeVolume(mnt);
                 rc = GROW_REMOUNTED;
                 sprintf(ok_msg,
-                        "FFS filesystem on %s grown and remounted as %s:\n"
-                        "The new space is available now - no reboot needed.\n"
-                        "Click Write to save the RDB so it survives a reboot.\n\n"
-                        "Diagnostic: %s",
+                        GS(MSG_MOVE_FFS_REMOUNTED_FMT),
                         pi->drive_name, mnt, errbuf);
             } else {
                 /* Grow worked but the volume couldn't be remounted live. */
                 rc = GROW_NEED_REBOOT;
                 sprintf(ok_msg,
-                        "FFS filesystem on %s grown successfully.\n"
-                        "Remount failed (%s) - Write RDB and REBOOT to use it.\n\n"
-                        "Diagnostic: %s",
-                        pi->drive_name, rmerr[0] ? rmerr : "?", errbuf);
+                        GS(MSG_MOVE_FFS_REMOUNT_FAIL_FMT),
+                        pi->drive_name, rmerr[0] ? rmerr : GS(MSG_MOVE_QMARK), errbuf);
             }
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
-            ok_es.es_Title        = (UBYTE *)"Filesystem Grown";
+            ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROWN_TITLE);
             ok_es.es_TextFormat   = (UBYTE *)ok_msg;
-            ok_es.es_GadgetFormat = (UBYTE *)"OK";
+            ok_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &ok_es, NULL);
         } else {
             struct EasyStruct err_es;
@@ -820,13 +791,13 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
             rc = GROW_ABORTED;
             sprintf(full_msg,
-                    "FFS grow failed - volume restored at its original size.\n%s",
+                    GS(MSG_MOVE_FFS_FAIL_RESTORED_FMT),
                     errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
-            err_es.es_Title        = (UBYTE *)"Filesystem Grow Failed";
+            err_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_FAIL_TITLE);
             err_es.es_TextFormat   = (UBYTE *)full_msg;
-            err_es.es_GadgetFormat = (UBYTE *)"OK";
+            err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &err_es, NULL);
         }
     }
@@ -848,13 +819,9 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
-    es.es_Title        = (UBYTE *)"EXPERIMENTAL: Grow Filesystem";
-    es.es_TextFormat   = (UBYTE *)
-        "This will update PFS3/PFS2 filesystem metadata directly on disk.\n"
-        "This feature is EXPERIMENTAL and may corrupt data.\n"
-        "Always have a backup before proceeding.\n\n"
-        "Grow PFS filesystem on partition %s?";
-    es.es_GadgetFormat = (UBYTE *)"Grow Filesystem|Skip";
+    es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_TITLE);
+    es.es_TextFormat   = (UBYTE *)GS(MSG_MOVE_GROW_PFS_BODY_FMT);
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_GROW_GADGETS);
 
     if (EasyRequest(win, &es, NULL, pi->drive_name) == 1) {
         struct Screen *scr = win->WScreen;
@@ -867,7 +834,7 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
             { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
             { WA_Width,     (ULONG)pw_w  },
             { WA_Height,    (ULONG)pw_h  },
-            { WA_Title,     (ULONG)"Growing PFS Filesystem..." },
+            { WA_Title,     (ULONG)GS(MSG_MOVE_GROW_PFS_PROG_TITLE) },
             { WA_PubScreen, (ULONG)scr   },
             { WA_Flags,     (ULONG)WFLG_DRAGBAR },
             { WA_IDCMP,     0             },
@@ -886,24 +853,22 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
             struct EasyStruct ok_es;
             static char ok_msg[512];
             sprintf(ok_msg,
-                    "PFS filesystem on %%s grown successfully.\n"
-                    "Write RDB to disk, then REBOOT to use the new space.\n\n"
-                    "Diagnostic: %s", errbuf);
+                    GS(MSG_MOVE_PFS_OK_FMT), errbuf);
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
-            ok_es.es_Title        = (UBYTE *)"Filesystem Grown";
+            ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROWN_TITLE);
             ok_es.es_TextFormat   = (UBYTE *)ok_msg;
-            ok_es.es_GadgetFormat = (UBYTE *)"OK";
+            ok_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &ok_es, NULL, pi->drive_name);
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
-            sprintf(full_msg, "PFS grow failed:\n%s", errbuf);
+            sprintf(full_msg, GS(MSG_MOVE_PFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
-            err_es.es_Title        = (UBYTE *)"Filesystem Grow Failed";
+            err_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_FAIL_TITLE);
             err_es.es_TextFormat   = (UBYTE *)full_msg;
-            err_es.es_GadgetFormat = (UBYTE *)"OK";
+            err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &err_es, NULL);
         }
         return GROW_NEED_REBOOT;
@@ -926,13 +891,9 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
-    es.es_Title        = (UBYTE *)"EXPERIMENTAL: Grow Filesystem";
-    es.es_TextFormat   = (UBYTE *)
-        "This will update SmartFileSystem metadata directly on disk.\n"
-        "This feature is EXPERIMENTAL and may corrupt data.\n"
-        "Always have a backup before proceeding.\n\n"
-        "Grow SFS filesystem on partition %s?";
-    es.es_GadgetFormat = (UBYTE *)"Grow Filesystem|Skip";
+    es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_TITLE);
+    es.es_TextFormat   = (UBYTE *)GS(MSG_MOVE_GROW_SFS_BODY_FMT);
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_GROW_GADGETS);
 
     if (EasyRequest(win, &es, NULL, pi->drive_name) == 1) {
         struct Screen *scr = win->WScreen;
@@ -945,7 +906,7 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
             { WA_Width,     (ULONG)pw_w  },
             { WA_Height,    (ULONG)pw_h  },
-            { WA_Title,     (ULONG)"Growing SFS Filesystem..." },
+            { WA_Title,     (ULONG)GS(MSG_MOVE_GROW_SFS_PROG_TITLE) },
             { WA_PubScreen, (ULONG)scr   },
             { WA_Flags,     (ULONG)WFLG_DRAGBAR },
             { WA_IDCMP,     0             },
@@ -966,38 +927,28 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             static char ok_msg[512];
             if (wrote_rdb) {
                 sprintf(ok_msg,
-                        "SFS filesystem on %s grown successfully.\n"
-                        "RDB written automatically.\n"
-                        "%s: is INHIBITED (inaccessible) until reboot.\n"
-                        "Reboot NOW to use the new space.\n\n"
-                        "Diagnostic: %s",
+                        GS(MSG_MOVE_SFS_OK_RDB_WRITTEN_FMT),
                         pi->drive_name, pi->drive_name, errbuf);
             } else {
                 sprintf(ok_msg,
-                        "SFS filesystem on %s grown successfully.\n"
-                        "WARNING: RDB write FAILED.\n"
-                        "Click Write to save the RDB before rebooting.\n"
-                        "%s: is INHIBITED (inaccessible) until reboot.\n"
-                        "1. Click Write (save RDB)\n"
-                        "2. Reboot NOW\n\n"
-                        "Diagnostic: %s",
+                        GS(MSG_MOVE_SFS_OK_RDB_FAILED_FMT),
                         pi->drive_name, pi->drive_name, errbuf);
             }
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
-            ok_es.es_Title        = (UBYTE *)"Filesystem Grown";
+            ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROWN_TITLE);
             ok_es.es_TextFormat   = (UBYTE *)ok_msg;
-            ok_es.es_GadgetFormat = (UBYTE *)"OK";
+            ok_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &ok_es, NULL);
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
-            sprintf(full_msg, "SFS grow failed:\n%s", errbuf);
+            sprintf(full_msg, GS(MSG_MOVE_SFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
-            err_es.es_Title        = (UBYTE *)"Filesystem Grow Failed";
+            err_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_FAIL_TITLE);
             err_es.es_TextFormat   = (UBYTE *)full_msg;
-            err_es.es_GadgetFormat = (UBYTE *)"OK";
+            err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &err_es, NULL);
         }
         return GROW_NEED_REBOOT;

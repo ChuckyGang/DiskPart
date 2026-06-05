@@ -38,6 +38,7 @@
 #include "cli.h"
 #include "clib.h"
 #include "devices.h"
+#include "locale_support.h"
 #include "partview.h"
 #include "rdb.h"
 #include "version.h"
@@ -170,8 +171,8 @@ static BOOL confirm_exit(struct Window *win)
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
     es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
-    es.es_TextFormat   = (UBYTE *)"Exit DiskPart?";
-    es.es_GadgetFormat = (UBYTE *)"Yes|No";
+    es.es_TextFormat   = (UBYTE *)GS(MSG_MAIN_EXIT_BODY);
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_YES_NO);
     return (BOOL)(EasyRequestArgs(win, &es, NULL, NULL) == 1);
 }
 
@@ -187,6 +188,7 @@ static WORD run_devname_window(void)
     struct Window  *win       = NULL;
     WORD            sel       = -1;
     WORD            result    = -1;
+    static char     dev_title[80];   /* Intuition keeps the pointer */
     /* Sticky across window reopens so a user-enabled Show All survives a
        round-trip through the partition editor.  Otherwise devices outside
        the default keyword filter (e.g. warpSD.device) appear to vanish
@@ -276,7 +278,7 @@ static WORD run_devname_window(void)
             ng.ng_LeftEdge   = bor_l + pad;
             ng.ng_Width      = inner_w - pad * 2;
             ng.ng_Height     = btn_h;
-            ng.ng_GadgetText = "Manual device name:";
+            ng.ng_GadgetText = GS(MSG_MAIN_MANUAL_DEV);
             ng.ng_GadgetID   = GID_MANUAL;
             ng.ng_Flags      = PLACETEXT_ABOVE;
             {
@@ -294,29 +296,32 @@ static WORD run_devname_window(void)
             ng.ng_Width   = btn_w;
 
             ng.ng_LeftEdge   = bor_l + pad;
-            ng.ng_GadgetText = "Select";
+            ng.ng_GadgetText = GS(MSG_MAIN_SELECT);
             ng.ng_GadgetID   = GID_SELECT;
             prev = CreateGadgetA(BUTTON_KIND, str_gad, &ng, bt);
             if (!prev) goto cleanup;
 
             ng.ng_LeftEdge   = bor_l + pad + btn_w + pad;
-            ng.ng_GadgetText = show_all ? "Filter" : "Show All";
+            ng.ng_GadgetText = show_all ? GS(MSG_MAIN_FILTER) : GS(MSG_MAIN_SHOWALL);
             ng.ng_GadgetID   = GID_SHOWALL;
             showall_gad = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
             if (!showall_gad) goto cleanup;
 
             ng.ng_LeftEdge   = bor_l + pad + (btn_w + pad) * 2;
-            ng.ng_GadgetText = "Use Image";
+            ng.ng_GadgetText = GS(MSG_MAIN_USE_IMAGE);
             ng.ng_GadgetID   = GID_USEIMAGE;
             prev = CreateGadgetA(BUTTON_KIND, showall_gad, &ng, bt);
             if (!prev) goto cleanup;
 
             ng.ng_LeftEdge   = bor_l + pad + (btn_w + pad) * 3;
-            ng.ng_GadgetText = "Quit";
+            ng.ng_GadgetText = GS(MSG_MAIN_QUIT);
             ng.ng_GadgetID   = GID_QUIT;
             prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
             if (!prev) goto cleanup;
         }
+
+        sprintf(dev_title, "%s%s", DISKPART_VERTITLE,
+                GS(MSG_MAIN_TITLE_SELECT_DEV));
 
         {
             struct TagItem win_tags[] = {
@@ -324,7 +329,7 @@ static WORD run_devname_window(void)
                 { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
                 { WA_Width,     win_w },
                 { WA_Height,    win_h },
-                { WA_Title,     (ULONG)DISKPART_VERTITLE " - Select Device" },
+                { WA_Title,     (ULONG)dev_title },
                 { WA_Gadgets,   (ULONG)glist },
                 { WA_PubScreen, (ULONG)scr },
                 { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
@@ -388,7 +393,7 @@ static WORD run_devname_window(void)
                                                         sel_map, show_all);
                         reattach[0].ti_Data = (ULONG)&name_list;
                         GT_SetGadgetAttrsA(lv_gad, win, NULL, reattach);
-                        relabel[0].ti_Data  = (ULONG)(show_all ? "Filter" : "Show All");
+                        relabel[0].ti_Data  = (ULONG)(show_all ? GS(MSG_MAIN_FILTER) : GS(MSG_MAIN_SHOWALL));
                         GT_SetGadgetAttrsA(showall_gad, win, NULL, relabel);
                         RefreshGList(showall_gad, win, NULL, 1);
                         sel = -1;
@@ -469,7 +474,7 @@ static void probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
 
     switch (phase) {
     case PROBE_START:
-        sprintf(buf, "Testing unit %lu...", (unsigned long)unit);
+        sprintf(buf, GS(MSG_MAIN_TESTING_UNIT_FMT), (unsigned long)unit);
         /* Pad to 60 chars so previous longer text is fully erased */
         len = (WORD)strlen(buf);
         for (pad = len; pad < 60; pad++) buf[pad] = ' ';
@@ -481,8 +486,8 @@ static void probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
 
     case PROBE_FOUND:
         if (pw->results >= PROBE_WIN_MAX_RESULTS) break;
-        sprintf(buf, "Unit %lu  %s", (unsigned long)unit,
-                info ? info : "found");
+        sprintf(buf, GS(MSG_MAIN_UNIT_FMT), (unsigned long)unit,
+                info ? info : GS(MSG_MAIN_FOUND));
         SetAPen(rp, 1);
         Move(rp, pw->x, pw->y_result0 + (WORD)pw->results * (WORD)pw->line_h);
         Text(rp, buf, strlen(buf));
@@ -502,7 +507,10 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
     UWORD fh, bor_l, bor_t, bor_r, bor_b, pad, lh, win_w, win_h, rows;
 
     memset(pw, 0, sizeof(*pw));
-    sprintf(pw->title, DISKPART_VERTITLE " - Probing %s", devname);
+    {
+        int n = sprintf(pw->title, "%s", DISKPART_VERTITLE);
+        sprintf(pw->title + n, GS(MSG_MAIN_TITLE_PROBING_FMT), devname);
+    }
 
     scr = LockPubScreen(NULL);
     if (!scr) return;
@@ -550,7 +558,7 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
     /* Draw the header line (row 0) now; status/results come via callback */
     {
         char hdr[80];
-        sprintf(hdr, "Device: %s", devname);
+        sprintf(hdr, GS(MSG_MAIN_DEVICE_FMT), devname);
         SetAPen(pw->win->RPort, 1);
         Move(pw->win->RPort, pw->x, pw->y_status);
         Text(pw->win->RPort, hdr, strlen(hdr));
@@ -595,7 +603,10 @@ static WORD run_unitsel_window(const char *devname)
         AddTail(&ulist, &unit_nodes[i]);
     }
 
-    sprintf(win_title, DISKPART_VERTITLE " - %s", devname);
+    {
+        int n = sprintf(win_title, "%s", DISKPART_VERTITLE);
+        sprintf(win_title + n, GS(MSG_MAIN_TITLE_DASH_FMT), devname);
+    }
 
     scr = LockPubScreen(NULL);
     if (!scr) goto cleanup;
@@ -662,13 +673,13 @@ static WORD run_unitsel_window(const char *devname)
                     ng.ng_Height     = btn_h;
                     ng.ng_Width      = half_w;
                     ng.ng_LeftEdge   = bor_l + pad;
-                    ng.ng_GadgetText = "Select";
+                    ng.ng_GadgetText = GS(MSG_MAIN_SELECT);
                     ng.ng_GadgetID   = GID_SELECT;
                     sel_gad = CreateGadgetA(BUTTON_KIND, lv_gad, &ng, bt);
                     if (!sel_gad) goto cleanup;
 
                     ng.ng_LeftEdge   = bor_l + pad + half_w + pad;
-                    ng.ng_GadgetText = "Back";
+                    ng.ng_GadgetText = GS(MSG_MAIN_BACK);
                     ng.ng_GadgetID   = GID_QUIT;
                     back_gad = CreateGadgetA(BUTTON_KIND, sel_gad, &ng, bt);
                     if (!back_gad) goto cleanup;
@@ -795,17 +806,16 @@ static BOOL pick_image_path(char *out, ULONG outsz)
         struct EasyStruct es;
         es.es_StructSize   = sizeof(es);
         es.es_Flags        = 0;
-        es.es_Title        = (UBYTE *)"DiskPart";
-        es.es_TextFormat   = (UBYTE *)"asl.library not available.\n"
-                                       "Cannot open file requester.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_Title        = (UBYTE *)GS(MSG_INFO_TITLE);
+        es.es_TextFormat   = (UBYTE *)GS(MSG_MAIN_ASL_UNAVAIL);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequestArgs(NULL, &es, NULL, NULL);
         return FALSE;
     }
 
     {
         struct TagItem asl_tags[] = {
-            { ASLFR_TitleText,    (ULONG)"Select or name an image file" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_MAIN_ASL_TITLE) },
             { ASLFR_DoSaveMode,   TRUE },
             { ASLFR_InitialDrawer,(ULONG)"" },
             { ASLFR_InitialFile,  (ULONG)"" },
@@ -864,8 +874,7 @@ static BOOL image_size_dialog(const char *path, char *out, ULONG outsz)
     BOOL            ok    = FALSE;
     static char     prompt[300];
 
-    sprintf(prompt, "File \"%s\" does not exist.\nEnter size for the new image:",
-            path);
+    sprintf(prompt, GS(MSG_MAIN_IMG_NOEXIST_FMT), path);
 
     scr = LockPubScreen(NULL);
     if (!scr) return FALSE;
@@ -911,7 +920,7 @@ static BOOL image_size_dialog(const char *path, char *out, ULONG outsz)
             ng.ng_TopEdge    = str_y;
             ng.ng_Width      = inner_w - pad * 2;
             ng.ng_Height     = btn_h;
-            ng.ng_GadgetText = "Size (e.g. 100M, 2G):";
+            ng.ng_GadgetText = GS(MSG_MAIN_SIZE_PROMPT);
             ng.ng_GadgetID   = GID_SZ_STR;
             ng.ng_Flags      = PLACETEXT_ABOVE;
             str_gad = CreateGadgetA(STRING_KIND, gctx, &ng, str_tags);
@@ -923,13 +932,13 @@ static BOOL image_size_dialog(const char *path, char *out, ULONG outsz)
             ng.ng_Width      = btn_w;
 
             ng.ng_LeftEdge   = bor_l + pad;
-            ng.ng_GadgetText = "Create";
+            ng.ng_GadgetText = GS(MSG_MAIN_CREATE);
             ng.ng_GadgetID   = GID_SZ_OK;
             prev = CreateGadgetA(BUTTON_KIND, str_gad, &ng, bt);
             if (!prev) goto done;
 
             ng.ng_LeftEdge   = bor_l + pad + btn_w + pad;
-            ng.ng_GadgetText = "Cancel";
+            ng.ng_GadgetText = GS(MSG_CANCEL);
             ng.ng_GadgetID   = GID_SZ_CANC;
             prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
             if (!prev) goto done;
@@ -941,7 +950,7 @@ static BOOL image_size_dialog(const char *path, char *out, ULONG outsz)
                 { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
                 { WA_Width,     win_w },
                 { WA_Height,    win_h },
-                { WA_Title,     (ULONG)"DiskPart - New Image" },
+                { WA_Title,     (ULONG)GS(MSG_MAIN_NEW_IMAGE_TITLE) },
                 { WA_Gadgets,   (ULONG)glist },
                 { WA_PubScreen, (ULONG)scr },
                 { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
@@ -1048,9 +1057,9 @@ static BOOL prepare_image(const char *path)
         struct EasyStruct es;
         es.es_StructSize   = sizeof(es);
         es.es_Flags        = 0;
-        es.es_Title        = (UBYTE *)"DiskPart";
-        es.es_TextFormat   = (UBYTE *)"Size must be at least 512 bytes.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_Title        = (UBYTE *)GS(MSG_INFO_TITLE);
+        es.es_TextFormat   = (UBYTE *)GS(MSG_MAIN_SIZE_MIN);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequestArgs(NULL, &es, NULL, NULL);
         return FALSE;
     }
@@ -1059,9 +1068,9 @@ static BOOL prepare_image(const char *path)
         struct EasyStruct es;
         es.es_StructSize   = sizeof(es);
         es.es_Flags        = 0;
-        es.es_Title        = (UBYTE *)"DiskPart";
-        es.es_TextFormat   = (UBYTE *)"Size exceeds the 2 GB dos.library image-file limit.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_Title        = (UBYTE *)GS(MSG_INFO_TITLE);
+        es.es_TextFormat   = (UBYTE *)GS(MSG_MAIN_SIZE_MAX);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequestArgs(NULL, &es, NULL, NULL);
         return FALSE;
     }
@@ -1070,12 +1079,12 @@ static BOOL prepare_image(const char *path)
     if (!bd) {
         struct EasyStruct es;
         static char       body[300];
-        sprintf(body, "Failed to create image file:\n%s", path);
+        sprintf(body, GS(MSG_MAIN_IMG_CREATE_FAIL_FMT), path);
         es.es_StructSize   = sizeof(es);
         es.es_Flags        = 0;
-        es.es_Title        = (UBYTE *)"DiskPart";
+        es.es_Title        = (UBYTE *)GS(MSG_INFO_TITLE);
         es.es_TextFormat   = (UBYTE *)body;
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequestArgs(NULL, &es, NULL, NULL);
         return FALSE;
     }
@@ -1092,6 +1101,12 @@ int main(void)
 
     DOSBase = (struct DosLibrary *)OpenLibrary("dos.library", 37);
     if (!DOSBase) goto cleanup;
+
+    /* Localization: opens locale.library (v38+) + DiskPart.catalog when
+     * present.  No-op on Kickstart 2.04 (v37) - GS() then falls back to the
+     * built-in English strings.  Opened before CLI dispatch so CLI/script
+     * messages are localized too. */
+    LocaleOpen();
 
     /* Opened before the CLI dispatch below so quick-format works in CLI/script
        mode too (a ROM library; not fatal if absent). */
@@ -1150,23 +1165,14 @@ int main(void)
         if (!skip_warning) {
             struct EasyStruct es;
             char body[512];
-            sprintf(body,
-                "EXPERIMENTAL SOFTWARE\n"
-                "DiskPart %s  (built %s)\n\n"
-                "DiskPart can modify the partition table\n"
-                "of your hard drive or other block device.\n\n"
-                "Incorrect use WILL cause permanent data loss.\n\n"
-                "Make sure you have a FULL BACKUP of any disk\n"
-                "you intend to work with before proceeding.\n\n"
-                "The author accepts NO responsibility for\n"
-                "any loss of data caused by this software.",
+            sprintf(body, GS(MSG_MAIN_WARN_BODY),
                 DISKPART_VERSION, DiskPart_BuildStamp);
 
             es.es_StructSize   = sizeof(es);
             es.es_Flags        = 0;
-            es.es_Title        = (UBYTE *)"DiskPart - WARNING";
+            es.es_Title        = (UBYTE *)GS(MSG_MAIN_WARN_TITLE);
             es.es_TextFormat   = (UBYTE *)body;
-            es.es_GadgetFormat = (UBYTE *)"I have a backup - Continue|Quit";
+            es.es_GadgetFormat = (UBYTE *)GS(MSG_MAIN_WARN_GADGETS);
             if (EasyRequestArgs(NULL, &es, NULL, NULL) != 1)
                 goto cleanup;
         }
@@ -1225,6 +1231,7 @@ cleanup:
     if (GadToolsBase)  CloseLibrary(GadToolsBase);
     if (GfxBase)       CloseLibrary((struct Library *)GfxBase);
     if (IntuitionBase) CloseLibrary((struct Library *)IntuitionBase);
+    LocaleClose();
     if (DOSBase)       CloseLibrary((struct Library *)DOSBase);
 
     return result;

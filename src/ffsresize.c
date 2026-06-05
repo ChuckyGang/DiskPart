@@ -49,6 +49,7 @@
 #include "clib.h"
 #include "rdb.h"
 #include "ffsresize.h"
+#include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
 /* AmigaDOS constants                                                   */
@@ -181,12 +182,12 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG nlongs     = eff_bsz / 4;
 
     if (heads == 0 || sectors == 0) {
-        sprintf(err_buf, "Invalid partition geometry (heads=%lu secs=%lu)",
+        sprintf(err_buf, GS(MSG_FFS_INVALID_GEOMETRY),
                 (unsigned long)heads, (unsigned long)sectors);
         goto done;
     }
     if (dev_bsz != 512) {
-        sprintf(err_buf, "Only 512-byte device sectors supported (got %lu)",
+        sprintf(err_buf, GS(MSG_FFS_ONLY_512_SECTORS),
                 (unsigned long)dev_bsz);
         goto done;
     }
@@ -199,8 +200,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
        data-only partitions are unaffected. */
     if (eff_bsz < 512 || eff_bsz > 16384 || (eff_bsz & (eff_bsz - 1)) != 0) {
         sprintf(err_buf,
-                "Unsupported FS block size %lu (spb=%lu).\n"
-                "Must be a power of two in 512..16384.",
+                GS(MSG_FFS_UNSUPPORTED_BLOCKSIZE),
                 (unsigned long)eff_bsz, (unsigned long)spb);
         goto done;
     }
@@ -230,15 +230,13 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     if (old_blocks <= reserved) {
         sprintf(err_buf,
-                "Partition is too small to contain a valid FFS filesystem\n"
-                "(old_blocks=%lu <= reserved=%lu).",
+                GS(MSG_FFS_PART_TOO_SMALL),
                 (unsigned long)old_blocks, (unsigned long)reserved);
         goto done;
     }
     if (new_blocks <= reserved) {
         sprintf(err_buf,
-                "New partition size is too small for FFS\n"
-                "(new_blocks=%lu <= reserved=%lu).",
+                GS(MSG_FFS_NEWPART_TOO_SMALL),
                 (unsigned long)new_blocks, (unsigned long)reserved);
         goto done;
     }
@@ -260,7 +258,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     bm_blknums = (ULONG *)AllocVec(max_bm_list * sizeof(ULONG),
                                     MEMF_PUBLIC | MEMF_CLEAR);
     if (!boot_buf || !root_buf || !bm_buf || !bm_blknums) {
-        sprintf(err_buf, "Out of memory");
+        sprintf(err_buf, GS(MSG_FFS_OUT_OF_MEMORY));
         goto done;
     }
 
@@ -273,21 +271,21 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
        If the partition isn't mounted, Inhibit() returns FALSE and we
        continue anyway - direct access to an unmounted partition is safe. */
     sprintf(inh_name, "%s:", pi->drive_name);
-    FFS_PROGRESS("Inhibiting filesystem handler...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_INHIBITING));
     did_inhibit = Inhibit((STRPTR)inh_name, DOSTRUE);
 
     /* ---------------------------------------------------------------- */
     /* Phase 1 - read + validate boot block, get root block number      */
     /* ---------------------------------------------------------------- */
-    FFS_PROGRESS("Reading boot block...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_READING_BOOT));
 
     if (!read_fs_block(bd, part_abs, 0, spb, boot_buf)) {
-        sprintf(err_buf, "Cannot read partition boot block (abs %lu)",
+        sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_BOOT),
                 (unsigned long)part_abs);
         goto done;
     }
     if ((boot_buf[BL_DOSTYPE] & 0xFFFFFF00UL) != 0x444F5300UL) {
-        sprintf(err_buf, "Boot block DosType mismatch (0x%08lX)",
+        sprintf(err_buf, GS(MSG_FFS_BOOT_DOSTYPE_MISMATCH),
                 (unsigned long)boot_buf[BL_DOSTYPE]);
         goto done;
     }
@@ -302,18 +300,17 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Phase 2 - read + validate root block                             */
     /* ---------------------------------------------------------------- */
-    FFS_PROGRESS("Reading root block...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_READING_ROOT));
 
     if (!read_fs_block(bd, part_abs, root_blk, spb, root_buf)) {
-        sprintf(err_buf, "Cannot read root block (abs %lu, rel %lu)",
+        sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_ROOT),
                 (unsigned long)(part_abs + root_blk * spb),
                 (unsigned long)root_blk);
         goto done;
     }
     if (root_buf[RL_TYPE] != T_SHORT || root_buf[RL_SEC_TYPE(nlongs)] != ST_ROOT) {
         sprintf(err_buf,
-                "Root block wrong type/sec_type (0x%lX/0x%lX)\n"
-                "partabs=%lu bb[2]=%lu rootblk=%lu old_blks=%lu spb=%lu",
+                GS(MSG_FFS_ROOT_WRONG_TYPE),
                 (unsigned long)root_buf[RL_TYPE],
                 (unsigned long)root_buf[RL_SEC_TYPE(nlongs)],
                 (unsigned long)part_abs,
@@ -329,13 +326,13 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG csum = ffs_checksum(root_buf, nlongs);
         root_buf[RL_CHKSUM] = save;
         if (csum != save) {
-            sprintf(err_buf, "Root block checksum invalid (stored 0x%08lX calc 0x%08lX)",
+            sprintf(err_buf, GS(MSG_FFS_ROOT_CHECKSUM_INVALID),
                     (unsigned long)save, (unsigned long)csum);
             goto done;
         }
     }
     if (root_buf[RL_BM_FLAG(nlongs)] != BM_VALID) {
-        sprintf(err_buf, "Bitmap not valid in root block (flag=0x%08lX)",
+        sprintf(err_buf, GS(MSG_FFS_BITMAP_NOT_VALID),
                 (unsigned long)root_buf[RL_BM_FLAG(nlongs)]);
         goto done;
     }
@@ -344,7 +341,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* Phase 3 - collect existing bm block numbers into flat array,     */
     /*           track the ext block chain for later rewriting          */
     /* ---------------------------------------------------------------- */
-    FFS_PROGRESS("Reading bitmap chain...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_READING_BITMAP));
 
     ULONG bm_count    = 0;
     /* ext chain info: block numbers and per-block used-slot counts */
@@ -364,7 +361,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG ext_blk = root_buf[RL_BM_EXT(nlongs)];
         while (ext_blk != 0 && ext_count < MAX_EXT_CHAIN) {
             if (!read_fs_block(bd, part_abs, ext_blk, spb, bm_buf)) {
-                sprintf(err_buf, "Cannot read bm_ext block %lu",
+                sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_EXT),
                         (unsigned long)(part_abs + ext_blk * spb));
                 goto done;
             }
@@ -382,7 +379,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     }
 
     if (bm_count < old_bm_need) {
-        sprintf(err_buf, "Bitmap chain has %lu blocks, expected at least %lu",
+        sprintf(err_buf, GS(MSG_FFS_BITMAP_CHAIN_SHORT),
                 (unsigned long)bm_count, (unsigned long)old_bm_need);
         goto done;
     }
@@ -412,8 +409,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         need_new_ext = TRUE;
         if (num_new_ext > MAX_EXT_CHAIN) {
             sprintf(err_buf,
-                    "Grow requires %lu new ext blocks (max %u). "
-                    "Partition is too large for this implementation.",
+                    GS(MSG_FFS_TOO_MANY_EXT),
                     (unsigned long)num_new_ext, (unsigned)MAX_EXT_CHAIN);
             goto done;
         }
@@ -424,7 +420,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             new_ext_relblk[ei] = reserved + (new_bm_need - 1) * bpbm + 1 + ei;
             if (new_ext_relblk[ei] >= new_blocks) {
                 sprintf(err_buf,
-                        "No room in new partition space for ext block %lu",
+                        GS(MSG_FFS_NO_ROOM_EXT),
                         (unsigned long)ei);
                 goto done;
             }
@@ -433,7 +429,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* ---------------------------------------------------------------- */
     /* Phase 5 - update the last EXISTING bm block                      */
-    FFS_PROGRESS("Extending last bitmap block...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_EXTENDING_BM));
     /*                                                                   */
     /* Blocks old_blocks .. min(old_bm_need*bpbm, new_blocks) - 1       */
     /* were beyond the old partition end; mark them free now.           */
@@ -447,7 +443,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
         if (old_blocks < free_end) {
             if (!read_fs_block(bd, part_abs, bm_blknums[bm_idx], spb, bm_buf)) {
-                sprintf(err_buf, "Cannot read last bm block %lu",
+                sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_LAST_BM),
                         (unsigned long)bm_blknums[bm_idx]);
                 goto done;
             }
@@ -460,7 +456,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             bm_buf[0] = 0;
             bm_buf[0] = ffs_checksum(bm_buf, nlongs);
             if (!write_fs_block(bd, part_abs, bm_blknums[bm_idx], spb, bm_buf)) {
-                sprintf(err_buf, "Failed to write updated bm block %lu",
+                sprintf(err_buf, GS(MSG_FFS_WRITE_UPDATED_BM_FAIL),
                         (unsigned long)bm_blknums[bm_idx]);
                 goto done;
             }
@@ -469,7 +465,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* ---------------------------------------------------------------- */
     /* Phase 6 - create new bm blocks                                   */
-    FFS_PROGRESS("Writing new bitmap blocks...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_WRITING_BM));
     /*                                                                   */
     /* New bm block N (N = old_bm_need .. new_bm_need-1) is placed at   */
     /* partition block N * bpbm (natural position, always in new space). */
@@ -517,7 +513,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         bm_buf[0] = ffs_checksum(bm_buf, nlongs);
 
         if (!write_fs_block(bd, part_abs, abs_blk, spb, bm_buf)) {
-            sprintf(err_buf, "Failed to write new bm block %lu (abs %lu)",
+            sprintf(err_buf, GS(MSG_FFS_WRITE_NEW_BM_FAIL),
                     (unsigned long)abs_blk,
                     (unsigned long)(part_abs + abs_blk * spb));
             goto done;
@@ -527,7 +523,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Phase 7 - add new bm block numbers to the chain                  */
     /* ---------------------------------------------------------------- */
-    FFS_PROGRESS("Updating bitmap chain in root...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_UPDATING_CHAIN));
 
     /* The new numbers are bm_blknums[old_bm_need .. new_bm_need-1].
        Fill slots in order: root bm_pages[] first, then last existing ext
@@ -544,7 +540,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* Existing last ext block free slots */
         if (added < num_new_bm && ext_count > 0) {
             if (!read_fs_block(bd, part_abs, ext_relblk[ext_count - 1], spb, bm_buf)) {
-                sprintf(err_buf, "Cannot re-read last ext block %lu",
+                sprintf(err_buf, GS(MSG_FFS_REREAD_EXT_FAIL),
                         (unsigned long)ext_relblk[ext_count - 1]);
                 goto done;
             }
@@ -557,7 +553,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             bm_buf[nlongs - 1] = need_new_ext ? new_ext_relblk[0] : 0;
             /* ext blocks have no checksum field */
             if (!write_fs_block(bd, part_abs, ext_relblk[ext_count - 1], spb, bm_buf)) {
-                sprintf(err_buf, "Failed to write updated ext block %lu",
+                sprintf(err_buf, GS(MSG_FFS_WRITE_UPDATED_EXT_FAIL),
                         (unsigned long)ext_relblk[ext_count - 1]);
                 goto done;
             }
@@ -577,7 +573,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                 bm_buf[nlongs - 1] = (ei + 1 < num_new_ext) ? new_ext_relblk[ei + 1] : 0;
                 /* ext blocks have no checksum field */
                 if (!write_fs_block(bd, part_abs, new_ext_relblk[ei], spb, bm_buf)) {
-                    sprintf(err_buf, "Failed to write new ext block %lu (abs %lu)",
+                    sprintf(err_buf, GS(MSG_FFS_WRITE_NEW_EXT_FAIL),
                             (unsigned long)new_ext_relblk[ei],
                             (unsigned long)(part_abs + new_ext_relblk[ei] * spb));
                     goto done;
@@ -597,7 +593,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* ---------------------------------------------------------------- */
     /* Phase 8 - relocate root block to new_blocks/2 and write it      */
-    FFS_PROGRESS("Relocating root block...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_RELOCATING_ROOT));
     /*                                                                   */
     /* After the RDB is updated with new high_cyl, AmigaOS FFS computes */
     /* the root block position as new_blocks/2 from the DosEnvec.  The  */
@@ -620,7 +616,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
              off    = (block - reserved) % bpbm
            Using any other formula selects the WRONG bit. */
         if (new_root < reserved) {
-            sprintf(err_buf, "new_root %lu < reserved %lu - impossible geometry",
+            sprintf(err_buf, GS(MSG_FFS_NEWROOT_LT_RESERVED),
                     (unsigned long)new_root, (unsigned long)reserved);
             goto done;
         }
@@ -631,7 +627,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
             if (bm_idx_nr >= bm_count) {
                 sprintf(err_buf,
-                        "new_root bm index %lu out of range (bm_count=%lu)",
+                        GS(MSG_FFS_NEWROOT_BM_OOR),
                         (unsigned long)bm_idx_nr, (unsigned long)bm_count);
                 goto done;
             }
@@ -648,7 +644,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                The "is target free?" sanity check is only meaningful when we
                are relocating to a new position; skip it for in-place. */
             if (!read_fs_block(bd, part_abs, bm_blknums[bm_idx_nr], spb, bm_buf)) {
-                sprintf(err_buf, "Cannot read bm block %lu (root relocation)",
+                sprintf(err_buf, GS(MSG_FFS_READ_BM_RELOC_FAIL),
                         (unsigned long)bm_blknums[bm_idx_nr]);
                 goto done;
             }
@@ -671,7 +667,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             bm_buf[0] = 0;
             bm_buf[0] = ffs_checksum(bm_buf, nlongs);
             if (!write_fs_block(bd, part_abs, bm_blknums[bm_idx_nr], spb, bm_buf)) {
-                sprintf(err_buf, "Failed to write bm block %lu (root relocation)",
+                sprintf(err_buf, GS(MSG_FFS_WRITE_BM_RELOC_FAIL),
                         (unsigned long)bm_blknums[bm_idx_nr]);
                 goto done;
             }
@@ -683,7 +679,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        just skip freeing it (it stays "used" which is safe) */
                 } else {
                     if (!read_fs_block(bd, part_abs, bm_blknums[bm_idx_or], spb, bm_buf)) {
-                        sprintf(err_buf, "Cannot read bm block %lu (free old root)",
+                        sprintf(err_buf, GS(MSG_FFS_READ_BM_FREEROOT_FAIL),
                                 (unsigned long)bm_blknums[bm_idx_or]);
                         goto done;
                     }
@@ -694,7 +690,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                     bm_buf[0] = 0;
                     bm_buf[0] = ffs_checksum(bm_buf, nlongs);
                     if (!write_fs_block(bd, part_abs, bm_blknums[bm_idx_or], spb, bm_buf)) {
-                        sprintf(err_buf, "Failed to write bm block %lu (free old root)",
+                        sprintf(err_buf, GS(MSG_FFS_WRITE_BM_FREEROOT_FAIL),
                                 (unsigned long)bm_blknums[bm_idx_or]);
                         goto done;
                     }
@@ -734,7 +730,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         root_buf[RL_CHKSUM]          = 0;
         root_buf[RL_CHKSUM]          = ffs_checksum(root_buf, nlongs);
         if (!write_fs_block(bd, part_abs, new_root, spb, root_buf)) {
-            sprintf(err_buf, "Failed to write root block at %lu (abs %lu)",
+            sprintf(err_buf, GS(MSG_FFS_WRITE_ROOT_FAIL),
                     (unsigned long)new_root,
                     (unsigned long)(part_abs + new_root * spb));
             goto done;
@@ -750,8 +746,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             ULONG save_cs = root_buf[RL_CHKSUM];
             if (!read_fs_block(bd, part_abs, new_root, spb, bm_buf)) {
                 sprintf(err_buf,
-                        "Root write failed: cannot read back abs %lu.\n"
-                        "The filesystem was not modified.",
+                        GS(MSG_FFS_ROOT_WRITE_READBACK_FAIL),
                         (unsigned long)(part_abs + new_root * spb));
                 goto done;
             }
@@ -759,10 +754,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                 bm_buf[RL_SEC_TYPE(nlongs)]  != (ULONG)ST_ROOT ||
                 bm_buf[RL_CHKSUM]            != save_cs) {
                 sprintf(err_buf,
-                        "Root write verification failed at abs %lu.\n"
-                        "The block was not written or was overwritten before\n"
-                        "verification (Inhibit may have failed for '%s').\n"
-                        "The filesystem was not modified.",
+                        GS(MSG_FFS_ROOT_WRITE_VERIFY_FAIL),
                         (unsigned long)(part_abs + new_root * spb),
                         inh_name);
                 goto done;
@@ -772,7 +764,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* ---------------------------------------------------------------- */
     /* Phase 9b - update fhb_Parent in all of root's direct children   */
-    FFS_PROGRESS("Updating file/directory parent pointers...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_UPDATING_PARENTS));
     /*                                                                   */
     /* FFS v40 (exinfo.asm:682, 1024) checks:                           */
     /*   cmp.l vfhb_Parent(a0), <current_directory_key>                 */
@@ -809,7 +801,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                 bm_buf[RL_CHKSUM]       = ffs_checksum(bm_buf, nlongs);
                 if (!write_fs_block(bd, part_abs, blkno, spb, bm_buf)) {
                     sprintf(err_buf,
-                            "Failed to update fhb_Parent in block %lu (abs %lu)",
+                            GS(MSG_FFS_UPDATE_PARENT_FAIL),
                             (unsigned long)blkno,
                             (unsigned long)(part_abs + blkno * spb));
                     goto done;
@@ -821,7 +813,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* ---------------------------------------------------------------- */
     /* Phase 9 - update boot block bb[2] to point to new_root          */
-    FFS_PROGRESS("Updating boot block...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_UPDATING_BOOT));
     /*                                                                   */
     /* Some FFS implementations read the root block number from bb[2]   */
     /* of the partition boot block (the first block of the partition).  */
@@ -843,7 +835,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         boot_buf[1] = ~bbsum;
     }
     if (!write_fs_block(bd, part_abs, 0, spb, boot_buf)) {
-        sprintf(err_buf, "Failed to update boot block bb[2] at abs %lu",
+        sprintf(err_buf, GS(MSG_FFS_UPDATE_BOOT_FAIL),
                 (unsigned long)part_abs);
         goto done;
     }
@@ -884,9 +876,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             if (!write_fs_block(bd, part_abs, root_blk, spb, bm_buf)) {
                 /* Non-fatal - log in err_buf temporarily but don't abort */
                 sprintf(err_buf,
-                        "Warning: could not stamp bm_flag on old root at rel %lu\n"
-                        "FFS may run bitmap validator after Inhibit release.\n"
-                        "Filesystem written; reboot and verify.",
+                        GS(MSG_FFS_STAMP_OLDROOT_WARN),
                         (unsigned long)root_blk);
                 /* We still set ok=TRUE below - the new filesystem structure
                    is correct.  Worst case: FFS validator runs and we need
@@ -907,7 +897,7 @@ done:
         if (!read_fs_block(bd, part_abs, new_root, spb, bm_buf)) {
             ok = FALSE;
             sprintf(err_buf,
-                    "Root readback failed (abs %lu) before Inhibit release",
+                    GS(MSG_FFS_ROOT_READBACK_PRE_FAIL),
                     (unsigned long)(part_abs + new_root * spb));
         } else {
             ULONG save_cs = bm_buf[RL_CHKSUM];
@@ -920,9 +910,7 @@ done:
                 bm_buf[RL_SEC_TYPE(nlongs)]  != (ULONG)ST_ROOT) {
                 ok = FALSE;
                 sprintf(err_buf,
-                        "Root corrupted by Phase 9 writes at abs %lu.\n"
-                        "type=0x%lX L[1]=%lu L[4]=%lu sec_type=0x%lX\n"
-                        "A parent-pointer or old-root update overwrote new root.",
+                        GS(MSG_FFS_ROOT_CORRUPTED_PHASE9),
                         (unsigned long)(part_abs + new_root * spb),
                         (unsigned long)bm_buf[RL_TYPE],
                         (unsigned long)bm_buf[1],
@@ -931,8 +919,7 @@ done:
             } else if (calc_cs != save_cs) {
                 ok = FALSE;
                 sprintf(err_buf,
-                        "Root checksum WRONG before Inhibit release\n"
-                        "stored=0x%08lX calc=0x%08lX at abs %lu",
+                        GS(MSG_FFS_ROOT_CHECKSUM_PRE_WRONG),
                         (unsigned long)save_cs, (unsigned long)calc_cs,
                         (unsigned long)(part_abs + new_root * spb));
             }
@@ -940,7 +927,7 @@ done:
         }
     }
 
-    FFS_PROGRESS("Verifying root block (pre-release)...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_VERIFY_PRE));
     if (did_inhibit)
         Inhibit((STRPTR)inh_name, DOSFALSE);
 
@@ -948,20 +935,19 @@ done:
        triggered by the restart.  FFS validator is asynchronous - it may
        not run until several scheduler ticks after Inhibit release.
        5 seconds is ample for any partition size on real or emulated hw. */
-    FFS_PROGRESS("Waiting for FFS to resume (5 sec)...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_WAITING_RESUME));
     Delay(250);
 
     /* ------------------------------------------------------------------ */
     /* Stage 2: verify root is still intact AFTER FFS has resumed         */
-    FFS_PROGRESS("Verifying root block (post-resume)...");
+    FFS_PROGRESS(GS(MSG_FFS_PROG_VERIFY_POST));
     /* If this fails but Stage 1 passed, Inhibit(FALSE) caused corruption */
     /* ------------------------------------------------------------------ */
     if (ok && new_root != 0 && bm_buf) {
         if (!read_fs_block(bd, part_abs, new_root, spb, bm_buf)) {
             ok = FALSE;
             sprintf(err_buf,
-                    "Root readback FAILED after Inhibit release (abs %lu)\n"
-                    "FFS may have overwritten the new root block!",
+                    GS(MSG_FFS_ROOT_READBACK_POST_FAIL),
                     (unsigned long)(part_abs + new_root * spb));
         } else {
             ULONG save_cs = bm_buf[RL_CHKSUM];
@@ -974,9 +960,7 @@ done:
                 bm_buf[RL_SEC_TYPE(nlongs)]  != (ULONG)ST_ROOT) {
                 ok = FALSE;
                 sprintf(err_buf,
-                        "Root CORRUPTED after Inhibit(FALSE)!\n"
-                        "type=0x%lX L[1]=%lu L[4]=%lu sec_type=0x%lX\n"
-                        "FFS overwrote abs %lu with non-root data",
+                        GS(MSG_FFS_ROOT_CORRUPTED_POST),
                         (unsigned long)bm_buf[RL_TYPE],
                         (unsigned long)bm_buf[1],
                         (unsigned long)bm_buf[4],
@@ -985,9 +969,7 @@ done:
             } else if (calc_cs != save_cs) {
                 ok = FALSE;
                 sprintf(err_buf,
-                        "Root checksum CORRUPTED after Inhibit(FALSE)!\n"
-                        "stored=0x%08lX calc=0x%08lX\n"
-                        "FFS overwrote root checksum at abs %lu",
+                        GS(MSG_FFS_ROOT_CHECKSUM_POST_CORRUPT),
                         (unsigned long)save_cs, (unsigned long)calc_cs,
                         (unsigned long)(part_abs + new_root * spb));
             }
@@ -1004,7 +986,7 @@ done:
         if (!read_fs_block(bd, part_abs, nr_bm_blknum, spb, bm_buf)) {
             ok = FALSE;
             sprintf(err_buf,
-                    "BM block %lu (abs %lu) unreadable after Inhibit(FALSE)",
+                    GS(MSG_FFS_BM_UNREADABLE_POST),
                     (unsigned long)nr_bm_blknum,
                     (unsigned long)(part_abs + nr_bm_blknum * spb));
         } else {
@@ -1015,19 +997,14 @@ done:
             if (calc_cs != save_cs) {
                 ok = FALSE;
                 sprintf(err_buf,
-                        "BM block %lu CHECKSUM BAD after Inhibit(FALSE)!\n"
-                        "stored=0x%08lX calc=0x%08lX\n"
-                        "FFS validator will run and free new_root=%lu\n"
-                        "-> root will be overwritten on next file write",
+                        GS(MSG_FFS_BM_CHECKSUM_BAD_POST),
                         (unsigned long)nr_bm_blknum,
                         (unsigned long)save_cs, (unsigned long)calc_cs,
                         (unsigned long)new_root);
             } else if (BM_TESTFREE(bm_buf, nr_bm_off)) {
                 ok = FALSE;
                 sprintf(err_buf,
-                        "BM block %lu: new_root=%lu marked FREE after Inhibit(FALSE)!\n"
-                        "(off=%lu in bm block)\n"
-                        "FFS will allocate new_root for file data -> root overwritten",
+                        GS(MSG_FFS_BM_NEWROOT_FREE_POST),
                         (unsigned long)nr_bm_blknum,
                         (unsigned long)new_root,
                         (unsigned long)nr_bm_off);
@@ -1046,11 +1023,7 @@ done:
                 if (root_buf[6 + i]) ht_entries++;
         }
         sprintf(err_buf,
-                "old_root=%lu  new_root=%lu (abs %lu)\n"
-                "part_abs=%lu  new_blks=%lu  spb=%lu\n"
-                "heads=%lu  secs=%lu  reserved=%lu\n"
-                "ht_entries=%lu  bm_blocks=%lu\n"
-                "bm_blk_for_root=%lu  bm_off=%lu",
+                GS(MSG_FFS_SUCCESS_DIAG),
                 (unsigned long)root_blk,
                 (unsigned long)new_root,
                 (unsigned long)(part_abs + new_root * spb),

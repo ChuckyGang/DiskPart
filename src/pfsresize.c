@@ -74,6 +74,7 @@ extern struct IntuitionBase *IntuitionBase;
 #include "rdb.h"
 #include "ffsresize.h"
 #include "pfsresize.h"
+#include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
 /* PFS3 rootblock byte offsets (rootblock_t from blocks.h)            */
@@ -191,7 +192,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
 
     if (heads == 0 || sectors == 0) {
-        sprintf(err_buf, "Invalid geometry (heads=%lu secs=%lu)",
+        sprintf(err_buf, GS(MSG_PFS_INVALID_GEOMETRY),
                 (unsigned long)heads, (unsigned long)sectors);
         return FALSE;
     }
@@ -226,9 +227,9 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* without inhibit and hang after it due to PFS flush writes still  */
     /* draining in the device queue after Inhibit returns).             */
     /* ---------------------------------------------------------------- */
-    PFS_PROGRESS("Reading PFS rootblock...");
+    PFS_PROGRESS(GS(MSG_PFS_READING_ROOTBLOCK));
     if (!BlockDev_ReadBlock(bd, part_abs, first_sector)) {
-        sprintf(err_buf, "Cannot read PFS rootblock (abs %lu)",
+        sprintf(err_buf, GS(MSG_PFS_CANNOT_READ_ROOTBLOCK),
                 (unsigned long)part_abs);
         goto done;
     }
@@ -240,8 +241,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG disktype = pfs_getl(first_sector, PFS_RB_DISKTYPE);
         if (disktype != PFS_ID_PFS1 && disktype != PFS_ID_PFS2) {
             sprintf(err_buf,
-                    "Block 0 is not a PFS3 rootblock (disktype=0x%08lX).\n"
-                    "Expected 0x%08lX (PFS\\1) or 0x%08lX (PFS\\2).",
+                    GS(MSG_PFS_NOT_ROOTBLOCK),
                     (unsigned long)disktype,
                     (unsigned long)PFS_ID_PFS1,
                     (unsigned long)PFS_ID_PFS2);
@@ -254,11 +254,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     if (rblkcluster == 0) {
         sprintf(err_buf,
-                "PFS rootblock has rblkcluster=0.\n"
-                "part_abs=%lu  blksz=%lu  phys_per_lb=%lu\n"
-                "low=%lu  heads=%lu  secs=%lu\n"
-                "bytes[60..67]: %02X%02X%02X%02X %02X%02X%02X%02X\n"
-                "disktype=0x%08lX  options=0x%08lX",
+                GS(MSG_PFS_RBLKCLUSTER_ZERO),
                 (unsigned long)part_abs,
                 (unsigned long)(pi->block_size),
                 (unsigned long)phys_per_lblock,
@@ -274,7 +270,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         goto done;
     }
     if (reserved_blksize < 512 || (reserved_blksize & 3)) {
-        sprintf(err_buf, "Unexpected reserved_blksize=%u",
+        sprintf(err_buf, GS(MSG_PFS_UNEXPECTED_BLKSIZE),
                 (unsigned)reserved_blksize);
         goto done;
     }
@@ -282,7 +278,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Phase 3 - read and save full rootblock cluster                   */
     /* ---------------------------------------------------------------- */
-    PFS_PROGRESS("Reading rootblock cluster...");
+    PFS_PROGRESS(GS(MSG_PFS_READING_CLUSTER));
     {
         /* rblkcluster is in logical blocks; convert to physical 512-byte sectors */
         cluster_phys = (UWORD)((ULONG)rblkcluster * phys_per_lblock);
@@ -290,12 +286,12 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         cluster_buf  = (UBYTE *)AllocVec(cluster_bytes, MEMF_PUBLIC);
         original_buf = (UBYTE *)AllocVec(cluster_bytes, MEMF_PUBLIC);
         if (!cluster_buf || !original_buf) {
-            sprintf(err_buf, "Out of memory (need %lu bytes for rootblock cluster)",
+            sprintf(err_buf, GS(MSG_PFS_OUT_OF_MEMORY),
                     (unsigned long)cluster_bytes);
             goto done;
         }
         if (!pfs_read_cluster(bd, part_abs, cluster_buf, cluster_phys)) {
-            sprintf(err_buf, "Cannot read rootblock cluster (%u phys-secs at abs %lu)",
+            sprintf(err_buf, GS(MSG_PFS_CANNOT_READ_CLUSTER),
                     (unsigned)cluster_phys, (unsigned long)part_abs);
             goto done;
         }
@@ -366,8 +362,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* Abort if SUPERINDEX mode is set */
         if (options & PFS_MODE_SUPERINDEX) {
             sprintf(err_buf,
-                    "PFS partition uses SUPERINDEX (options=0x%08lX).\n"
-                    "This index structure is not supported by this grow tool.",
+                    GS(MSG_PFS_SUPERINDEX),
                     (unsigned long)options);
             goto done;
         }
@@ -385,12 +380,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                                   : old_high_cyl;
             if (safe_high > pi->high_cyl) safe_high = pi->high_cyl;
             sprintf(err_buf,
-                    "PFS reserved area too small for this grow.\n"
-                    "Need %lu new reserved blocks, only %lu free.\n\n"
-                    "Max safe target: cyl ~%lu "
-                    "(+%lu cyls instead of +%lu).\n\n"
-                    "To grow further, use PFSDoctor to\n"
-                    "expand the reserved area, then try again.",
+                    GS(MSG_PFS_RESERVED_TOO_SMALL),
                     (unsigned long)reserved_needed,
                     (unsigned long)reserved_free,
                     (unsigned long)safe_high,
@@ -409,9 +399,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             /* max_blocks in logical blocks -> MB: divide by blocks-per-MB */
             ULONG max_mb     = max_blocks / (1048576UL / blksz);
             sprintf(err_buf,
-                    "Partition too large for PFS3.\n"
-                    "PFS3 supports at most ~%lu MB with this block size.\n"
-                    "Use a smaller high cylinder.",
+                    GS(MSG_PFS_TOO_LARGE),
                     (unsigned long)max_mb);
             goto done;
         }
@@ -423,10 +411,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
            PFSDoctor to rebuild blocksfree before growing again. */
         if (cur_disksize > 0 && blocksfree > cur_disksize) {
             sprintf(err_buf,
-                    "PFS3 metadata corrupted (prev. grow attempt).\n"
-                    "bfree=%lu > dsz=%lu\n"
-                    "Run 'PFSDoctor %s:' to repair,\n"
-                    "then grow again.",
+                    GS(MSG_PFS_METADATA_CORRUPT),
                     (unsigned long)blocksfree,
                     (unsigned long)cur_disksize,
                     pi->drive_name);
@@ -436,8 +421,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* Overflow check: blocksfree + delta must not wrap a ULONG */
         if (delta_blocks > 0xFFFFFFFFUL - blocksfree) {
             sprintf(err_buf,
-                    "Overflow: bfree(%lu)+delta(%lu)>4G\n"
-                    "h=%lu s=%lu cyl+%lu",
+                    GS(MSG_PFS_OVERFLOW),
                     (unsigned long)blocksfree, (unsigned long)delta_blocks,
                     (unsigned long)heads, (unsigned long)sectors,
                     (unsigned long)(pi->high_cyl - old_high_cyl));
@@ -460,13 +444,10 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* therefore fails with "UAEHF SCSI: out of bounds" because         */
         /* start+length > 0.  Writing BEFORE Inhibit avoids this.           */
         /* ---------------------------------------------------------------- */
-        PFS_PROGRESS("Writing rootblock cluster...");
+        PFS_PROGRESS(GS(MSG_PFS_WRITING_CLUSTER));
         if (!pfs_write_cluster(bd, part_abs, cluster_buf, cluster_phys)) {
             sprintf(err_buf,
-                    "Cannot write PFS rootblock (device error).\n\n"
-                    "After writing the RDB and rebooting, open a Shell and run:\n"
-                    "  PFSDoctor %s:\n\n"
-                    "PFSDoctor will fix the free space count automatically.",
+                    GS(MSG_PFS_CANNOT_WRITE),
                     pi->drive_name);
             goto done;
         }
@@ -479,7 +460,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             pfs_setl(cluster_buf, PFS_RB_OPTIONS,
                      options & ~(ULONG)PFS_MODE_SIZEFIELD);
             if (!pfs_write_cluster(bd, part_abs, cluster_buf, cluster_phys)) {
-                PFS_PROGRESS("Warning: MODE_SIZEFIELD clear failed.");
+                PFS_PROGRESS(GS(MSG_PFS_SIZEFIELD_CLEAR_FAIL));
             }
         }
 
@@ -496,7 +477,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* (taken when the confirmation dialog was dismissed) has time to   */
         /* release; otherwise ACTION_INHIBIT deadlocks.                     */
         /* ---------------------------------------------------------------- */
-        PFS_PROGRESS("Flushing PFS cache (please wait)...");
+        PFS_PROGRESS(GS(MSG_PFS_FLUSHING_CACHE));
         Delay(50);
         if (pi->drive_name[0]) {
             sprintf(inh_name, "%s:", pi->drive_name);
@@ -514,9 +495,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         /* cyl_diff × bpc = delta_blocks; bpc derived from PFS3 disksize,
            not DosEnvec geometry, so it matches PFS3's native block units */
         sprintf(err_buf,
-                "cyl+%lu bpc=%lu db=%lu\n"
-                "bfree %lu->%lu\n"
-                "dsz   %lu->%lu",
+                GS(MSG_PFS_SUCCESS),
                 (unsigned long)cyl_diff,
                 (unsigned long)bpc,
                 (unsigned long)delta_blocks,

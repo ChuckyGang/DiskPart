@@ -19,6 +19,7 @@
 
 #include "clib.h"
 #include "imagecopy.h"
+#include "locale_support.h"
 
 /* 128 * 512 = 64 KB. Big enough to amortise filesystem write cost,
  * small enough to keep AllocVec happy on tight memory. */
@@ -42,13 +43,13 @@ BOOL ImageCopy_DiskToFile(struct BlockDev *bd, const char *path,
     ULONG  block;
 
     if (!bd || !path || !*path) {
-        set_err(errbuf, ebsz, "Bad parameters.");
+        set_err(errbuf, ebsz, GS(MSG_IC_BAD_PARAMETERS));
         return FALSE;
     }
 
     total_blocks = (ULONG)(bd->total_bytes / bd->block_size);
     if (total_blocks == 0) {
-        set_err(errbuf, ebsz, "Source has zero blocks.");
+        set_err(errbuf, ebsz, GS(MSG_IC_ZERO_BLOCKS));
         return FALSE;
     }
 
@@ -57,14 +58,14 @@ BOOL ImageCopy_DiskToFile(struct BlockDev *bd, const char *path,
 
     fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
     if (!fh) {
-        set_err(errbuf, ebsz, "Cannot create image file.");
+        set_err(errbuf, ebsz, GS(MSG_IC_CANNOT_CREATE_FILE));
         return FALSE;
     }
 
     buf = (UBYTE *)AllocVec(IMG_BATCH_BLOCKS * bd->block_size, MEMF_PUBLIC);
     if (!buf) {
         Close(fh);
-        set_err(errbuf, ebsz, "Out of memory.");
+        set_err(errbuf, ebsz, GS(MSG_IC_OUT_OF_MEMORY));
         return FALSE;
     }
 
@@ -85,7 +86,7 @@ BOOL ImageCopy_DiskToFile(struct BlockDev *bd, const char *path,
             (LONG)(batch * bd->block_size)) {
             FreeVec(buf);
             Close(fh);
-            set_err(errbuf, ebsz, "Write error.");
+            set_err(errbuf, ebsz, GS(MSG_IC_WRITE_ERROR));
             return FALSE;
         }
 
@@ -93,7 +94,7 @@ BOOL ImageCopy_DiskToFile(struct BlockDev *bd, const char *path,
         if (cb && !cb(ud, block, count)) {
             FreeVec(buf);
             Close(fh);
-            set_err(errbuf, ebsz, "Cancelled by user.");
+            set_err(errbuf, ebsz, GS(MSG_IC_CANCELLED));
             return FALSE;
         }
     }
@@ -114,13 +115,13 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
     ULONG  hint_total;          /* progress hint, 0 = unknown */
 
     if (!bd || !path || !*path) {
-        set_err(errbuf, ebsz, "Bad parameters.");
+        set_err(errbuf, ebsz, GS(MSG_IC_BAD_PARAMETERS));
         return FALSE;
     }
 
     fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
     if (!fh) {
-        set_err(errbuf, ebsz, "Cannot open image file.");
+        set_err(errbuf, ebsz, GS(MSG_IC_CANNOT_OPEN_FILE));
         return FALSE;
     }
 
@@ -146,7 +147,7 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
     buf = (UBYTE *)AllocVec(IMG_BATCH_BLOCKS * bd->block_size, MEMF_PUBLIC);
     if (!buf) {
         Close(fh);
-        set_err(errbuf, ebsz, "Out of memory.");
+        set_err(errbuf, ebsz, GS(MSG_IC_OUT_OF_MEMORY));
         return FALSE;
     }
 
@@ -159,26 +160,26 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
         LONG  got = Read(fh, buf, (LONG)(IMG_BATCH_BLOCKS * bd->block_size));
         if (got < 0) {
             FreeVec(buf); Close(fh);
-            set_err(errbuf, ebsz, "Read error.");
+            set_err(errbuf, ebsz, GS(MSG_IC_READ_ERROR));
             return FALSE;
         }
         if (got == 0) break;                /* EOF */
         if ((ULONG)got % bd->block_size != 0) {
             FreeVec(buf); Close(fh);
-            set_err(errbuf, ebsz, "Image size not block-aligned.");
+            set_err(errbuf, ebsz, GS(MSG_IC_NOT_BLOCK_ALIGNED));
             return FALSE;
         }
         got_blocks = (ULONG)got / bd->block_size;
         if (block + got_blocks > total_blocks) {
             FreeVec(buf); Close(fh);
-            set_err(errbuf, ebsz, "Image is larger than the destination.");
+            set_err(errbuf, ebsz, GS(MSG_IC_IMAGE_TOO_LARGE));
             return FALSE;
         }
         for (i = 0; i < got_blocks; i++) {
             if (!BlockDev_WriteBlock(bd, block + i,
                                      buf + i * bd->block_size)) {
                 FreeVec(buf); Close(fh);
-                set_err(errbuf, ebsz, "Write error.");
+                set_err(errbuf, ebsz, GS(MSG_IC_WRITE_ERROR));
                 return FALSE;
             }
         }
@@ -186,14 +187,14 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
         if (cb && !cb(ud, block, hint_total)) {
             FreeVec(buf);
             Close(fh);
-            set_err(errbuf, ebsz, "Cancelled by user.");
+            set_err(errbuf, ebsz, GS(MSG_IC_CANCELLED));
             return FALSE;
         }
     }
 
     if (block == 0) {
         FreeVec(buf); Close(fh);
-        set_err(errbuf, ebsz, "Image file is empty.");
+        set_err(errbuf, ebsz, GS(MSG_IC_IMAGE_EMPTY));
         return FALSE;
     }
 

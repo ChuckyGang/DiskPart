@@ -40,6 +40,7 @@
 #include <proto/gadtools.h>
 
 #include "clib.h"
+#include "locale_support.h"
 #include "rdb.h"
 #include "partview.h"
 #include "version.h"
@@ -138,9 +139,11 @@ static struct {
     UWORD w;    /* column width (for right-align) */
 } lv_cols[LVCOL_COUNT];
 
-/* Header labels - match order of LVCOL_* */
-static const char * const lv_hdr[LVCOL_COUNT] = {
-    "", "Drive", "Lo Cyl", "Hi Cyl", "FileSystem", "Size", "Boot"
+/* Header labels - match order of LVCOL_* (message ids; -1 = no label).
+   Looked up via GS() at draw time in draw_col_header(). */
+static const LONG lv_hdr[LVCOL_COUNT] = {
+    -1, MSG_PV_COL_DRIVE, MSG_PV_COL_LOCYL, MSG_PV_COL_HICYL,
+    MSG_PV_COL_FILESYSTEM, MSG_PV_COL_SIZE, MSG_PV_COL_BOOT
 };
 
 /* Pointer to current RDB (set whenever rdb is live) - used by render hook */
@@ -241,7 +244,7 @@ static ULONG lv_render(void)
 
     /* Drive name */
     {
-        const char *nm = pi->drive_name[0] ? pi->drive_name : "(none)";
+        const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
         LV_TEXT(LVCOL_DRIVE, nm, strlen(nm));
     }
 
@@ -306,7 +309,7 @@ static void offer_reboot(struct Window *win, const char *msg)
     es.es_Flags        = 0;
     es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
     es.es_TextFormat   = (UBYTE *)msg;
-    es.es_GadgetFormat = (UBYTE *)"Reboot|Later";
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_REBOOT_LATER);
     if (EasyRequest(win, &es, NULL) == 1) {
         /* Show a small window during the settle delay so the pause before the
            machine resets isn't a mystery. */
@@ -320,7 +323,7 @@ static void offer_reboot(struct Window *win, const char *msg)
                 { WA_Left,      (ULONG)((scr->Width  - w) / 2) },
                 { WA_Top,       (ULONG)((scr->Height - h) / 2) },
                 { WA_Width,     (ULONG)w }, { WA_Height, (ULONG)h },
-                { WA_Title,     (ULONG)"Please wait" },
+                { WA_Title,     (ULONG)GS(MSG_PV_PLEASE_WAIT) },
                 { WA_PubScreen, (ULONG)scr },
                 { WA_Flags,     WFLG_DRAGBAR | WFLG_SIMPLE_REFRESH },
                 { WA_IDCMP,     0 },
@@ -328,7 +331,7 @@ static void offer_reboot(struct Window *win, const char *msg)
             };
             rw = OpenWindowTagList(NULL, wt);
             if (rw) {
-                const char *t = "Rebooting the system...";
+                const char *t = GS(MSG_PV_REBOOTING);
                 SetAPen(rw->RPort, 1);
                 Move(rw->RPort, (WORD)(rw->BorderLeft + 6),
                                 (WORD)(rw->BorderTop + font_h));
@@ -357,7 +360,7 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
         ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
         ULONG bsz   = pi->block_size > 0 ? pi->block_size : 512;
         UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
-        const char *nm = pi->drive_name[0] ? pi->drive_name : "(none)";
+        const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
 
         FriendlyDosType(pi->dos_type, dt);
         FormatSize(bytes, sz);
@@ -471,7 +474,7 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
     RectFill(rp, mx, my, mx+(WORD)mw-1, my+(WORD)mh-1);
 
     if (!rdb || !rdb->valid) {
-        const char *msg = "No RDB - use Init RDB to create partitions";
+        const char *msg = GS(MSG_PV_MAP_NO_RDB);
         UWORD mlen = strlen(msg);
         WORD  tw   = rp->TxWidth ? (WORD)(mlen*(UWORD)rp->TxWidth):(WORD)(mlen*8);
         SetAPen(rp, 1);
@@ -549,7 +552,7 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
                 UQUAD bytes2 = (UQUAD)cyls2 * heads2 * secs2 * bsz2;
                 WORD  txw    = rp->TxWidth ? (WORD)rp->TxWidth : 8;
                 WORD  max_c  = (pw - 4) / txw;
-                char  *nm    = pi->drive_name[0] ? pi->drive_name : "(none)";
+                char  *nm    = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
                 UWORD nlen   = strlen(nm);
                 WORD  block_top; /* top of two-line text block */
 
@@ -616,8 +619,8 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
             char lo_str[24], hi_str[24];
             WORD label_y = by + (WORD)bh + 2 + fb;
 
-            sprintf(lo_str, "Cyl %lu", (unsigned long)lo);
-            sprintf(hi_str, "Cyl %lu", (unsigned long)hi);
+            sprintf(lo_str, GS(MSG_PV_CYL_FMT), (unsigned long)lo);
+            sprintf(hi_str, GS(MSG_PV_CYL_FMT), (unsigned long)hi);
 
             /* Erase the label strip before redrawing - prevents ghost text
                when the map is redrawn at a different position after resize. */
@@ -639,8 +642,7 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
 
                 /* Centred usage hint - only if it fits between the Cyl labels */
                 {
-                    static const char hint[] =
-                        "drag edges to resize  \xB7  drag body to move  \xB7  drag free area to add";
+                    const char *hint = GS(MSG_PV_MAP_HINT);
                     UWORD hintlen = strlen(hint);
                     WORD  hinttw  = (WORD)TextLength(rp, hint, hintlen);
                     WORD  lo_end  = (WORD)TextLength(rp, lo_str, (UWORD)strlen(lo_str)) + 4;
@@ -682,8 +684,8 @@ static void draw_drag_info(struct Window *win, const struct RDBInfo *rdb,
     char  sz[16];
 
     FormatSize(bytes, sz);
-    sprintf(info, "%s: Cyl %lu - %lu  (%s)",
-            pi->drive_name[0] ? pi->drive_name : "(none)",
+    sprintf(info, GS(MSG_PV_DRAG_INFO_FMT),
+            pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE),
             (unsigned long)pi->low_cyl,
             (unsigned long)pi->high_cyl,
             sz);
@@ -776,7 +778,7 @@ static void draw_new_part_overlay(struct Window *win,
     }
 
     /* Info strip below map */
-    sprintf(info, "New: Cyl %lu - %lu  (%s)",
+    sprintf(info, GS(MSG_PV_NEW_INFO_FMT),
             (unsigned long)lo, (unsigned long)hi, sz);
     SetAPen(rp, 0);
     SetDrMd(rp, JAM2);
@@ -835,25 +837,25 @@ static void draw_info(struct Window *win, const char *devname, ULONG unit,
             ULONG bsz = (rdb->blk_size > 0) ? rdb->blk_size : 512;
             FormatSize((UQUAD)rdb->cylinders * rdb->heads * rdb->sectors * bsz, sz);
         } else {
-            strncpy(sz, "unknown", 15); sz[15] = '\0';
+            strncpy(sz, GS(MSG_PV_UNKNOWN), 15); sz[15] = '\0';
         }
 
         if (model[0])
-            snprintf(line1, sizeof(line1), "Device: %s/%lu    Size: %s    Model: %s",
+            snprintf(line1, sizeof(line1), GS(MSG_PV_INFO_LINE1_MODEL),
                      devname, (unsigned long)unit, sz, model);
         else
-            snprintf(line1, sizeof(line1), "Device: %s/%lu    Size: %s",
+            snprintf(line1, sizeof(line1), GS(MSG_PV_INFO_LINE1),
                      devname, (unsigned long)unit, sz);
     }
 
     /* Line 2: full geometry so large cylinder counts never clip */
     if (rdb && rdb->cylinders > 0)
-        sprintf(line2, "Geometry: %lu x %lu x %lu  (CYL x HD x SEC)",
+        sprintf(line2, GS(MSG_PV_INFO_GEOMETRY_FMT),
                 (unsigned long)rdb->cylinders,
                 (unsigned long)rdb->heads,
                 (unsigned long)rdb->sectors);
     else
-        strncpy(line2, "Geometry: unknown", 119);
+        strncpy(line2, GS(MSG_PV_INFO_GEOM_UNKNOWN), 119);
 
     /* Line 3: RDB partition / free info (text clipped short; right side
        is occupied by the Last Disk / Last LUN checkbox gadgets) */
@@ -867,11 +869,11 @@ static void draw_info(struct Window *win, const char *devname, ULONG unit,
         }
         { ULONG bsz = (rdb->blk_size > 0) ? rdb->blk_size : 512;
           FormatSize((UQUAD)free_cyls * rdb->heads * rdb->sectors * bsz, fsz); }
-        sprintf(line3, "RDB: %u partition%s         Free: %s",
+        sprintf(line3, GS(MSG_PV_INFO_RDB_FMT),
                 (unsigned)rdb->num_parts,
                 rdb->num_parts == 1 ? "" : "s", fsz);
     } else {
-        strncpy(line3, "RDB: Not found", 119);
+        strncpy(line3, GS(MSG_PV_INFO_RDB_NOTFOUND), 119);
     }
     line2[119] = line3[119] = '\0';
 
@@ -915,7 +917,7 @@ static void draw_col_header(struct Window *win, WORD hx, WORD hy, UWORD hw)
 
     /* Draw each column label at its computed pixel position */
     for (i = LVCOL_MARK + 1; i < LVCOL_COUNT; i++) {
-        const char *label = lv_hdr[i];
+        const char *label = GS(lv_hdr[i]);
         UWORD llen = strlen(label);
         WORD  lx   = hx + (WORD)lv_cols[i].x;
         /* Skip if column starts beyond the available width */
@@ -1295,14 +1297,14 @@ static BOOL build_gadgets(APTR vi,
     prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); \
     if (!prev) { FreeGadgets(glist); return FALSE; }
 
-    MKBTN(bor_l+pad,                     "Init RDB", GID_INITRDB)
-    MKBTN(bor_l+pad+(eighth+pad)*1,      "Add",      GID_ADD)
-    MKBTN(bor_l+pad+(eighth+pad)*2,      "Edit",     GID_EDIT)
-    MKBTN(bor_l+pad+(eighth+pad)*3,      "Delete",   GID_DELETE)
-    MKBTN(bor_l+pad+(eighth+pad)*4,      "Move",     GID_MOVE)
-    MKBTN(bor_l+pad+(eighth+pad)*5,      "FileSys",  GID_FILESYS)
-    MKBTN(bor_l+pad+(eighth+pad)*6,      "Write",    GID_WRITE)
-    MKBTN(bor_l+pad+(eighth+pad)*7,      "Back",     GID_BACK)
+    MKBTN(bor_l+pad,                     GS(MSG_PV_BTN_INITRDB), GID_INITRDB)
+    MKBTN(bor_l+pad+(eighth+pad)*1,      GS(MSG_PV_BTN_ADD),     GID_ADD)
+    MKBTN(bor_l+pad+(eighth+pad)*2,      GS(MSG_PV_BTN_EDIT),    GID_EDIT)
+    MKBTN(bor_l+pad+(eighth+pad)*3,      GS(MSG_PV_BTN_DELETE),  GID_DELETE)
+    MKBTN(bor_l+pad+(eighth+pad)*4,      GS(MSG_PV_BTN_MOVE),    GID_MOVE)
+    MKBTN(bor_l+pad+(eighth+pad)*5,      GS(MSG_PV_BTN_FILESYS), GID_FILESYS)
+    MKBTN(bor_l+pad+(eighth+pad)*6,      GS(MSG_PV_BTN_WRITE),   GID_WRITE)
+    MKBTN(bor_l+pad+(eighth+pad)*7,      GS(MSG_PV_BTN_BACK),    GID_BACK)
 #undef MKBTN
     }
 
@@ -1320,7 +1322,7 @@ static BOOL build_gadgets(APTR vi,
         ng.ng_TopEdge    = chk_y;
         ng.ng_Width      = cbw;
         ng.ng_Height     = chk_h;
-        ng.ng_GadgetText = "Last Disk";
+        ng.ng_GadgetText = GS(MSG_PV_CHK_LASTDISK);
         ng.ng_GadgetID   = GID_LASTDISK;
         ng.ng_Flags      = PLACETEXT_RIGHT;
         ldisk = CreateGadgetA(CHECKBOX_KIND, prev, &ng, cbt);
@@ -1332,7 +1334,7 @@ static BOOL build_gadgets(APTR vi,
         ng.ng_TopEdge    = chk_y;
         ng.ng_Width      = cbw;
         ng.ng_Height     = chk_h;
-        ng.ng_GadgetText = "Last LUN";
+        ng.ng_GadgetText = GS(MSG_PV_CHK_LASTLUN);
         ng.ng_GadgetID   = GID_LASTLUN;
         ng.ng_Flags      = PLACETEXT_RIGHT;
         llun = CreateGadgetA(CHECKBOX_KIND, prev, &ng, cbt);
@@ -1392,6 +1394,47 @@ static struct NewMenu partview_menu_def[] = {
     { NM_END,   NULL,                    NULL,         0, 0, NULL },
 };
 
+/* Replace the built-in English nm_Label strings above with their localized
+   forms before the menu is created.  NM_TITLE for menu 0 keeps DISKPART_VERTITLE
+   (a version constant); NM_BARLABEL separators and the NM_END terminator are
+   left alone.  The message ids are listed in the same order as the table. */
+static void localize_partview_menu(void)
+{
+    static const LONG ids[] = {
+        -1,                          /* DISKPART_VERTITLE (menu 0 title)   */
+        MSG_PV_MENU_ABOUT,
+        MSG_PV_MENU_ADVANCED,
+        MSG_PV_MENU_BACKUP_RDB,
+        MSG_PV_MENU_RESTORE_RDB,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_EXT_BACKUP,
+        MSG_PV_MENU_EXT_RESTORE,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_VERIFY_RDB,
+        MSG_PV_MENU_VERIFY_EXT,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_INTEGRITY,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_DUMP_IMAGE,
+        MSG_PV_MENU_RESTORE_IMAGE,
+        MSG_PV_MENU_HEALTH,
+        MSG_PV_MENU_SMART,
+        MSG_PV_MENU_BADBLOCK,
+        MSG_PV_MENU_DEBUG,
+        MSG_PV_MENU_VIEW_RDB,
+        MSG_PV_MENU_RAW_SCAN,
+        MSG_PV_MENU_HEX_DUMP,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_RAW_READ,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_CHECK_FFS,
+    };
+    UWORD i;
+    for (i = 0; i < sizeof(ids) / sizeof(ids[0]); i++)
+        if (ids[i] >= 0)
+            partview_menu_def[i].nm_Label = GS(ids[i]);
+}
+
 /* ------------------------------------------------------------------ */
 /* format_pending_partitions - after a successful RDB write, quick-format */
 /* any newly created partition the user opted to format (want_format).    */
@@ -1417,16 +1460,16 @@ static BOOL format_pending_partitions(struct Window *win, struct BlockDev *bd,
         any = 1;
 
         if (!bd || bd->backend == BD_FILE) {
-            sprintf(line, "%s: format skipped (image file).\n", pi->drive_name);
+            sprintf(line, GS(MSG_PV_FMT_SKIPPED_IMAGE), pi->drive_name);
             need_reboot = TRUE;   /* exists in RDB but not mounted */
         } else {
             char err[80], mounted[40];
             err[0] = '\0';
             if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
-                sprintf(line, "%s: formatted as \"%s\".\n",
+                sprintf(line, GS(MSG_PV_FMT_FORMATTED),
                         mounted[0] ? mounted : pi->drive_name, pi->volume_name);
             } else {
-                sprintf(line, "%s: format failed - %s\n", pi->drive_name, err);
+                sprintf(line, GS(MSG_PV_FMT_FAILED), pi->drive_name, err);
                 need_reboot = TRUE;   /* not mounted - reboot to pick it up */
             }
         }
@@ -1441,7 +1484,7 @@ static BOOL format_pending_partitions(struct Window *win, struct BlockDev *bd,
         es.es_Flags        = 0;
         es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
         es.es_TextFormat   = (UBYTE *)report;
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
     }
     return need_reboot;
@@ -1462,9 +1505,10 @@ static void set_title_dirty(struct Window *win, const char *devname, ULONG unit,
                             BOOL dirty)
 {
     static char t[96];
-    sprintf(t, DISKPART_VERTITLE " - %s unit %lu%s",
+    int n = sprintf(t, "%s", DISKPART_VERTITLE);
+    sprintf(t + n, GS(MSG_PV_TITLE_UNIT_FMT),
             devname, (unsigned long)unit,
-            dirty ? "  -  UNSAVED CHANGES (Write to save)" : "");
+            dirty ? GS(MSG_PV_TITLE_UNSAVED) : "");
     SetWindowTitles(win, (UBYTE *)t, (UBYTE *)~0UL);  /* leave screen title */
 }
 
@@ -1508,9 +1552,9 @@ static BOOL unmount_deleted_partitions(struct Window *win, struct RDBInfo *rdb)
         any = 1;
         err[0] = '\0';
         if (UnmountDevice(nm, err, sizeof(err))) {
-            sprintf(line, "%s: unmounted.\n", nm);
+            sprintf(line, GS(MSG_PV_UNMOUNTED), nm);
         } else {
-            sprintf(line, "%s: still mounted - %s\n", nm, err);
+            sprintf(line, GS(MSG_PV_STILL_MOUNTED), nm, err);
             need_reboot = TRUE;
         }
         if (rlen + strlen(line) < sizeof(report) - 1)
@@ -1524,7 +1568,7 @@ static BOOL unmount_deleted_partitions(struct Window *win, struct RDBInfo *rdb)
         es.es_Flags        = 0;
         es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
         es.es_TextFormat   = (UBYTE *)report;
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
     }
     return need_reboot;
@@ -1661,7 +1705,11 @@ BOOL partview_run(const char *devname, ULONG unit)
         UWORD min_w   = bor_l + bor_r + pad * 2 + 7 * (40 + pad) - pad;
         UWORD min_h   = fixed_est + row_h * 2;
 
-        sprintf(win_title, DISKPART_VERTITLE " - %s unit %lu", devname, (unsigned long)unit);
+        {
+            int n = sprintf(win_title, "%s", DISKPART_VERTITLE);
+            sprintf(win_title + n, GS(MSG_PV_TITLE_UNIT_FMT),
+                    devname, (unsigned long)unit, "");
+        }
 
         {
             struct TagItem wt[] = {
@@ -1737,6 +1785,7 @@ BOOL partview_run(const char *devname, ULONG unit)
 
     {
         struct TagItem lt[] = { { TAG_DONE, 0 } };
+        localize_partview_menu();
         menu = CreateMenusA(partview_menu_def, NULL);
         if (menu) {
             LayoutMenusA(menu, vi, lt);
@@ -1827,24 +1876,22 @@ BOOL partview_run(const char *devname, ULONG unit)
                     es.es_Flags      = 0;
                     es.es_Title      = (UBYTE *)DISKPART_VERTITLE;
                     if (dirty) {
-                        es.es_TextFormat   = (UBYTE *)"You have unsaved changes.\nWrite partition table to disk?";
-                        es.es_GadgetFormat = (UBYTE *)"Write|Discard|Cancel";
+                        es.es_TextFormat   = (UBYTE *)GS(MSG_PV_UNSAVED_BODY);
+                        es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_WRITE_DISCARD_CANCEL);
                         r = EasyRequest(win, &es, NULL);
                         if (r == 0) break;           /* Cancel - stay */
                         if (r == 1 && bd) {          /* Write */
                             if (RDB_Write(bd, rdb)) {
                                 dirty = FALSE;
                                 if (needs_reboot) {
-                                    offer_reboot(win,
-                                        "Partition table written.\n"
-                                        "Reboot now for changes to take effect.");
+                                    offer_reboot(win, GS(MSG_PV_REBOOT_WRITTEN));
                                     needs_reboot = FALSE;
                                 }
                             } else {
-                                sprintf(wfmt, "Write failed (err %d)!\nCheck device and try again.",
+                                sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
                                         (int)bd->last_io_err);
                                 es.es_TextFormat   = (UBYTE *)wfmt;
-                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                 EasyRequest(win, &es, NULL);
                                 break; /* stay open */
                             }
@@ -1853,13 +1900,11 @@ BOOL partview_run(const char *devname, ULONG unit)
                     } else if (needs_reboot) {
                         /* RDB was already written outside the dirty path
                            (e.g. by Partition Move, which writes RDB itself). */
-                        offer_reboot(win,
-                            "Disk layout has changed.\n"
-                            "Reboot now for changes to take effect.");
+                        offer_reboot(win, GS(MSG_PV_REBOOT_LAYOUT));
                         needs_reboot = FALSE;
                     } else {
-                        es.es_TextFormat   = (UBYTE *)"Exit DiskPart?";
-                        es.es_GadgetFormat = (UBYTE *)"Yes|No";
+                        es.es_TextFormat   = (UBYTE *)GS(MSG_PV_EXIT_BODY);
+                        es.es_GadgetFormat = (UBYTE *)GS(MSG_YES_NO);
                         if (EasyRequest(win, &es, NULL) != 1) break;
                     }
                     exit_req = TRUE;
@@ -1944,12 +1989,9 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 struct EasyStruct es;
                                 es.es_StructSize   = sizeof(es);
                                 es.es_Flags        = 0;
-                                es.es_Title        = (UBYTE *)"Cannot Resize From Start";
-                                es.es_TextFormat   = (UBYTE *)
-                                    "Filesystem resize is only possible when\n"
-                                    "the start cylinder is left unchanged.\n\n"
-                                    "To grow a partition, drag the right edge instead.";
-                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                es.es_Title        = (UBYTE *)GS(MSG_PV_NORESIZE_START_TITLE);
+                                es.es_TextFormat   = (UBYTE *)GS(MSG_PV_NORESIZE_START_BODY);
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                 EasyRequest(win, &es, NULL);
                             } else if (move_blk >= 0) {
                                 /* Inside a partition block (middle) - check double-click */
@@ -1964,7 +2006,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     {
                                         ULONG old_hi = rdb->parts[sel].high_cyl;
                                         if (partition_dialog(&rdb->parts[sel],
-                                                             "Edit Partition", rdb, FALSE)) {
+                                                             GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
                                             {
                                             int g = offer_ffs_grow(win, bd, rdb,
                                                            &rdb->parts[sel], old_hi);
@@ -2080,30 +2122,20 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                                 LONG r;
                                 if (is_grow) {
-                                    sprintf(msg,
-                                        "Partition %s has been grown.\n"
-                                        "Resize filesystem to use the new space?\n\n"
-                                        "(\"Grow without resize\" extends the partition\n"
-                                        "but leaves the filesystem unchanged - the\n"
-                                        "filesystem will NOT mount until the root block\n"
-                                        "is moved, so DATA WILL BE LOST.)",
+                                    sprintf(msg, GS(MSG_PV_RESIZE_GROWN_BODY),
                                         rdb->parts[confirmed_part].drive_name);
                                     /* Button slots: 1=Resize, 2=Cancel, 0=Grow w/o resize.
                                        Extra spaces around the destructive option push it
                                        to the right edge and make accidental clicks harder. */
-                                    es.es_GadgetFormat = (UBYTE *)
-                                        "Resize|Cancel|     Grow without resize     ";
+                                    es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_RESIZE_GROW_GADGETS);
                                 } else {
-                                    sprintf(msg,
-                                        "Partition %s has been shrunk or moved.\n"
-                                        "ALL EXISTING DATA WILL BE LOST!\n"
-                                        "Keep this change?",
+                                    sprintf(msg, GS(MSG_PV_RESIZE_SHRUNK_BODY),
                                         rdb->parts[confirmed_part].drive_name);
-                                    es.es_GadgetFormat = (UBYTE *)"Yes, destroy data|Cancel";
+                                    es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_RESIZE_SHRUNK_GADGETS);
                                 }
                                 es.es_StructSize   = sizeof(es);
                                 es.es_Flags        = 0;
-                                es.es_Title        = (UBYTE *)"Resize Partition";
+                                es.es_Title        = (UBYTE *)GS(MSG_PV_RESIZE_TITLE);
                                 es.es_TextFormat   = (UBYTE *)msg;
                                 r = EasyRequest(win, &es, NULL);
                                 /* is_grow:  1=Resize, 2=Cancel, 0=Grow without resize
@@ -2164,7 +2196,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 new_pi.baud          = 0;
                                 new_pi.control       = 0;
                                 new_pi.dev_flags     = 0;
-                                if (partition_dialog(&new_pi, "Add Partition", rdb, TRUE)) {
+                                if (partition_dialog(&new_pi, GS(MSG_PV_DLG_ADD_PART), rdb, TRUE)) {
                                     rdb->parts[rdb->num_parts++] = new_pi;
                                     dirty = TRUE;
                                     /* A new partition needs a reboot to mount -
@@ -2333,7 +2365,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                             sel >= 0 && sel < (WORD)rdb->num_parts) {
                             ULONG old_hi = rdb->parts[sel].high_cyl;
                             if (partition_dialog(&rdb->parts[sel],
-                                                 "Edit Partition", rdb, FALSE)) {
+                                                 GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
                                 {
                                 int g = offer_ffs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
@@ -2384,10 +2416,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     char td_sz[16], rc_sz[16];
                                     FormatSize(bd->td_total_bytes, td_sz);
                                     FormatSize(rc_bytes, rc_sz);
-                                    sprintf(driver_warn,
-                                        "\nDrive reports %s, driver reports %s.\n"
-                                        "Driver may be limited (old scsi.device?).\n"
-                                        "I/O beyond driver limit may fail.",
+                                    sprintf(driver_warn, GS(MSG_PV_INIT_DRIVER_WARN),
                                         rc_sz, td_sz);
                                 }
                             }
@@ -2413,14 +2442,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 char msg[512];
                                 geom_retry = FALSE;
 
-                                sprintf(msg,
-                                    "Disk already has an RDB with %u partition%s.\n\n"
-                                    "Device geometry: %lu cyl x %lu hd x %lu sec\n"
-                                    "RDB geometry:    %lu cyl x %lu hd x %lu sec\n\n"
-                                    "Re-init: wipe all partitions, create fresh RDB.\n"
-                                    "Update Geometry (EXPERIMENTAL): keep partitions,\n"
-                                    "  update RDB to match device size.\n"
-                                    "Manual...: enter geometry by hand.%s",
+                                sprintf(msg, GS(MSG_PV_INIT_HAS_RDB_BODY),
                                     (unsigned)rdb->num_parts,
                                     rdb->num_parts == 1 ? "" : "s",
                                     (unsigned long)real_cyls,
@@ -2433,10 +2455,10 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                                 es.es_StructSize   = sizeof(es);
                                 es.es_Flags        = 0;
-                                es.es_Title        = (UBYTE *)"Init RDB";
+                                es.es_Title        = (UBYTE *)GS(MSG_PV_INIT_TITLE);
                                 es.es_TextFormat   = (UBYTE *)msg;
                                 es.es_GadgetFormat =
-                                    (UBYTE *)"Re-init|Update Geometry|Manual...|Cancel";
+                                    (UBYTE *)GS(MSG_PV_INIT_HAS_RDB_GADGETS);
                                 choice = EasyRequest(win, &es, NULL);
 
                                 if (choice == 1) {
@@ -2504,17 +2526,14 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 char msg_nordb[512];
                                 geom_retry = FALSE;
 
-                                sprintf(msg_nordb,
-                                    "Create a new RDB on this disk?\n"
-                                    "All existing data will be lost.\n\n"
-                                    "Manual...: enter geometry by hand.%s",
+                                sprintf(msg_nordb, GS(MSG_PV_INIT_NO_RDB_BODY),
                                     driver_warn);
 
                                 es.es_StructSize   = sizeof(es);
                                 es.es_Flags        = 0;
-                                es.es_Title        = (UBYTE *)"Init RDB";
+                                es.es_Title        = (UBYTE *)GS(MSG_PV_INIT_TITLE);
                                 es.es_TextFormat   = (UBYTE *)msg_nordb;
-                                es.es_GadgetFormat = (UBYTE *)"Yes|Manual...|No";
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_INIT_NO_RDB_GADGETS);
                                 choice = EasyRequest(win, &es, NULL);
 
                                 if (choice == 1) {
@@ -2578,7 +2597,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                         new_pi.dev_flags     = 0;
                         /* flags: 0 = bootable */
 
-                        if (partition_dialog(&new_pi, "Add Partition", rdb, TRUE)) {
+                        if (partition_dialog(&new_pi, GS(MSG_PV_DLG_ADD_PART), rdb, TRUE)) {
                             rdb->parts[rdb->num_parts++] = new_pi;
                             dirty = TRUE;
                             /* New partition needs a reboot to mount unless it
@@ -2596,7 +2615,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                         if (sel >= 0 && sel < (WORD)rdb->num_parts) {
                             ULONG old_hi = rdb->parts[sel].high_cyl;
                             if (partition_dialog(&rdb->parts[sel],
-                                                 "Edit Partition", rdb, FALSE)) {
+                                                 GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
                                 {
                                 int g = offer_ffs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
@@ -2621,15 +2640,13 @@ BOOL partview_run(const char *devname, ULONG unit)
                         if (sel >= 0 && sel < (WORD)rdb->num_parts) {
                             struct EasyStruct es;
                             char msg[128];
-                            sprintf(msg,
-                                "Delete partition %s?\n"
-                                "All data on this partition will be lost!",
+                            sprintf(msg, GS(MSG_PV_DELETE_BODY),
                                 rdb->parts[sel].drive_name);
                             es.es_StructSize   = sizeof(es);
                             es.es_Flags        = 0;
-                            es.es_Title        = (UBYTE *)"Delete Partition";
+                            es.es_Title        = (UBYTE *)GS(MSG_PV_DELETE_TITLE);
                             es.es_TextFormat   = (UBYTE *)msg;
-                            es.es_GadgetFormat = (UBYTE *)"Yes|No";
+                            es.es_GadgetFormat = (UBYTE *)GS(MSG_YES_NO);
                             if (EasyRequest(win, &es, NULL) == 1) {
                                 UWORD j;
                                 /* Remember the name so we can unmount it after
@@ -2673,8 +2690,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                             es.es_StructSize   = sizeof(es);
                             es.es_Flags        = 0;
                             es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
-                            es.es_TextFormat   = (UBYTE *)"No RDB found.\nInit RDB first.";
-                            es.es_GadgetFormat = (UBYTE *)"OK";
+                            es.es_TextFormat   = (UBYTE *)GS(MSG_PV_NO_RDB_INIT_FIRST);
+                            es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                             EasyRequest(win, &es, NULL);
                         } else {
                             if (filesystem_manager_dialog(rdb))
@@ -2688,8 +2705,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                         es.es_StructSize   = sizeof(es);
                         es.es_Flags        = 0;
                         es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
-                        es.es_TextFormat   = (UBYTE *)"Write partition table to disk?\nAll existing data may be lost!";
-                        es.es_GadgetFormat = (UBYTE *)"Write|Cancel";
+                        es.es_TextFormat   = (UBYTE *)GS(MSG_PV_WRITE_CONFIRM_BODY);
+                        es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_WRITE_CANCEL);
                         if (EasyRequest(win, &es, NULL) != 1) break;
 
                         write_ok = (bd != NULL) && RDB_Write(bd, rdb);
@@ -2711,59 +2728,48 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                             if (new_lo > rdb->lo_cyl && blk_part < 0) {
                                 /* Safe: no partition starts inside the new reserved area */
-                                sprintf(wfmt,
-                                    "Metadata overflow:\n"
-                                    "need %lu blocks, only %lu available\n"
-                                    "(lo_cyl=%lu, %lu blks/cyl).\n\n"
-                                    "Increase reserved area to lo_cyl=%lu\n"
-                                    "and write now?",
+                                sprintf(wfmt, GS(MSG_PV_OVERFLOW_INCREASE_BODY),
                                     (unsigned long)bd->last_overflow_need,
                                     (unsigned long)bd->last_overflow_avail,
                                     (unsigned long)rdb->lo_cyl,
                                     (unsigned long)blks_per_cyl,
                                     (unsigned long)new_lo);
                                 es.es_TextFormat   = (UBYTE *)wfmt;
-                                es.es_GadgetFormat = (UBYTE *)"Increase & Write|Cancel";
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_OVERFLOW_INCREASE_GADGETS);
                                 if (EasyRequest(win, &es, NULL) == 1) {
                                     rdb->lo_cyl = new_lo;
                                     dirty       = TRUE;
                                     write_ok    = RDB_Write(bd, rdb);
                                     if (!write_ok) {
-                                        sprintf(wfmt, "Write failed after lo_cyl increase (err %d).",
+                                        sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_LOCYL),
                                             (int)bd->last_io_err);
                                         es.es_TextFormat   = (UBYTE *)wfmt;
-                                        es.es_GadgetFormat = (UBYTE *)"OK";
+                                        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                         EasyRequest(win, &es, NULL);
                                     }
                                 }
                             } else if (blk_part >= 0) {
                                 /* A partition blocks the expansion */
-                                sprintf(wfmt,
-                                    "Metadata overflow: need lo_cyl=%lu,\n"
-                                    "but %s starts at cyl %lu.\n\n"
-                                    "Move %s to cyl %lu or later first.",
+                                sprintf(wfmt, GS(MSG_PV_OVERFLOW_BLOCKED),
                                     (unsigned long)new_lo,
                                     rdb->parts[blk_part].drive_name,
                                     (unsigned long)rdb->parts[blk_part].low_cyl,
                                     rdb->parts[blk_part].drive_name,
                                     (unsigned long)new_lo);
                                 es.es_TextFormat   = (UBYTE *)wfmt;
-                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                 EasyRequest(win, &es, NULL);
                             } else {
-                                sprintf(wfmt, "Metadata overflow: need %lu blocks, "
-                                    "only %lu available.",
+                                sprintf(wfmt, GS(MSG_PV_OVERFLOW_PLAIN),
                                     (unsigned long)bd->last_overflow_need,
                                     (unsigned long)bd->last_overflow_avail);
                                 es.es_TextFormat   = (UBYTE *)wfmt;
-                                es.es_GadgetFormat = (UBYTE *)"OK";
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                 EasyRequest(win, &es, NULL);
                             }
                         } else if (!write_ok) {
                             if (bd && bd->last_io_err == 1)
-                                sprintf(wfmt,
-                                    "Verify fail blk %lu off %lu\n"
-                                    "W:%02X%02X%02X%02X R:%02X%02X%02X%02X",
+                                sprintf(wfmt, GS(MSG_PV_VERIFY_FAIL_FMT),
                                     (unsigned long)bd->last_verify_block,
                                     (unsigned long)bd->last_verify_off,
                                     bd->last_wrote[0], bd->last_wrote[1],
@@ -2771,10 +2777,10 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     bd->last_read[0],  bd->last_read[1],
                                     bd->last_read[2],  bd->last_read[3]);
                             else
-                                sprintf(wfmt, "Write failed (err %d)!\nCheck device and try again.",
+                                sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
                                     bd ? (int)bd->last_io_err : 0);
                             es.es_TextFormat   = (UBYTE *)wfmt;
-                            es.es_GadgetFormat = (UBYTE *)"OK";
+                            es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                             EasyRequest(win, &es, NULL);
                         }
 
@@ -2785,15 +2791,13 @@ BOOL partview_run(const char *devname, ULONG unit)
                             if (unmount_deleted_partitions(win, rdb))
                                 needs_reboot = TRUE;
                             if (BlockDev_HasMBR(bd)) {
-                                es.es_TextFormat   = (UBYTE *)"PC partition table (MBR) found on block 0.\nErase it?";
-                                es.es_GadgetFormat = (UBYTE *)"Erase|Keep";
+                                es.es_TextFormat   = (UBYTE *)GS(MSG_PV_MBR_FOUND_BODY);
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_MBR_ERASE_KEEP);
                                 if (EasyRequest(win, &es, NULL) == 1)
                                     BlockDev_EraseMBR(bd);
                             }
                             if (needs_reboot) {
-                                offer_reboot(win,
-                                    "Partition table written.\n"
-                                    "Reboot now for changes to take effect.");
+                                offer_reboot(win, GS(MSG_PV_REBOOT_WRITTEN));
                                 needs_reboot = FALSE;
                             }
                         }
@@ -2807,8 +2811,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                             es.es_StructSize   = sizeof(es);
                             es.es_Flags        = 0;
                             es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
-                            es.es_TextFormat   = (UBYTE *)"You have unsaved changes.\nWrite partition table to disk?";
-                            es.es_GadgetFormat = (UBYTE *)"Write|Discard|Cancel";
+                            es.es_TextFormat   = (UBYTE *)GS(MSG_PV_UNSAVED_BODY);
+                            es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_WRITE_DISCARD_CANCEL);
                             r = EasyRequest(win, &es, NULL);
                             if (r == 0) break;           /* Cancel - stay */
                             if (r == 1 && bd) {          /* Write */
@@ -2819,16 +2823,14 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     if (unmount_deleted_partitions(win, rdb))
                                         needs_reboot = TRUE;
                                     if (needs_reboot) {
-                                        offer_reboot(win,
-                                            "Partition table written.\n"
-                                            "Reboot now for changes to take effect.");
+                                        offer_reboot(win, GS(MSG_PV_REBOOT_WRITTEN));
                                         needs_reboot = FALSE;
                                     }
                                 } else {
-                                    sprintf(wfmt, "Write failed (err %d)!\nCheck device and try again.",
+                                    sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
                                             (int)bd->last_io_err);
                                     es.es_TextFormat   = (UBYTE *)wfmt;
-                                    es.es_GadgetFormat = (UBYTE *)"OK";
+                                    es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                     EasyRequest(win, &es, NULL);
                                     break; /* stay open */
                                 }
@@ -2837,9 +2839,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                         } else if (needs_reboot) {
                             /* RDB was already written outside the dirty path
                                (Partition Move writes RDB itself). */
-                            offer_reboot(win,
-                                "Disk layout has changed.\n"
-                                "Reboot now for changes to take effect.");
+                            offer_reboot(win, GS(MSG_PV_REBOOT_LAYOUT));
                             needs_reboot = FALSE;
                         }
                         running = FALSE; break;

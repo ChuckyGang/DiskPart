@@ -29,6 +29,7 @@
 #include <proto/gadtools.h>
 
 #include "clib.h"
+#include "locale_support.h"
 #include "rdb.h"
 #include "devices.h"
 #include "version.h"
@@ -50,17 +51,17 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
 
     if (!rdb->valid) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Backup RDB Block";
-        es.es_TextFormat=(UBYTE*)"No RDB found on this disk.\nNothing to backup.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_RDB_NOTHING);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Backup RDB Block";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -71,9 +72,9 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
     if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
         FreeVec(buf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Backup RDB Block";
-        es.es_TextFormat=(UBYTE*)"Failed to read RDB block from disk.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_READ_RDB_FAILED);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -81,9 +82,9 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
     if (!AslBase) {
         FreeVec(buf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Backup RDB Block";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -92,7 +93,7 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
         struct FileRequester *fr;
         BOOL chosen = FALSE;
         { struct TagItem asl_tags[] = {
-              { ASLFR_TitleText,    (ULONG)"Save RDB Block Backup" },
+              { ASLFR_TitleText,    (ULONG)GS(MSG_RDB_ASL_SAVE_BLOCK) },
               { ASLFR_DoSaveMode,   TRUE },
               { ASLFR_InitialDrawer,(ULONG)"RAM:" },
               { ASLFR_InitialFile,  (ULONG)"RDB.backup" },
@@ -114,17 +115,17 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
         BPTR fh = Open((UBYTE *)save_path, MODE_NEWFILE);
         if (!fh) {
             es.es_StructSize=sizeof(es); es.es_Flags=0;
-            es.es_Title=(UBYTE*)"Backup RDB Block";
-            es.es_TextFormat=(UBYTE*)"Cannot create backup file.";
-            es.es_GadgetFormat=(UBYTE*)"OK";
+            es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
+            es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_CREATE_BACKUP);
+            es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
             EasyRequest(win, &es, NULL);
         } else {
             Write(fh, buf, (LONG)bd->block_size);
             Close(fh);
             es.es_StructSize=sizeof(es); es.es_Flags=0;
-            es.es_Title=(UBYTE*)"Backup RDB Block";
-            es.es_TextFormat=(UBYTE*)"RDB block saved successfully.";
-            es.es_GadgetFormat=(UBYTE*)"OK";
+            es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
+            es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCK_SAVED);
+            es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
             EasyRequest(win, &es, NULL);
         }
     }
@@ -141,31 +142,25 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
 
     /* Prominent warning before doing anything else */
     es.es_StructSize=sizeof(es); es.es_Flags=0;
-    es.es_Title=(UBYTE*)"Restore RDB Block - WARNING";
-    es.es_TextFormat=(UBYTE*)
-        "WARNING: This will OVERWRITE block 0\n"
-        "on the disk with data from the backup file!\n\n"
-        "Restoring an incorrect or mismatched backup\n"
-        "WILL cause permanent data loss.\n\n"
-        "Ensure the backup matches THIS disk.\n\n"
-        "Are you absolutely sure?";
-    es.es_GadgetFormat=(UBYTE*)"Yes, restore|Cancel";
+    es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE_WARN);
+    es.es_TextFormat=(UBYTE*)GS(MSG_RDB_RESTORE_WARN_BODY);
+    es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_YES_RESTORE_CANCEL);
     if (EasyRequest(win, &es, NULL) != 1) return;
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -174,7 +169,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         struct FileRequester *fr;
         BOOL chosen = FALSE;
         { struct TagItem asl_tags[] = {
-              { ASLFR_TitleText,    (ULONG)"Select RDB Block Backup File" },
+              { ASLFR_TitleText,    (ULONG)GS(MSG_RDB_ASL_SELECT_BLOCK) },
               { ASLFR_InitialDrawer,(ULONG)"RAM:" },
               { ASLFR_InitialFile,  (ULONG)"RDB.backup" },
               { TAG_DONE, 0 } };
@@ -194,9 +189,9 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
     fh = Open((UBYTE *)load_path, MODE_OLDFILE);
     if (!fh) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"Cannot open backup file.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_OPEN_BACKUP);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -207,9 +202,9 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
     if (fsize != (LONG)bd->block_size) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"Backup file size does not match\nthe device block size. Aborted.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BACKUP_SIZE_MISMATCH);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -220,9 +215,9 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
     if (Read(fh, buf, fsize) != fsize) {
         Close(fh); FreeVec(buf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"File read error.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILE_READ_ERROR);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -230,29 +225,25 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
 
     /* Second confirmation - shown after the file is chosen, names the device */
     { char msg[160];
-      sprintf(msg,
-          "LAST CHANCE\n\n"
-          "Write backup to block 0 of\n"
-          "%s unit %lu ?\n\n"
-          "This CANNOT be undone.",
+      sprintf(msg, GS(MSG_RDB_LAST_CHANCE_BLOCK0_FMT),
           bd->devname, (unsigned long)bd->unit);
       es.es_StructSize=sizeof(es); es.es_Flags=0;
-      es.es_Title=(UBYTE*)"Restore RDB Block - FINAL WARNING";
+      es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE_FINAL);
       es.es_TextFormat=(UBYTE*)msg;
-      es.es_GadgetFormat=(UBYTE*)"Write it|Cancel";
+      es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_WRITE_IT_CANCEL);
       if (EasyRequest(win, &es, NULL) != 1) { FreeVec(buf); return; } }
 
     if (!BlockDev_WriteBlock(bd, 0, buf)) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"Failed to write block to disk.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_WRITE_BLOCK_FAILED);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
     } else {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore RDB Block";
-        es.es_TextFormat=(UBYTE*)"RDB block restored to block 0.\nPlease reboot for changes to take effect.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCK_RESTORED);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
     }
     FreeVec(buf);
@@ -280,16 +271,16 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
 
     if (!rdb->valid) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Backup";
-        es.es_TextFormat=(UBYTE*)"No RDB found on this disk.\nNothing to backup.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_RDB_NOTHING);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Backup";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -300,9 +291,9 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
     if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
         FreeVec(buf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Backup";
-        es.es_TextFormat=(UBYTE*)"Failed to read RDB block from disk.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_READ_RDB_FAILED);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
     { struct RigidDiskBlock *r = (struct RigidDiskBlock *)buf;
@@ -316,9 +307,9 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
     if (!AslBase) {
         FreeVec(buf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Backup";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -343,7 +334,7 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
 
     { struct FileRequester *fr; BOOL chosen = FALSE;
       { struct TagItem at[] = {
-            { ASLFR_TitleText,    (ULONG)"Save Extended RDB Backup" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_RDB_ASL_SAVE_EXT) },
             { ASLFR_DoSaveMode,   TRUE },
             { ASLFR_InitialDrawer,(ULONG)"RAM:" },
             { ASLFR_InitialFile,  (ULONG)init_file },
@@ -365,9 +356,9 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
       if (!fh) {
           FreeVec(buf);
           es.es_StructSize=sizeof(es); es.es_Flags=0;
-          es.es_Title=(UBYTE*)"Extended Backup";
-          es.es_TextFormat=(UBYTE*)"Cannot create backup file.";
-          es.es_GadgetFormat=(UBYTE*)"OK";
+          es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+          es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_CREATE_BACKUP);
+          es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
           EasyRequest(win, &es, NULL); return;
       }
 
@@ -378,9 +369,9 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
       if (Write(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ) {
           Close(fh); FreeVec(buf);
           es.es_StructSize=sizeof(es); es.es_Flags=0;
-          es.es_Title=(UBYTE*)"Extended Backup";
-          es.es_TextFormat=(UBYTE*)"Write error saving header.";
-          es.es_GadgetFormat=(UBYTE*)"OK";
+          es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+          es.es_TextFormat=(UBYTE*)GS(MSG_RDB_WRITE_ERR_HEADER);
+          es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
           EasyRequest(win, &es, NULL); return;
       }
 
@@ -391,22 +382,22 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
           if (Write(fh, buf, (LONG)bd->block_size) != (LONG)bd->block_size) {
               Close(fh); FreeVec(buf);
               es.es_StructSize=sizeof(es); es.es_Flags=0;
-              es.es_Title=(UBYTE*)"Extended Backup";
-              es.es_TextFormat=(UBYTE*)"Write error saving block data.";
-              es.es_GadgetFormat=(UBYTE*)"OK";
+              es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
+              es.es_TextFormat=(UBYTE*)GS(MSG_RDB_WRITE_ERR_BLOCKDATA);
+              es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
               EasyRequest(win, &es, NULL); return;
           }
       }
       Close(fh);
       { char msg[96];
-        sprintf(msg, "Extended RDB backup saved.\n%lu blocks (blocks %lu-%lu).",
+        sprintf(msg, GS(MSG_RDB_EXT_BACKUP_SAVED_FMT),
                 (unsigned long)num_blocks,
                 (unsigned long)block_lo,
                 (unsigned long)block_hi);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Backup";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_BACKUP_TITLE);
         es.es_TextFormat=(UBYTE*)msg;
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); }
     }
     FreeVec(buf);
@@ -424,34 +415,29 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     es.es_StructSize=sizeof(es); es.es_Flags=0;
-    es.es_Title=(UBYTE*)"Extended Restore - WARNING";
-    es.es_TextFormat=(UBYTE*)
-        "WARNING: This will OVERWRITE multiple blocks\n"
-        "(RDB, partitions, filesystems) on the disk!\n\n"
-        "An incorrect backup WILL destroy the disk layout.\n"
-        "Ensure the backup matches THIS disk.\n\n"
-        "Are you absolutely sure?";
-    es.es_GadgetFormat=(UBYTE*)"Yes, restore|Cancel";
+    es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE_WARN);
+    es.es_TextFormat=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_WARN_BODY);
+    es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_YES_RESTORE_CANCEL);
     if (EasyRequest(win, &es, NULL) != 1) return;
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     { struct FileRequester *fr; BOOL chosen = FALSE;
       { struct TagItem at[] = {
-            { ASLFR_TitleText,    (ULONG)"Select Extended RDB Backup File" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_RDB_ASL_SELECT_EXT) },
             { ASLFR_InitialDrawer,(ULONG)"RAM:" },
             { ASLFR_InitialFile,  (ULONG)"RDB_extended.backup" },
             { TAG_DONE, 0 } };
@@ -471,9 +457,9 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
     fh = Open((UBYTE *)load_path, MODE_OLDFILE);
     if (!fh) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"Cannot open backup file.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_OPEN_BACKUP);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -484,9 +470,9 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
     if (fsize < ERDB_HDR_SZ) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"File too small - not a valid extended backup.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILE_TOO_SMALL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -494,9 +480,9 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         hdr[0] != ERDB_MAGIC || hdr[1] != ERDB_VERSION) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"Not a valid extended RDB backup.\n(Bad magic or unsupported version.)";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NOT_VALID_EXT_BACKUP);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
     block_lo   = hdr[2];
@@ -506,35 +492,31 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
     if (block_size != bd->block_size) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"Block size mismatch between backup\nand this device. Aborted.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCKSIZE_MISMATCH);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
     if (fsize != (LONG)(ERDB_HDR_SZ + num_blocks * block_size)) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Extended Restore";
-        es.es_TextFormat=(UBYTE*)"File size does not match header.\nBackup may be corrupt. Aborted.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILESIZE_MISMATCH_HDR);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     /* Final confirmation */
     { char msg[192];
-      sprintf(msg,
-          "LAST CHANCE\n\n"
-          "Write %lu blocks (blocks %lu-%lu) to\n"
-          "%s unit %lu ?\n\n"
-          "This CANNOT be undone.",
+      sprintf(msg, GS(MSG_RDB_LAST_CHANCE_NBLKS_FMT),
           (unsigned long)num_blocks,
           (unsigned long)block_lo,
           (unsigned long)(block_lo + num_blocks - 1),
           bd->devname, (unsigned long)bd->unit);
       es.es_StructSize=sizeof(es); es.es_Flags=0;
-      es.es_Title=(UBYTE*)"Extended Restore - FINAL WARNING";
+      es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE_FINAL);
       es.es_TextFormat=(UBYTE*)msg;
-      es.es_GadgetFormat=(UBYTE*)"Write it|Cancel";
+      es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_WRITE_IT_CANCEL);
       if (EasyRequest(win, &es, NULL) != 1) { Close(fh); return; }
     }
 
@@ -545,28 +527,28 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         if (Read(fh, buf, (LONG)block_size) != (LONG)block_size) {
             Close(fh); FreeVec(buf);
             es.es_StructSize=sizeof(es); es.es_Flags=0;
-            es.es_Title=(UBYTE*)"Extended Restore";
-            es.es_TextFormat=(UBYTE*)"Read error on backup file.";
-            es.es_GadgetFormat=(UBYTE*)"OK";
+            es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+            es.es_TextFormat=(UBYTE*)GS(MSG_RDB_READ_ERR_BACKUP);
+            es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
             EasyRequest(win, &es, NULL); return;
         }
         if (!BlockDev_WriteBlock(bd, block_lo + blk, buf)) {
             Close(fh); FreeVec(buf);
             { char msg[80];
-              sprintf(msg, "Write failed on block %lu.", (unsigned long)(block_lo + blk));
+              sprintf(msg, GS(MSG_RDB_WRITE_FAILED_BLK_FMT), (unsigned long)(block_lo + blk));
               es.es_StructSize=sizeof(es); es.es_Flags=0;
-              es.es_Title=(UBYTE*)"Extended Restore";
+              es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
               es.es_TextFormat=(UBYTE*)msg;
-              es.es_GadgetFormat=(UBYTE*)"OK";
+              es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
               EasyRequest(win, &es, NULL); }
             return;
         }
     }
     Close(fh); FreeVec(buf);
     es.es_StructSize=sizeof(es); es.es_Flags=0;
-    es.es_Title=(UBYTE*)"Extended Restore";
-    es.es_TextFormat=(UBYTE*)"Extended RDB restored successfully.\nPlease reboot for changes to take effect.";
-    es.es_GadgetFormat=(UBYTE*)"OK";
+    es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
+    es.es_TextFormat=(UBYTE*)GS(MSG_RDB_EXT_RESTORED_OK);
+    es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
     EasyRequest(win, &es, NULL);
 }
 
@@ -651,7 +633,7 @@ static BOOL vrdb_make_gadgets(APTR vi, struct Screen *scr,
       ng.ng_Height     = btn_h;
       ng.ng_Width      = inner_w - pad * 2;
       ng.ng_LeftEdge   = bor_l + pad;
-      ng.ng_GadgetText = "Close";
+      ng.ng_GadgetText = GS(MSG_CLOSE);
       ng.ng_GadgetID   = VRDB_DONE;
       ng.ng_Flags      = PLACETEXT_IN;
       prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
@@ -670,9 +652,9 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"View RDB Block";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VIEW_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -687,9 +669,9 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
       if (!BlockDev_ReadBlock(bd, read_blk, buf)) {
           FreeVec(buf);
           es.es_StructSize=sizeof(es); es.es_Flags=0;
-          es.es_Title=(UBYTE*)"View RDB Block";
-          es.es_TextFormat=(UBYTE*)"Failed to read block from disk.";
-          es.es_GadgetFormat=(UBYTE*)"OK";
+          es.es_Title=(UBYTE*)GS(MSG_RDB_VIEW_TITLE);
+          es.es_TextFormat=(UBYTE*)GS(MSG_RDB_READ_BLOCK_FAILED);
+          es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
           EasyRequest(win, &es, NULL);
           return;
       }
@@ -711,14 +693,14 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
         vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
         if (!rdb->valid)
-            vrdb_add("*** No valid RDB found - showing raw block 0 ***");
+            vrdb_add(GS(MSG_RDB_NO_VALID_RAW0));
 
         /* --- Installed Filesystems (from parsed RDB) --- */
         { char b[80]; UWORD fi;
-          sprintf(b, "--- Installed Filesystems (%u) -----------------------", (unsigned)rdb->num_fs);
+          sprintf(b, GS(MSG_RDB_HDR_INST_FS_FMT), (unsigned)rdb->num_fs);
           vrdb_add(b);
           if (rdb->num_fs == 0) {
-              vrdb_add("  (none)");
+              vrdb_add(GS(MSG_RDB_NONE_INDENT));
           } else {
               for (fi = 0; fi < rdb->num_fs; fi++) {
                   const struct FSInfo *fs = &rdb->filesystems[fi];
@@ -733,8 +715,8 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
                   if (fs->code && fs->code_size > 0)
                       FormatSize((UQUAD)fs->code_size, sz);
                   else
-                      sprintf(sz, "no code");
-                  sprintf(b, "  %-12s  %-8s  %s  (blk %lu)",
+                      sprintf(sz, GS(MSG_RDB_NO_CODE));
+                  sprintf(b, GS(MSG_RDB_FS_LINE_FMT),
                           dt, ver, sz, (unsigned long)fs->block_num);
                   vrdb_add(b);
               }
@@ -742,131 +724,131 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
         }
 
         /* --- Identity --- */
-        vrdb_add("--- Identity -----------------------------------------");
-        { char b[80]; sprintf(b, "  Block number  : %lu", (unsigned long)rdb->block_num); vrdb_add(b); }
+        vrdb_add(GS(MSG_RDB_HDR_IDENTITY));
+        { char b[80]; sprintf(b, GS(MSG_RDB_BLOCK_NUMBER_FMT), (unsigned long)rdb->block_num); vrdb_add(b); }
         { char id[8], b[80];
           id[0]=(char)((r->rdb_ID>>24)&0xFF); id[1]=(char)((r->rdb_ID>>16)&0xFF);
           id[2]=(char)((r->rdb_ID>> 8)&0xFF); id[3]=(char)( r->rdb_ID     &0xFF);
           id[4]='\0';
           for (i=0;i<4;i++) if (id[i]<0x20||id[i]>0x7E) id[i]='.';
-          sprintf(b, "  ID            : %s  (0x%08lX)", id, (unsigned long)r->rdb_ID);
+          sprintf(b, GS(MSG_RDB_ID_FMT), id, (unsigned long)r->rdb_ID);
           vrdb_add(b); }
-        { char b[80]; sprintf(b, "  SummedLongs   : %lu  (%lu bytes covered)",
+        { char b[80]; sprintf(b, GS(MSG_RDB_SUMMEDLONGS_FMT),
               (unsigned long)r->rdb_SummedLongs,
               (unsigned long)(r->rdb_SummedLongs * 4)); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Checksum      : 0x%08lX  [%s]",
+        { char b[80]; sprintf(b, GS(MSG_RDB_CHECKSUM_FMT),
               (unsigned long)(ULONG)r->rdb_ChkSum,
-              (sum == 0) ? "VALID" : "INVALID"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  HostID        : %lu", (unsigned long)r->rdb_HostID); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  BlockBytes    : %lu", (unsigned long)r->rdb_BlockBytes); vrdb_add(b); }
+              (sum == 0) ? GS(MSG_RDB_VALID) : GS(MSG_RDB_INVALID)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_HOSTID_FMT), (unsigned long)r->rdb_HostID); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BLOCKBYTES_FMT), (unsigned long)r->rdb_BlockBytes); vrdb_add(b); }
 
         /* --- Flags --- */
-        { char b[80]; sprintf(b, "--- Flags: 0x%08lX ---------------------------", (unsigned long)r->rdb_Flags); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit0 LAST      : %s", (r->rdb_Flags & RDBFF_LAST)      ? "SET  (no more disks after this)"       : "not set"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit1 LASTLUN   : %s", (r->rdb_Flags & RDBFF_LASTLUN)   ? "SET  (no more LUNs at this target)"    : "not set"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit2 LASTTID   : %s", (r->rdb_Flags & RDBFF_LASTTID)   ? "SET  (no more target IDs on this bus)" : "not set"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit3 NORESELECT: %s", (r->rdb_Flags & RDBFF_NORESELECT) ? "SET  (no reselect)"                   : "not set"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit4 DISKID    : %s", (r->rdb_Flags & RDBFF_DISKID)     ? "SET  (disk identification valid)"     : "not set (disk ID fields may be garbage)"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit5 CTRLRID   : %s", (r->rdb_Flags & RDBFF_CTRLRID)    ? "SET  (controller ID valid)"           : "not set (ctrl ID fields may be garbage)"); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Bit6 SYNCH     : %s", (r->rdb_Flags & RDBFF_SYNCH)      ? "SET  (SCSI synchronous mode)"         : "not set"); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_HDR_FLAGS_FMT), (unsigned long)r->rdb_Flags); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT0_LAST_FMT), (r->rdb_Flags & RDBFF_LAST)      ? GS(MSG_RDB_FLAG_SET_NOMORE_DISKS)  : GS(MSG_RDB_NOT_SET)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT1_LASTLUN_FMT), (r->rdb_Flags & RDBFF_LASTLUN)   ? GS(MSG_RDB_FLAG_SET_NOMORE_LUNS)   : GS(MSG_RDB_NOT_SET)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT2_LASTTID_FMT), (r->rdb_Flags & RDBFF_LASTTID)   ? GS(MSG_RDB_FLAG_SET_NOMORE_TIDS)   : GS(MSG_RDB_NOT_SET)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT3_NORESELECT_FMT), (r->rdb_Flags & RDBFF_NORESELECT) ? GS(MSG_RDB_FLAG_SET_NORESELECT)    : GS(MSG_RDB_NOT_SET)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT4_DISKID_FMT), (r->rdb_Flags & RDBFF_DISKID)     ? GS(MSG_RDB_FLAG_SET_DISKID_VALID)  : GS(MSG_RDB_NOT_SET_DISKID_GARBAGE)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT5_CTRLRID_FMT), (r->rdb_Flags & RDBFF_CTRLRID)    ? GS(MSG_RDB_FLAG_SET_CTRLID_VALID)  : GS(MSG_RDB_NOT_SET_CTRLID_GARBAGE)); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_BIT6_SYNCH_FMT), (r->rdb_Flags & RDBFF_SYNCH)      ? GS(MSG_RDB_FLAG_SET_SYNCH)         : GS(MSG_RDB_NOT_SET)); vrdb_add(b); }
 
         /* --- Block List Heads --- */
-        vrdb_add("--- Block List Heads ---------------------------------");
+        vrdb_add(GS(MSG_RDB_HDR_BLOCKLISTS));
         { char v[32], b[80];
-          if (r->rdb_BadBlockList == RDB_END_MARK) sprintf(v,"none");
+          if (r->rdb_BadBlockList == RDB_END_MARK) sprintf(v,GS(MSG_RDB_NONE));
           else sprintf(v,"%lu",(unsigned long)r->rdb_BadBlockList);
-          sprintf(b,"  BadBlockList   : %s  (0x%08lX)", v, (unsigned long)r->rdb_BadBlockList); vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_BADBLOCKLIST_FMT), v, (unsigned long)r->rdb_BadBlockList); vrdb_add(b); }
         { char v[32], b[80];
-          if (r->rdb_PartitionList == RDB_END_MARK) sprintf(v,"none");
+          if (r->rdb_PartitionList == RDB_END_MARK) sprintf(v,GS(MSG_RDB_NONE));
           else sprintf(v,"%lu",(unsigned long)r->rdb_PartitionList);
-          sprintf(b,"  PartitionList  : %s  (0x%08lX)", v, (unsigned long)r->rdb_PartitionList); vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_PARTITIONLIST_FMT), v, (unsigned long)r->rdb_PartitionList); vrdb_add(b); }
         { char v[32], b[80];
-          if (r->rdb_FileSysHeaderList == RDB_END_MARK) sprintf(v,"none");
+          if (r->rdb_FileSysHeaderList == RDB_END_MARK) sprintf(v,GS(MSG_RDB_NONE));
           else sprintf(v,"%lu",(unsigned long)r->rdb_FileSysHeaderList);
-          sprintf(b,"  FileSysHdrList : %s  (0x%08lX)", v, (unsigned long)r->rdb_FileSysHeaderList); vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_FILESYSHDRLIST_FMT), v, (unsigned long)r->rdb_FileSysHeaderList); vrdb_add(b); }
         { char v[32], b[80];
-          if (r->rdb_DriveInit == RDB_END_MARK) sprintf(v,"none");
+          if (r->rdb_DriveInit == RDB_END_MARK) sprintf(v,GS(MSG_RDB_NONE));
           else sprintf(v,"%lu",(unsigned long)r->rdb_DriveInit);
-          sprintf(b,"  DriveInit      : %s  (0x%08lX)", v, (unsigned long)r->rdb_DriveInit); vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_DRIVEINIT_FMT), v, (unsigned long)r->rdb_DriveInit); vrdb_add(b); }
 
         /* --- Physical Drive --- */
-        vrdb_add("--- Physical Drive Characteristics -------------------");
-        { char b[80]; sprintf(b, "  Cylinders      : %lu", (unsigned long)r->rdb_Cylinders);   vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Sectors/track  : %lu", (unsigned long)r->rdb_Sectors);     vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Heads          : %lu", (unsigned long)r->rdb_Heads);       vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Interleave     : %lu", (unsigned long)r->rdb_Interleave);  vrdb_add(b); }
-        { char b[80]; sprintf(b, "  Park cylinder  : %lu", (unsigned long)r->rdb_Park);        vrdb_add(b); }
+        vrdb_add(GS(MSG_RDB_HDR_PHYSICAL));
+        { char b[80]; sprintf(b, GS(MSG_RDB_CYLINDERS_FMT), (unsigned long)r->rdb_Cylinders);   vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_SECTORS_TRACK_FMT), (unsigned long)r->rdb_Sectors);     vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_HEADS_FMT), (unsigned long)r->rdb_Heads);       vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_INTERLEAVE_FMT), (unsigned long)r->rdb_Interleave);  vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_PARK_CYL_FMT), (unsigned long)r->rdb_Park);        vrdb_add(b); }
         { char v[32], b[80];
-          if (r->rdb_WritePreComp == RDB_END_MARK) sprintf(v,"not used");
+          if (r->rdb_WritePreComp == RDB_END_MARK) sprintf(v,GS(MSG_RDB_NOT_USED));
           else sprintf(v,"%lu",(unsigned long)r->rdb_WritePreComp);
-          sprintf(b,"  WritePreComp   : %s", v); vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_WRITEPRECOMP_FMT), v); vrdb_add(b); }
         { char v[32], b[80];
-          if (r->rdb_ReducedWrite == RDB_END_MARK) sprintf(v,"not used");
+          if (r->rdb_ReducedWrite == RDB_END_MARK) sprintf(v,GS(MSG_RDB_NOT_USED));
           else sprintf(v,"%lu",(unsigned long)r->rdb_ReducedWrite);
-          sprintf(b,"  ReducedWrite   : %s", v); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  StepRate       : %lu", (unsigned long)r->rdb_StepRate);    vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_REDUCEDWRITE_FMT), v); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_STEPRATE_FMT), (unsigned long)r->rdb_StepRate);    vrdb_add(b); }
 
         /* --- Logical Drive --- */
-        vrdb_add("--- Logical Drive Characteristics --------------------");
-        { char b[80]; sprintf(b, "  RDBBlocksLo    : %lu", (unsigned long)r->rdb_RDBBlocksLo);  vrdb_add(b); }
-        { char b[80]; sprintf(b, "  RDBBlocksHi    : %lu", (unsigned long)r->rdb_RDBBlocksHi);  vrdb_add(b); }
-        { char b[80]; sprintf(b, "  LoCylinder     : %lu", (unsigned long)r->rdb_LoCylinder);   vrdb_add(b); }
-        { char b[80]; sprintf(b, "  HiCylinder     : %lu", (unsigned long)r->rdb_HiCylinder);   vrdb_add(b); }
-        { char b[80]; sprintf(b, "  CylBlocks      : %lu  (%lu sectors x %lu heads)",
+        vrdb_add(GS(MSG_RDB_HDR_LOGICAL));
+        { char b[80]; sprintf(b, GS(MSG_RDB_RDBBLOCKSLO_FMT), (unsigned long)r->rdb_RDBBlocksLo);  vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_RDBBLOCKSHI_FMT), (unsigned long)r->rdb_RDBBlocksHi);  vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_LOCYLINDER_FMT), (unsigned long)r->rdb_LoCylinder);   vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_HICYLINDER_FMT), (unsigned long)r->rdb_HiCylinder);   vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_CYLBLOCKS_FMT),
               (unsigned long)r->rdb_CylBlocks,
               (unsigned long)r->rdb_Sectors,
               (unsigned long)r->rdb_Heads); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  AutoParkSecs   : %lu", (unsigned long)r->rdb_AutoParkSeconds); vrdb_add(b); }
-        { char b[80]; sprintf(b, "  HighRDSKBlock  : %lu", (unsigned long)r->rdb_HighRDSKBlock); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_AUTOPARKSECS_FMT), (unsigned long)r->rdb_AutoParkSeconds); vrdb_add(b); }
+        { char b[80]; sprintf(b, GS(MSG_RDB_HIGHRDSKBLOCK_FMT), (unsigned long)r->rdb_HighRDSKBlock); vrdb_add(b); }
 
         /* --- Drive Identification --- */
-        vrdb_add("--- Drive Identification -----------------------------");
-        { char s[20], b[80]; vrdb_str(r->rdb_DiskVendor,        8, s, sizeof(s)); sprintf(b,"  Disk Vendor    : %s", s); vrdb_add(b); }
-        { char s[20], b[80]; vrdb_str(r->rdb_DiskProduct,       16, s, sizeof(s)); sprintf(b,"  Disk Product   : %s", s); vrdb_add(b); }
-        { char s[8],  b[80]; vrdb_str(r->rdb_DiskRevision,       4, s, sizeof(s)); sprintf(b,"  Disk Revision  : %s", s); vrdb_add(b); }
-        { char s[20], b[80]; vrdb_str(r->rdb_ControllerVendor,   8, s, sizeof(s)); sprintf(b,"  Ctrl Vendor    : %s", s); vrdb_add(b); }
-        { char s[20], b[80]; vrdb_str(r->rdb_ControllerProduct, 16, s, sizeof(s)); sprintf(b,"  Ctrl Product   : %s", s); vrdb_add(b); }
-        { char s[8],  b[80]; vrdb_str(r->rdb_ControllerRevision, 4, s, sizeof(s)); sprintf(b,"  Ctrl Revision  : %s", s); vrdb_add(b); }
+        vrdb_add(GS(MSG_RDB_HDR_DRIVE_ID));
+        { char s[20], b[80]; vrdb_str(r->rdb_DiskVendor,        8, s, sizeof(s)); sprintf(b,GS(MSG_RDB_DISK_VENDOR_FMT), s); vrdb_add(b); }
+        { char s[20], b[80]; vrdb_str(r->rdb_DiskProduct,       16, s, sizeof(s)); sprintf(b,GS(MSG_RDB_DISK_PRODUCT_FMT), s); vrdb_add(b); }
+        { char s[8],  b[80]; vrdb_str(r->rdb_DiskRevision,       4, s, sizeof(s)); sprintf(b,GS(MSG_RDB_DISK_REVISION_FMT), s); vrdb_add(b); }
+        { char s[20], b[80]; vrdb_str(r->rdb_ControllerVendor,   8, s, sizeof(s)); sprintf(b,GS(MSG_RDB_CTRL_VENDOR_FMT), s); vrdb_add(b); }
+        { char s[20], b[80]; vrdb_str(r->rdb_ControllerProduct, 16, s, sizeof(s)); sprintf(b,GS(MSG_RDB_CTRL_PRODUCT_FMT), s); vrdb_add(b); }
+        { char s[8],  b[80]; vrdb_str(r->rdb_ControllerRevision, 4, s, sizeof(s)); sprintf(b,GS(MSG_RDB_CTRL_REVISION_FMT), s); vrdb_add(b); }
         /* DriveInitName: null-terminated string (jdow extension, 40 bytes) */
         { char s[44], b[80];
           strncpy(s, r->rdb_DriveInitName, 39); s[39] = '\0';
           /* sanitize */
           { UWORD ii; for (ii=0; s[ii]; ii++) if (s[ii]<0x20||s[ii]>0x7E) s[ii]='.'; }
           if (s[0] == '\0') { s[0]='-'; s[1]='\0'; }
-          sprintf(b,"  DriveInitName  : %s", s); vrdb_add(b); }
+          sprintf(b,GS(MSG_RDB_DRIVEINITNAME_FMT), s); vrdb_add(b); }
 
         /* --- Reserved Fields --- */
-        vrdb_add("--- Reserved Fields ----------------------------------");
+        vrdb_add(GS(MSG_RDB_HDR_RESERVED));
         { UWORD ri; char b[80];
           for (ri = 0; ri < 6; ri++) {
               ULONG v = r->rdb_Reserved1[ri];
-              sprintf(b, "  Reserved1[%u]  : 0x%08lX%s", ri, (unsigned long)v,
-                      (v == 0xFFFFFFFFUL) ? "" : "  <-- modified");
+              sprintf(b, GS(MSG_RDB_RESERVED1_FMT), ri, (unsigned long)v,
+                      (v == 0xFFFFFFFFUL) ? "" : GS(MSG_RDB_MODIFIED_MARK));
               vrdb_add(b); } }
         { UWORD ri; char b[80];
           for (ri = 0; ri < 3; ri++) {
               ULONG v = r->rdb_Reserved2[ri];
-              sprintf(b, "  Reserved2[%u]  : 0x%08lX%s", ri, (unsigned long)v,
-                      (v == 0xFFFFFFFFUL) ? "" : "  <-- modified");
+              sprintf(b, GS(MSG_RDB_RESERVED2_FMT), ri, (unsigned long)v,
+                      (v == 0xFFFFFFFFUL) ? "" : GS(MSG_RDB_MODIFIED_MARK));
               vrdb_add(b); } }
         { UWORD ri; char b[80];
           for (ri = 0; ri < 5; ri++) {
               ULONG v = r->rdb_Reserved3[ri];
-              sprintf(b, "  Reserved3[%u]  : 0x%08lX%s", ri, (unsigned long)v,
-                      (v == 0xFFFFFFFFUL) ? "" : "  <-- modified");
+              sprintf(b, GS(MSG_RDB_RESERVED3_FMT), ri, (unsigned long)v,
+                      (v == 0xFFFFFFFFUL) ? "" : GS(MSG_RDB_MODIFIED_MARK));
               vrdb_add(b); } }
         { char b[80]; ULONG v = r->rdb_Reserved4;
-          sprintf(b, "  Reserved4     : 0x%08lX%s", (unsigned long)v,
-                  (v == 0xFFFFFFFFUL || v == 0) ? "" : "  <-- modified");
+          sprintf(b, GS(MSG_RDB_RESERVED4_FMT), (unsigned long)v,
+                  (v == 0xFFFFFFFFUL || v == 0) ? "" : GS(MSG_RDB_MODIFIED_MARK));
           vrdb_add(b); }
 
         /* --- Extra data: bytes 256-511 (beyond RigidDiskBlock struct) --- */
         { const UBYTE *extra = buf + sizeof(struct RigidDiskBlock);
           UWORD xlen = (UWORD)((bd->block_size > sizeof(struct RigidDiskBlock))
                                ? bd->block_size - sizeof(struct RigidDiskBlock) : 0);
-          vrdb_add("--- Extra Block Data (bytes 256-511) -----------------");
+          vrdb_add(GS(MSG_RDB_HDR_EXTRA_DATA));
           if (xlen == 0) {
-              vrdb_add("  (block size matches struct size - no extra bytes)");
+              vrdb_add(GS(MSG_RDB_EXTRA_NO_BYTES));
           } else {
               BOOL has_data = FALSE;
               UWORD xi;
@@ -874,12 +856,12 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
                   if (extra[xi] != 0x00 && extra[xi] != 0xFF) { has_data = TRUE; break; }
               if (!has_data) {
                   char b[80];
-                  sprintf(b, "  %u bytes - all 0x00 or 0xFF (nothing stored here)",
+                  sprintf(b, GS(MSG_RDB_EXTRA_ALL_FILL_FMT),
                           (unsigned)xlen);
                   vrdb_add(b);
               } else {
                   char b[80];
-                  sprintf(b, "  %u bytes, contains data:", (unsigned)xlen);
+                  sprintf(b, GS(MSG_RDB_EXTRA_HAS_DATA_FMT), (unsigned)xlen);
                   vrdb_add(b);
                   for (xi = 0; xi < xlen; xi += 16) {
                       char hex[52], asc[18];
@@ -935,7 +917,7 @@ void rdb_view_block(struct Window *win, struct BlockDev *bd,
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"RDB Block - View" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_VIEW_WINTITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
@@ -1014,9 +996,9 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Raw Block Scan";
-        es.es_TextFormat=(UBYTE*)"No device open.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RAWSCAN_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_DEVICE_OPEN);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -1046,7 +1028,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 } while(0)
 
     /* --- Pass 1: single CMD_READ --- */
-    vrdb_add("--- CMD_READ scan (single read), blocks 0-15 ---");
+    vrdb_add(GS(MSG_RDB_SCAN_SINGLE_HDR));
 
     for (blk = 0; blk < 16; blk++) {
         ULONG id; char idtxt[5]; const char *tag;
@@ -1060,11 +1042,11 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
         if (err != 0) {
-            sprintf(line, "Blk %2lu: err=%ld", (unsigned long)blk, (long)err);
+            sprintf(line, GS(MSG_RDB_SCAN_BLK_ERR_FMT), (unsigned long)blk, (long)err);
             vrdb_add(line); continue;
         }
         DECODE_ID(buf, id, idtxt, tag);
-        sprintf(line, "Blk %2lu: OK  id=%s 0x%08lX  %s",
+        sprintf(line, GS(MSG_RDB_SCAN_BLK_OK_FMT),
                 (unsigned long)blk, idtxt, id, tag);
         vrdb_add(line);
     }
@@ -1075,7 +1057,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
        RDSK but pass 2 finds it, read2 is working correctly.  If neither
        finds it, CMD_READ itself is the problem. */
     vrdb_add("");
-    vrdb_add("--- CMD_READ scan (double read = read2), blocks 0-15 ---");
+    vrdb_add(GS(MSG_RDB_SCAN_DOUBLE_HDR));
 
     for (blk = 0; blk < 16; blk++) {
         ULONG id; char idtxt[5]; const char *tag;
@@ -1099,18 +1081,18 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
         if (err != 0) {
-            sprintf(line, "Blk %2lu: err=%ld", (unsigned long)blk, (long)err);
+            sprintf(line, GS(MSG_RDB_SCAN_BLK_ERR_FMT), (unsigned long)blk, (long)err);
             vrdb_add(line); continue;
         }
         DECODE_ID(buf, id, idtxt, tag);
-        sprintf(line, "Blk %2lu: OK  id=%s 0x%08lX  %s",
+        sprintf(line, GS(MSG_RDB_SCAN_BLK_OK_FMT),
                 (unsigned long)blk, idtxt, id, tag);
         vrdb_add(line);
     }
 
     /* Re-read block 0 and show hex dump (first 128 bytes) */
     vrdb_add("");
-    vrdb_add("--- Block 0 hex dump (bytes 0-127) ---");
+    vrdb_add(GS(MSG_RDB_SCAN_BLK0_DUMP_HDR));
 
     bd->iotd.iotd_Req.io_Command = CMD_READ;
     bd->iotd.iotd_Req.io_Length  = 512;
@@ -1121,7 +1103,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
     if (err != 0) {
-        vrdb_add("(re-read block 0 failed)");
+        vrdb_add(GS(MSG_RDB_REREAD_BLK0_FAILED));
     } else {
         for (i = 0; i < 128; i += 16) {
             char *p = line;
@@ -1163,7 +1145,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
     if (rdsk_blk == 0xFFFFFFFFUL) {
         vrdb_add("");
-        vrdb_add("--- RDSK: not found in blocks 0-15 ---");
+        vrdb_add(GS(MSG_RDB_RDSK_NOT_FOUND));
     } else {
         /* Re-read RDSK block 3× with BlockDev_ReadBlock so key fields
            (PartitionList, Cylinders, etc.) are stable despite SDMAC lag.
@@ -1176,20 +1158,20 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         ULONG *lw = (ULONG *)buf;
         ULONG part_blk;
         char  hdr[48];
-        sprintf(hdr, "--- RDSK key fields (block %lu) ---", rdsk_blk);
+        sprintf(hdr, GS(MSG_RDB_RDSK_KEYFIELDS_FMT), rdsk_blk);
         vrdb_add("");
         vrdb_add(hdr);
         /* lw[7]=PartitionList  lw[16]=Cylinders  lw[17]=Sectors  lw[18]=Heads */
-        sprintf(line, "PartList=blk %lu  Cyls=%lu  Secs=%lu  Heads=%lu",
+        sprintf(line, GS(MSG_RDB_PARTLIST_CYLS_FMT),
                 lw[7], lw[16], lw[17], lw[18]);
         vrdb_add(line);
 
         part_blk = lw[7];
         vrdb_add("");
         if (part_blk == RDB_END_MARK) {
-            vrdb_add("--- PART: PartitionList = end-of-list ---");
+            vrdb_add(GS(MSG_RDB_PART_ENDOFLIST));
         } else {
-            sprintf(line, "--- PART block at blk %lu ---", part_blk);
+            sprintf(line, GS(MSG_RDB_PART_BLOCK_AT_FMT), part_blk);
             vrdb_add(line);
 
             /* Three-pass read matching RDB_Read: two priming reads then
@@ -1202,7 +1184,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                 err = 0;
 
             if (err != 0) {
-                sprintf(line, "  read err");
+                sprintf(line, GS(MSG_RDB_READ_ERR_SHORT));
                 vrdb_add(line);
             } else {
                 /* pb_DriveName BSTR @ offset 36; pb_Environment @ offset 128 */
@@ -1214,12 +1196,12 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                 ULONG  pid = ((ULONG)buf[0]<<24)|((ULONG)buf[1]<<16)|
                              ((ULONG)buf[2]<< 8)| (ULONG)buf[3];
 
-                sprintf(line, "  ID=0x%08lX  namelen=%lu", pid, (unsigned long)nlen);
+                sprintf(line, GS(MSG_RDB_PART_ID_NAMELEN_FMT), pid, (unsigned long)nlen);
                 vrdb_add(line);
 
                 /* Show raw bytes 36-43 so we can see the BSTR regardless of length */
                 { char *p = line;
-                  sprintf(p, "  name raw [36..43]: "); p += 20;
+                  sprintf(p, GS(MSG_RDB_NAME_RAW_PREFIX)); p += 20;
                   for (k = 0; k < 8; k++) {
                       sprintf(p, "%02lX ", (unsigned long)buf[36 + k]); p += 3;
                   }
@@ -1231,32 +1213,32 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                     nm[k] = (c >= 0x20 && c <= 0x7E) ? c : '.';
                 }
                 nm[nlen] = '\0';
-                sprintf(line, "  Name='%s'", nm);
+                sprintf(line, GS(MSG_RDB_PART_NAME_FMT), nm);
                 vrdb_add(line);
 
-                sprintf(line, "  env[0]=TableSz=%lu  env[1]=SizeBlk=%lu",
+                sprintf(line, GS(MSG_RDB_ENV_TABLESZ_FMT),
                         env[0], env[1]);
                 vrdb_add(line);
-                sprintf(line, "  env[3]=Heads=%lu  env[5]=Secs=%lu",
+                sprintf(line, GS(MSG_RDB_ENV_HEADS_FMT),
                         env[3], env[5]);
                 vrdb_add(line);
-                sprintf(line, "  env[9]=LoCyl=%lu  env[10]=HiCyl=%lu",
+                sprintf(line, GS(MSG_RDB_ENV_LOCYL_FMT),
                         env[9], env[10]);
                 vrdb_add(line);
-                sprintf(line, "  env[11]=NumBuf=%lu  env[15]=BootPri=%lu",
+                sprintf(line, GS(MSG_RDB_ENV_NUMBUF_FMT),
                         env[11], env[15]);
                 vrdb_add(line);
-                sprintf(line, "  env[16]=DosType=0x%08lX  raw@0xC0: %02lX %02lX %02lX %02lX",
+                sprintf(line, GS(MSG_RDB_ENV_DOSTYPE_FMT),
                         env[16],
                         (unsigned long)buf[192], (unsigned long)buf[193],
                         (unsigned long)buf[194], (unsigned long)buf[195]);
                 vrdb_add(line);
-                sprintf(line, "  env[13]=MaxXfer=0x%08lX  env[14]=Mask=0x%08lX",
+                sprintf(line, GS(MSG_RDB_ENV_MAXXFER_FMT),
                         env[13], env[14]);
                 vrdb_add(line);
 
                 /* Hex dump of env region: bytes 128-207 (env[0]-env[19]) */
-                vrdb_add("  env hex (bytes 0x80-0xCF):");
+                vrdb_add(GS(MSG_RDB_ENV_HEX_HDR));
                 { ULONG off;
                   for (off = 128; off < 208; off += 16) {
                       char *p = line;
@@ -1286,7 +1268,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
     {
         struct DosList *dl;
         vrdb_add("");
-        vrdb_add("--- DosList entries (this device+unit) ---");
+        vrdb_add(GS(MSG_RDB_DOSLIST_HDR));
         dl = LockDosList(LDF_DEVICES | LDF_READ);
         while ((dl = NextDosEntry(dl, LDF_DEVICES)) != NULL) {
             struct FileSysStartupMsg *fssm;
@@ -1324,7 +1306,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                 if (env && env[DE_TABLESIZE] >= (ULONG)DE_UPPERCYL) {
                     lo = env[DE_LOWCYL]; hi = env[DE_UPPERCYL];
                 }
-                sprintf(line, "  %s: unit=%lu dev=%s lo=%lu hi=%lu",
+                sprintf(line, GS(MSG_RDB_DOSLIST_ENTRY_FMT),
                         node_name, fssm->fssm_Unit, dev_name,
                         (unsigned long)lo, (unsigned long)hi);
                 vrdb_add(line);
@@ -1349,7 +1331,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         ULONG  scan_b2;
 
         vrdb_add("");
-        vrdb_add("--- Multi-read stability test (A3000 DMA check) ---");
+        vrdb_add(GS(MSG_RDB_MULTIREAD_HDR));
 
         allok = 1;
         for (bi = 0; bi < 4; bi++) b[bi] = NULL;
@@ -1359,7 +1341,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         }
 
         if (!allok) {
-            vrdb_add("  (AllocVec MEMF_PUBLIC failed)");
+            vrdb_add(GS(MSG_RDB_ALLOCVEC_FAILED));
         } else {
             /* Re-scan for RDSK (<=16 CMD_READ into b[0]) */
             for (scan_b2 = 0; scan_b2 < 16; scan_b2++) {
@@ -1384,7 +1366,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
             }
 
             if (mrdsk == 0xFFFFFFFFUL) {
-                vrdb_add("  (RDSK not found - skipping)");
+                vrdb_add(GS(MSG_RDB_RDSK_NOTFOUND_SKIP));
             } else {
 /* ----------------------------------------------------------------
  * MREAD_BLK(blkno_, is_part_)
@@ -1396,7 +1378,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
     ULONG _bn = (blkno_); \
     int   _r, _cmp, _rdok = 1; \
     char  _hdr[64]; \
-    sprintf(_hdr, "  Block %lu (%s): 4 reads", \
+    sprintf(_hdr, GS(MSG_RDB_MREAD_BLOCK_FMT), \
             _bn, (is_part_) ? "PART" : "RDSK"); \
     vrdb_add(_hdr); \
     for (_r = 0; _r < 4; _r++) { \
@@ -1408,14 +1390,14 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         bd->iotd.iotd_Count          = 0; \
         if (DoIO((struct IORequest *)&bd->iotd) != 0) { _rdok = 0; break; } \
     } \
-    if (!_rdok) { vrdb_add("    read error"); break; } \
+    if (!_rdok) { vrdb_add(GS(MSG_RDB_MREAD_READ_ERROR)); break; } \
     /* differential comparison */ \
     for (_cmp = 1; _cmp < 4; _cmp++) { \
         ULONG _off, _nd = 0, _sh = 0; \
         char  _ln[80]; char *_lx = _ln; \
         for (_off = 0; _off < 512; _off++) \
             if (b[_cmp][_off] != b[0][_off]) _nd++; \
-        sprintf(_lx, "    R%d vs R1: %lu differ", _cmp+1, _nd); \
+        sprintf(_lx, GS(MSG_RDB_MREAD_RVS_FMT), _cmp+1, _nd); \
         _lx += strlen(_lx); \
         if (_nd > 0) { \
             for (_off = 0; _off < 512 && _sh < 6; _off++) { \
@@ -1433,14 +1415,14 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
     { const ULONG *_lp = (const ULONG *)b[0]; \
       ULONG _sl = _lp[1], _sm = 0, _si; \
       if (_sl >= 2 && _sl <= 128) for (_si=0;_si<_sl;_si++) _sm+=_lp[_si]; \
-      sprintf(line, "    csum: SL=%lu sum=0x%08lX %s", \
+      sprintf(line, GS(MSG_RDB_MREAD_CSUM_FMT), \
               _sl, _sm, (_sl>=2&&_sl<=128&&_sm==0)?"OK":"BAD"); \
       vrdb_add(line); \
     } \
     /* key fields - show actual bytes so corruption is explicit */ \
     if (!(is_part_)) { \
         const ULONG *_lp = (const ULONG *)b[0]; \
-        sprintf(line, "    Cyls=%lu Heads=%lu Secs=%lu PartList=%lu", \
+        sprintf(line, GS(MSG_RDB_MREAD_CYLS_FMT), \
                 _lp[16], _lp[18], _lp[17], _lp[7]); \
         vrdb_add(line); \
     } else { \
@@ -1454,12 +1436,12 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
         _dt=((ULONG)b[0][192]<<24)|((ULONG)b[0][193]<<16)| \
             ((ULONG)b[0][194]<<8)|(ULONG)b[0][195]; \
         sprintf(line, \
-            "    n[36]: len=%u '%s' raw:%02X %02X %02X %02X", \
+            GS(MSG_RDB_MREAD_NAME_FMT), \
             (unsigned)b[0][36], _nm, \
             b[0][36], b[0][37], b[0][38], b[0][39]); \
         vrdb_add(line); \
         sprintf(line, \
-            "    DosType[C0]: %02X %02X %02X %02X = 0x%08lX", \
+            GS(MSG_RDB_MREAD_DOSTYPE_FMT), \
             b[0][192],b[0][193],b[0][194],b[0][195],_dt); \
         vrdb_add(line); \
     } \
@@ -1469,7 +1451,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                 if (mpart != 0xFFFFFFFFUL)
                     MREAD_BLK(mpart, 1);
                 else
-                    vrdb_add("  (no PART block - PartList is end-mark)");
+                    vrdb_add(GS(MSG_RDB_NO_PART_ENDMARK));
 
 #undef MREAD_BLK
 
@@ -1507,7 +1489,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
                         if (b[0][_off] != b[2][_off]) _nd++;
                     {
                         char _ln[80]; char *_lx = _ln;
-                        sprintf(_lx, "  Interleaved RDSK re-read: %lu differ", _nd);
+                        sprintf(_lx, GS(MSG_RDB_INTERLEAVED_FMT), _nd);
                         _lx += strlen(_lx);
                         if (_nd > 0) {
                             for (_off = 0; _off < 512 && _sh < 6; _off++) {
@@ -1565,7 +1547,7 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"Raw Block Scan" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_RAWSCAN_TITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
@@ -1644,9 +1626,9 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Raw Disk Read";
-        es.es_TextFormat=(UBYTE*)"No device open.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_RAWREAD_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_DEVICE_OPEN);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -1660,34 +1642,34 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
     /* --- TD_GETGEOMETRY --- */
-    vrdb_add("=== TD_GETGEOMETRY ===");
+    vrdb_add(GS(MSG_RDB_HDR_GETGEOMETRY));
     memset(&geom, 0, sizeof(geom));
     bd->iotd.iotd_Req.io_Command = TD_GETGEOMETRY;
     bd->iotd.iotd_Req.io_Length  = sizeof(geom);
     bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
     bd->iotd.iotd_Req.io_Flags   = 0;
     if (DoIO((struct IORequest *)&bd->iotd) == 0) {
-        sprintf(line, "  TotalSectors : %lu", (unsigned long)geom.dg_TotalSectors);
+        sprintf(line, GS(MSG_RDB_GEO_TOTALSECTORS_FMT), (unsigned long)geom.dg_TotalSectors);
         vrdb_add(line);
-        sprintf(line, "  Cylinders    : %lu", (unsigned long)geom.dg_Cylinders);
+        sprintf(line, GS(MSG_RDB_GEO_CYLINDERS_FMT), (unsigned long)geom.dg_Cylinders);
         vrdb_add(line);
-        sprintf(line, "  Heads        : %lu", (unsigned long)geom.dg_Heads);
+        sprintf(line, GS(MSG_RDB_GEO_HEADS_FMT), (unsigned long)geom.dg_Heads);
         vrdb_add(line);
-        sprintf(line, "  TrackSectors : %lu", (unsigned long)geom.dg_TrackSectors);
+        sprintf(line, GS(MSG_RDB_GEO_TRACKSECTORS_FMT), (unsigned long)geom.dg_TrackSectors);
         vrdb_add(line);
-        sprintf(line, "  SectorSize   : %lu", (unsigned long)geom.dg_SectorSize);
+        sprintf(line, GS(MSG_RDB_GEO_SECTORSIZE_FMT), (unsigned long)geom.dg_SectorSize);
         vrdb_add(line);
-        sprintf(line, "  DeviceType   : %lu  Flags: 0x%lX",
+        sprintf(line, GS(MSG_RDB_GEO_DEVICETYPE_FMT),
                 (unsigned long)geom.dg_DeviceType,
                 (unsigned long)geom.dg_Flags);
         vrdb_add(line);
     } else {
-        vrdb_add("  TD_GETGEOMETRY failed (error or unsupported)");
+        vrdb_add(GS(MSG_RDB_GEO_FAILED));
     }
     vrdb_add("");
 
     /* --- SCSI INQUIRY - asks the device directly, bypasses driver --- */
-    vrdb_add("=== SCSI INQUIRY (HD_SCSICMD, direct to device) ===");
+    vrdb_add(GS(MSG_RDB_HDR_INQUIRY));
     {
         struct SCSICmd scmd;
         UBYTE cdb[6];
@@ -1721,9 +1703,9 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
         err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
         if (err == IOERR_NOCMD) {
-            vrdb_add("  Not supported (non-SCSI device)");
+            vrdb_add(GS(MSG_RDB_NOT_SUPPORTED_NONSCSI));
         } else if (err != 0) {
-            sprintf(line, "  Error: %ld", (long)err);
+            sprintf(line, GS(MSG_RDB_ERROR_FMT), (long)err);
             vrdb_add(line);
         } else {
             char vendor[9], product[17], revision[5];
@@ -1738,10 +1720,10 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
             for (i = 3;  i > 0 && revision[i] == ' '; i--) revision[i] = '\0';
 
             scsi_ok = TRUE;
-            sprintf(line, "  DevType : 0x%02X  Vendor  : \"%s\"",
+            sprintf(line, GS(MSG_RDB_INQ_DEVTYPE_FMT),
                     (unsigned)devtype, vendor);
             vrdb_add(line);
-            sprintf(line, "  Product : \"%s\"  Rev: \"%s\"",
+            sprintf(line, GS(MSG_RDB_INQ_PRODUCT_FMT),
                     product, revision);
             vrdb_add(line);
 
@@ -1758,7 +1740,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
     vrdb_add("");
 
     /* --- SCSI READ CAPACITY(10) - get real sector count from device --- */
-    vrdb_add("=== SCSI READ CAPACITY(10) (HD_SCSICMD, direct to device) ===");
+    vrdb_add(GS(MSG_RDB_HDR_READCAPACITY));
     {
         struct SCSICmd scmd;
         UBYTE cdb[10];
@@ -1787,9 +1769,9 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
         err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
         if (err == IOERR_NOCMD) {
-            vrdb_add("  Not supported (non-SCSI device)");
+            vrdb_add(GS(MSG_RDB_NOT_SUPPORTED_NONSCSI));
         } else if (err != 0) {
-            sprintf(line, "  Error: %ld", (long)err);
+            sprintf(line, GS(MSG_RDB_ERROR_FMT), (long)err);
             vrdb_add(line);
         } else {
             ULONG last_lba = ((ULONG)buf[0]<<24)|((ULONG)buf[1]<<16)|
@@ -1803,15 +1785,15 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
             rc_blksz    = (blksz > 0) ? blksz : 512;
             scsi_ok     = TRUE;
 
-            sprintf(line, "  LastLBA   : %lu  (TotalBlocks: %lu)",
+            sprintf(line, GS(MSG_RDB_RC_LASTLBA_FMT),
                     (unsigned long)last_lba, (unsigned long)total);
             vrdb_add(line);
-            sprintf(line, "  BlockSize : %lu bytes", (unsigned long)blksz);
+            sprintf(line, GS(MSG_RDB_RC_BLOCKSIZE_FMT), (unsigned long)blksz);
             vrdb_add(line);
             FormatSize((UQUAD)total * (UQUAD)blksz, szbuf);
-            sprintf(line, "  TotalSize : %s", szbuf);
+            sprintf(line, GS(MSG_RDB_RC_TOTALSIZE_FMT), szbuf);
             vrdb_add(line);
-            sprintf(line, "  Hex: %02X %02X %02X %02X  %02X %02X %02X %02X",
+            sprintf(line, GS(MSG_RDB_RC_HEX_FMT),
                     buf[0],buf[1],buf[2],buf[3],buf[4],buf[5],buf[6],buf[7]);
             vrdb_add(line);
         }
@@ -1823,9 +1805,9 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
     /* Drive responds with success or CHECK CONDITION - no driver         */
     /* interpretation involved.  Finds real capacity even if READ         */
     /* CAPACITY response was corrupted or truncated by the driver.        */
-    vrdb_add("=== Real capacity probe (HD_SCSICMD binary search) ===");
+    vrdb_add(GS(MSG_RDB_HDR_CAPPROBE));
     if (!scsi_ok) {
-        vrdb_add("  Skipped (HD_SCSICMD not available)");
+        vrdb_add(GS(MSG_RDB_CAPPROBE_SKIPPED));
     } else {
         ULONG lo = rc_last_lba; /* last known readable LBA */
         ULONG hi = 0;           /* first known unreadable LBA */
@@ -1887,28 +1869,28 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
         {
             char szbuf[16];
             FormatSize((UQUAD)(lo + 1) * (UQUAD)rc_blksz, szbuf);
-            sprintf(line, "  Probes used  : %lu", (unsigned long)steps);
+            sprintf(line, GS(MSG_RDB_CAPPROBE_PROBES_FMT), (unsigned long)steps);
             vrdb_add(line);
-            sprintf(line, "  Last readable LBA : %lu", (unsigned long)lo);
+            sprintf(line, GS(MSG_RDB_CAPPROBE_LASTLBA_FMT), (unsigned long)lo);
             vrdb_add(line);
-            sprintf(line, "  Real capacity     : %s  (%lu sectors)",
+            sprintf(line, GS(MSG_RDB_CAPPROBE_REALCAP_FMT),
                     szbuf, (unsigned long)(lo + 1));
             vrdb_add(line);
             if (lo != rc_last_lba) {
                 char szbuf2[16];
                 FormatSize((UQUAD)(rc_last_lba + 1) * (UQUAD)rc_blksz, szbuf2);
-                sprintf(line, "  READ CAPACITY said: %s - WRONG!", szbuf2);
+                sprintf(line, GS(MSG_RDB_CAPPROBE_WRONG_FMT), szbuf2);
                 vrdb_add(line);
-                vrdb_add("  *** Driver/DMA reports wrong size - use Manual Geometry! ***");
+                vrdb_add(GS(MSG_RDB_CAPPROBE_USE_MANUAL));
             } else {
-                vrdb_add("  READ CAPACITY agrees - reported size is correct.");
+                vrdb_add(GS(MSG_RDB_CAPPROBE_AGREES));
             }
         }
     }
     vrdb_add("");
 
     /* --- Raw block scan --- */
-    vrdb_add("=== Blocks 0-15: single CMD_READ, no fixups ===");
+    vrdb_add(GS(MSG_RDB_HDR_RAWBLOCKS));
     for (blk = 0; blk < 16; blk++) {
         ULONG id, csum_stored, csum_calc;
         ULONG summed_longs;
@@ -1927,7 +1909,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
         bd->iotd.iotd_Count          = 0;
         err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
         if (err != 0) {
-            sprintf(line, "Block %2lu: CMD_READ error %ld",
+            sprintf(line, GS(MSG_RDB_RAWBLK_READ_ERR_FMT),
                     (unsigned long)blk, (long)err);
             vrdb_add(line);
             continue;
@@ -1951,24 +1933,24 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
           }
           idtxt[4] = '\0'; }
 
-        sprintf(line, "Block %2lu  ID=%08lX (%s)  SL=%lu  csum=%s",
+        sprintf(line, GS(MSG_RDB_RAWBLK_STATUS_FMT),
                 (unsigned long)blk, (unsigned long)id, idtxt,
                 (unsigned long)summed_longs,
-                (summed_longs < 2 || summed_longs > 128) ? "?(SL out of range)" :
+                (summed_longs < 2 || summed_longs > 128) ? GS(MSG_RDB_SL_OUT_OF_RANGE) :
                 (csum_calc == 0) ? "OK" : "BAD");
         vrdb_add(line);
 
         if (id == IDNAME_RIGIDDISK) {
             /* RDSK fields */
-            sprintf(line, "  Cyls=%lu  Heads=%lu  Secs=%lu",
+            sprintf(line, GS(MSG_RDB_RAWBLK_RDSK_CYLS_FMT),
                     (unsigned long)lp[16], (unsigned long)lp[18],
                     (unsigned long)lp[17]);
             vrdb_add(line);
-            sprintf(line, "  RDBlo=%lu  RDBhi=%lu  LoCyl=%lu  HiCyl=%lu",
+            sprintf(line, GS(MSG_RDB_RAWBLK_RDSK_RDB_FMT),
                     (unsigned long)lp[22], (unsigned long)lp[23],
                     (unsigned long)lp[24], (unsigned long)lp[25]);
             vrdb_add(line);
-            sprintf(line, "  PartList=%08lX  FSHDList=%08lX",
+            sprintf(line, GS(MSG_RDB_RAWBLK_RDSK_PART_FMT),
                     (unsigned long)lp[7], (unsigned long)lp[8]);
             vrdb_add(line);
 
@@ -1984,41 +1966,41 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
                 name[k] = (c >= 0x20 && c <= 0x7E) ? (char)c : '?';
             }
             name[k] = '\0';
-            sprintf(line, "  Name BSTR raw [0x24]: len=0x%02X \"%s\"",
+            sprintf(line, GS(MSG_RDB_RAWBLK_NAME_BSTR_FMT),
                     (unsigned)bstr[0], name);
             vrdb_add(line);
-            sprintf(line, "  Raw bytes 0x24-0x27: %02X %02X %02X %02X",
+            sprintf(line, GS(MSG_RDB_RAWBLK_RAW24_FMT),
                     buf[0x24], buf[0x25], buf[0x26], buf[0x27]);
             vrdb_add(line);
-            sprintf(line, "  DosType [0xC0]: %08lX  LoCyl=%lu  HiCyl=%lu",
+            sprintf(line, GS(MSG_RDB_RAWBLK_DOSTYPE_FMT),
                     (unsigned long)env[16],
                     (unsigned long)env[9], (unsigned long)env[10]);
             vrdb_add(line);
-            sprintf(line, "  Raw bytes 0xC0-0xC3: %02X %02X %02X %02X",
+            sprintf(line, GS(MSG_RDB_RAWBLK_RAWC0_FMT),
                     buf[0xC0], buf[0xC1], buf[0xC2], buf[0xC3]);
             vrdb_add(line);
-            sprintf(line, "  Next=%08lX  Flags=%08lX  DevFlags=%08lX",
+            sprintf(line, GS(MSG_RDB_RAWBLK_NEXT_FLAGS_FMT),
                     (unsigned long)lp[4], (unsigned long)lp[5],
                     (unsigned long)lp[6]);
             vrdb_add(line);
 
         } else if (id == IDNAME_FSHEADER) {
             /* FSHD fields */
-            sprintf(line, "  DosType=%08lX  Version=%lu.%lu",
+            sprintf(line, GS(MSG_RDB_RAWBLK_FSHD_DOSTYPE_FMT),
                     (unsigned long)lp[8],
                     (unsigned long)(lp[9] >> 16),
                     (unsigned long)(lp[9] & 0xFFFF));
             vrdb_add(line);
-            sprintf(line, "  Next=%08lX  SegListBlk=%08lX",
+            sprintf(line, GS(MSG_RDB_RAWBLK_FSHD_NEXT_FMT),
                     (unsigned long)lp[4], (unsigned long)lp[12]);
             vrdb_add(line);
 
         } else if (id == IDNAME_LOADSEG) {
-            sprintf(line, "  Next=%08lX", (unsigned long)lp[4]);
+            sprintf(line, GS(MSG_RDB_RAWBLK_LSEG_NEXT_FMT), (unsigned long)lp[4]);
             vrdb_add(line);
 
         } else if (id != 0 && id != 0xFFFFFFFFUL) {
-            sprintf(line, "  Raw: %08lX %08lX %08lX %08lX",
+            sprintf(line, GS(MSG_RDB_RAWBLK_RAW_FMT),
                     (unsigned long)lp[0], (unsigned long)lp[1],
                     (unsigned long)lp[2], (unsigned long)lp[3]);
             vrdb_add(line);
@@ -2059,7 +2041,7 @@ void raw_disk_read(struct Window *win, struct BlockDev *bd)
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"Raw Disk Read" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_RAWREAD_TITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
@@ -2197,9 +2179,9 @@ void raw_hex_dump(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Hex Dump";
-        es.es_TextFormat=(UBYTE*)"No device open.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_HEXDUMP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_DEVICE_OPEN);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -2220,7 +2202,7 @@ void raw_hex_dump(struct Window *win, struct BlockDev *bd)
         rcode = diag_read_block(bd, blk, buf);
 
         if (rcode < 0) {
-            sprintf(line, "=== Block %lu: read error ===",
+            sprintf(line, GS(MSG_RDB_HEXDUMP_BLK_ERR_FMT),
                     (unsigned long)blk);
             vrdb_add(line);
             continue;
@@ -2240,7 +2222,7 @@ void raw_hex_dump(struct Window *win, struct BlockDev *bd)
             ULONG sum = 0, s;
             if (summed >= 2 && summed <= 128)
                 for (s = 0; s < summed; s++) sum += lp[s];
-            sprintf(line, "=== Block %lu  ID=%s(0x%08lX)  csum=%s  [%s] ===",
+            sprintf(line, GS(MSG_RDB_HEXDUMP_BLK_HDR_FMT),
                     (unsigned long)blk, idtxt, id,
                     (summed >= 2 && summed <= 128 && sum == 0) ? "OK" : "BAD",
                     (rcode == 0) ? "SCSI" : "CMD");
@@ -2301,7 +2283,7 @@ void raw_hex_dump(struct Window *win, struct BlockDev *bd)
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"Hex Dump - Raw Blocks (SCSI/CMD)" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_HEXDUMP_WINTITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
@@ -2517,11 +2499,11 @@ void smart_status(struct Window *win, struct BlockDev *bd)
 
     es.es_StructSize = sizeof(es);
     es.es_Flags      = 0;
-    es.es_Title      = (UBYTE *)"SMART Status";
+    es.es_Title      = (UBYTE *)GS(MSG_RDB_SMART_TITLE);
 
     if (!bd) {
-        es.es_TextFormat   = (UBYTE *)"No device open.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_NO_DEVICE_OPEN);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -2540,9 +2522,9 @@ void smart_status(struct Window *win, struct BlockDev *bd)
     vrdb_list.lh_Tail     = NULL;
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
-    vrdb_add("=== SMART Status ===");
+    vrdb_add(GS(MSG_RDB_HDR_SMART));
     if (bd->disk_brand[0]) {
-        sprintf(line, "  Drive: %s", bd->disk_brand);
+        sprintf(line, GS(MSG_RDB_DRIVE_FMT), bd->disk_brand);
         vrdb_add(line);
     }
     vrdb_add("");
@@ -2552,24 +2534,24 @@ void smart_status(struct Window *win, struct BlockDev *bd)
     rc = smart_send(bd, 0xD0, data_buf); /* SMART READ DATA */
 
     if (rc == -2) {
-        vrdb_add("  ATA SMART not supported:");
-        vrdb_add("  Device or driver does not implement HD_SCSICMD /");
-        vrdb_add("  ATA PASS-THROUGH.");
+        vrdb_add(GS(MSG_RDB_SMART_NOTSUP_1));
+        vrdb_add(GS(MSG_RDB_SMART_NOTSUP_2));
+        vrdb_add(GS(MSG_RDB_SMART_NOTSUP_3));
         goto smart_show;
     }
     if (rc < 0) {
-        vrdb_add("  SMART READ DATA command failed.");
-        vrdb_add("  Drive may not support SMART, or the driver does not");
-        vrdb_add("  support ATA PASS-THROUGH CDBs.");
+        vrdb_add(GS(MSG_RDB_SMART_READFAIL_1));
+        vrdb_add(GS(MSG_RDB_SMART_READFAIL_2));
+        vrdb_add(GS(MSG_RDB_SMART_READFAIL_3));
         goto smart_show;
     }
     if (data_buf[0] == 0 && data_buf[1] == 0) {
-        vrdb_add("  SMART returned all-zero data.");
-        vrdb_add("  Drive may not support SMART.");
+        vrdb_add(GS(MSG_RDB_SMART_ALLZERO_1));
+        vrdb_add(GS(MSG_RDB_SMART_ALLZERO_2));
         goto smart_show;
     }
 
-    sprintf(line, "  Data structure revision: 0x%02X%02X",
+    sprintf(line, GS(MSG_RDB_SMART_DATAREV_FMT),
             (unsigned)data_buf[1], (unsigned)data_buf[0]);
     vrdb_add(line);
 
@@ -2599,13 +2581,13 @@ void smart_status(struct Window *win, struct BlockDev *bd)
     }
 
     if (any_fail)
-        vrdb_add("  Overall health: ** FAILED ** (pre-failure threshold exceeded)");
+        vrdb_add(GS(MSG_RDB_SMART_HEALTH_FAILED));
     else if (thr_ok)
-        vrdb_add("  Overall health: PASSED");
+        vrdb_add(GS(MSG_RDB_SMART_HEALTH_PASSED));
     else
-        vrdb_add("  Overall health: UNKNOWN (threshold data unavailable)");
+        vrdb_add(GS(MSG_RDB_SMART_HEALTH_UNKNOWN));
     vrdb_add("");
-    vrdb_add("   ID Name                    Cur  Wst  Thr       Raw  Status");
+    vrdb_add(GS(MSG_RDB_SMART_TABLE_HDR));
     vrdb_add("  ---+------------------------+----+----+----+-----------+------");
 
     /* Pass 2: display each attribute. */
@@ -2681,7 +2663,7 @@ smart_show:
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height,    win_h },
-              { WA_Title,     (ULONG)"SMART Status" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_SMART_TITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
@@ -2762,7 +2744,7 @@ static BOOL write_badb(struct Window *win, struct BlockDev *bd,
 
     es.es_StructSize = sizeof(es);
     es.es_Flags      = 0;
-    es.es_Title      = (UBYTE *)"Bad Block List";
+    es.es_Title      = (UBYTE *)GS(MSG_RDB_BADBLOCKLIST_TITLE);
 
     badb_start    = rdb->rdb_block_hi + 1;
     num_badb_blks = (bad_count == 0) ? 1 :
@@ -2772,8 +2754,8 @@ static BOOL write_badb(struct Window *win, struct BlockDev *bd,
     if (rdb->lo_cyl > 0 && rdb->heads > 0 && rdb->sectors > 0) {
         ULONG first_part_blk = rdb->lo_cyl * rdb->heads * rdb->sectors;
         if (badb_start + num_badb_blks > first_part_blk) {
-            es.es_TextFormat   = (UBYTE *)"Not enough space in the RDB\nreserved area for a bad block list.";
-            es.es_GadgetFormat = (UBYTE *)"OK";
+            es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_BADB_NO_SPACE);
+            es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &es, NULL);
             return FALSE;
         }
@@ -2811,8 +2793,8 @@ static BOOL write_badb(struct Window *win, struct BlockDev *bd,
         badb->bbb_ChkSum = (LONG)(-(LONG)sum);
 
         if (!BlockDev_WriteBlock(bd, this_blk, buf)) {
-            es.es_TextFormat   = (UBYTE *)"Failed to write BADB block to disk.";
-            es.es_GadgetFormat = (UBYTE *)"OK";
+            es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_BADB_WRITE_FAILED);
+            es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &es, NULL);
             goto badb_done;
         }
@@ -2820,8 +2802,8 @@ static BOOL write_badb(struct Window *win, struct BlockDev *bd,
 
     /* Patch RDSK: update BadBlockList and extend RDBBlocksHi. */
     if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
-        es.es_TextFormat   = (UBYTE *)"Failed to read RDSK block for update.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_BADB_READ_RDSK_FAILED);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         goto badb_done;
     }
@@ -2836,8 +2818,8 @@ static BOOL write_badb(struct Window *win, struct BlockDev *bd,
     rdsk->rdb_ChkSum = (LONG)(-(LONG)sum);
 
     if (!BlockDev_WriteBlock(bd, rdb->block_num, buf)) {
-        es.es_TextFormat   = (UBYTE *)"Failed to write updated RDSK block.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_BADB_WRITE_RDSK_FAILED);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         goto badb_done;
     }
@@ -2875,11 +2857,11 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
 
     es.es_StructSize = sizeof(es);
     es.es_Flags      = 0;
-    es.es_Title      = (UBYTE *)"Bad Block Scan";
+    es.es_Title      = (UBYTE *)GS(MSG_RDB_BBSCAN_TITLE);
 
     if (!bd) {
-        es.es_TextFormat   = (UBYTE *)"No device open.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_NO_DEVICE_OPEN);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -2890,8 +2872,8 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
     if (total_blks == 0 && rdb && rdb->valid)
         total_blks = rdb->cylinders * rdb->heads * rdb->sectors;
     if (total_blks == 0) {
-        es.es_TextFormat   = (UBYTE *)"Cannot determine disk size.\nScan not possible.";
-        es.es_GadgetFormat = (UBYTE *)"OK";
+        es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_BBSCAN_NO_SIZE);
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -2932,7 +2914,7 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
                 ng.ng_TopEdge    = (WORD)(bor_t + pad);
                 ng.ng_Width      = (WORD)(win_w - bor_l - bor_r - pad * 2);
                 ng.ng_Height     = btn_h;
-                ng.ng_GadgetText = "Cancel";
+                ng.ng_GadgetText = GS(MSG_CANCEL);
                 ng.ng_GadgetID   = BBSCAN_CANCEL;
                 ng.ng_Flags      = PLACETEXT_IN;
 
@@ -2942,7 +2924,7 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
                         { WA_Left,      (ULONG)((scr->Width  - win_w) / 2) },
                         { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
                         { WA_Width,     win_w }, { WA_Height, win_h },
-                        { WA_Title,     (ULONG)"Bad Block Scan" },
+                        { WA_Title,     (ULONG)GS(MSG_RDB_BBSCAN_TITLE) },
                         { WA_Gadgets,   (ULONG)scan_list },
                         { WA_PubScreen, (ULONG)scr },
                         { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
@@ -2993,7 +2975,7 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
             /* Update title every 1000 blocks */
             if (scan_win && (blk % 1000 == 0)) {
                 ULONG pct = blk * 100UL / total_blks;
-                sprintf(title_buf, "Bad Block Scan - %lu/%lu (%lu%%) Bad:%lu",
+                sprintf(title_buf, GS(MSG_RDB_BBSCAN_PROGRESS_FMT),
                         (unsigned long)(blk + 1), (unsigned long)total_blks,
                         (unsigned long)pct, (unsigned long)bad_count);
                 SetWindowTitles(scan_win, title_buf, (UBYTE *)-1L);
@@ -3013,33 +2995,33 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
     vrdb_list.lh_Tail     = NULL;
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
-    vrdb_add("=== Bad Block Scan Results ===");
+    vrdb_add(GS(MSG_RDB_HDR_BBSCAN_RESULTS));
     if (bd->disk_brand[0]) {
-        sprintf(line, "  Drive: %s", bd->disk_brand);
+        sprintf(line, GS(MSG_RDB_DRIVE_FMT), bd->disk_brand);
         vrdb_add(line);
     }
-    sprintf(line, "  Blocks scanned: %lu%s",
+    sprintf(line, GS(MSG_RDB_BBSCAN_SCANNED_FMT),
             (unsigned long)blk,
-            cancelled ? " (cancelled)" : "");
+            cancelled ? GS(MSG_RDB_BBSCAN_CANCELLED_SUFFIX) : "");
     vrdb_add(line);
-    sprintf(line, "  Bad blocks found: %lu%s",
+    sprintf(line, GS(MSG_RDB_BBSCAN_FOUND_FMT),
             (unsigned long)bad_count,
-            capped ? " (limit reached, more may exist)" : "");
+            capped ? GS(MSG_RDB_BBSCAN_LIMIT_SUFFIX) : "");
     vrdb_add(line);
     vrdb_add("");
 
     if (bad_count == 0 && !cancelled) {
-        vrdb_add("  No bad blocks found. Disk surface appears healthy.");
+        vrdb_add(GS(MSG_RDB_BBSCAN_HEALTHY));
     } else if (bad_count > 0) {
         ULONG i;
-        vrdb_add("  Bad block list:");
+        vrdb_add(GS(MSG_RDB_BBSCAN_LIST_HDR));
         for (i = 0; i < bad_count; i++) {
             sprintf(line, "    %lu  (0x%08lX)",
                     (unsigned long)bbl[i], (unsigned long)bbl[i]);
             vrdb_add(line);
         }
         if (capped)
-            vrdb_add("    ... (more bad blocks exist - limit reached)");
+            vrdb_add(GS(MSG_RDB_BBSCAN_MORE_EXIST));
     }
 
     {
@@ -3073,7 +3055,7 @@ void bad_block_scan(struct Window *win, struct BlockDev *bd,
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"Bad Block Scan Results" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_BBSCAN_RESULTS_TITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
@@ -3133,19 +3115,15 @@ bbs_no_vrdb:
     if (bad_count > 0 && !cancelled && rdb && rdb->valid) {
         LONG r;
         static char badb_msg[160];
-        sprintf(badb_msg,
-                "%lu bad block(s) found.\n"
-                "Write bad block list to RDB?\n\n"
-                "Note: entries will be cleared if\n"
-                "you write the partition table later.",
+        sprintf(badb_msg, GS(MSG_RDB_BADB_OFFER_FMT),
                 (unsigned long)bad_count);
         es.es_TextFormat   = (UBYTE *)badb_msg;
-        es.es_GadgetFormat = (UBYTE *)"Write|Skip";
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_RDB_WRITE_SKIP);
         r = EasyRequest(win, &es, NULL);
         if (r == 1) {
             if (write_badb(win, bd, rdb, bbl, bad_count)) {
-                es.es_TextFormat   = (UBYTE *)"Bad block list written to RDB.";
-                es.es_GadgetFormat = (UBYTE *)"OK";
+                es.es_TextFormat   = (UBYTE *)GS(MSG_RDB_BADB_WRITTEN);
+                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                 EasyRequest(win, &es, NULL);
             }
         }
@@ -3169,9 +3147,9 @@ void rdb_integrity_check(struct Window *win, struct BlockDev *bd,
 
     if (!bd || !rdb || !rdb->valid) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"RDB Integrity Check";
-        es.es_TextFormat=(UBYTE*)"No device or RDB loaded.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_INTEGRITY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_DEV_OR_RDB);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return;
     }
@@ -3181,7 +3159,7 @@ void rdb_integrity_check(struct Window *win, struct BlockDev *bd,
     vrdb_list.lh_Tail     = NULL;
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
-    vrdb_add("--- RDB Integrity Check ---");
+    vrdb_add(GS(MSG_RDB_HDR_INTEGRITY));
     vrdb_add("");
 
     RDB_IntegrityCheck(bd, rdb, ic_vrdb_cb, NULL);
@@ -3219,7 +3197,7 @@ void rdb_integrity_check(struct Window *win, struct BlockDev *bd,
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"RDB Integrity Check" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_INTEGRITY_TITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
@@ -3295,30 +3273,30 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
     if (!rdb || !rdb->valid) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
-        es.es_TextFormat=(UBYTE*)"No RDB found on this disk.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NO_RDB_FOUND);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     { struct FileRequester *fr; BOOL chosen = FALSE;
       { struct TagItem at[] = {
-            { ASLFR_TitleText,    (ULONG)"Select RDB Block Backup to Verify" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_RDB_ASL_SELECT_VERIFY) },
             { ASLFR_InitialDrawer,(ULONG)"RAM:" },
             { ASLFR_InitialFile,  (ULONG)"RDB.backup" },
             { TAG_DONE, 0 } };
@@ -3338,9 +3316,9 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
     fh = Open((UBYTE *)load_path, MODE_OLDFILE);
     if (!fh) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
-        es.es_TextFormat=(UBYTE*)"Cannot open backup file.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_OPEN_BACKUP);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -3349,12 +3327,12 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
 
     if (fsize != (LONG)bd->block_size) {
         Close(fh);
-        sprintf(msg, "File size (%ld) does not match\ndevice block size (%lu). Aborted.",
+        sprintf(msg, GS(MSG_RDB_VERIFY_SIZE_MISMATCH_FMT),
                 (long)fsize, (unsigned long)bd->block_size);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
         es.es_TextFormat=(UBYTE*)msg;
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -3370,9 +3348,9 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
     if (Read(fh, fbuf, fsize) != fsize) {
         Close(fh); FreeVec(fbuf); FreeVec(dbuf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
-        es.es_TextFormat=(UBYTE*)"File read error.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILE_READ_ERROR);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
     Close(fh);
@@ -3380,9 +3358,9 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
     if (!BlockDev_ReadBlock(bd, rdb->block_num, dbuf)) {
         FreeVec(fbuf); FreeVec(dbuf);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify RDB Block";
-        es.es_TextFormat=(UBYTE*)"Failed to read RDB block from disk.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_READ_RDB_FAILED);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -3394,18 +3372,18 @@ void rdb_verify_block(struct Window *win, struct BlockDev *bd,
     }
 
     if (diff_count == 0) {
-        sprintf(msg, "MATCH\n\nBackup file matches RDB block %lu on disk.\n(%lu bytes compared)",
+        sprintf(msg, GS(MSG_RDB_VERIFY_MATCH_FMT),
                 (unsigned long)rdb->block_num, (unsigned long)bd->block_size);
     } else {
-        sprintf(msg, "MISMATCH\n\n%lu byte(s) differ.\nFirst difference at offset %lu (0x%04lX).",
+        sprintf(msg, GS(MSG_RDB_VERIFY_MISMATCH_FMT),
                 (unsigned long)diff_count,
                 (unsigned long)first_diff,
                 (unsigned long)first_diff);
     }
     es.es_StructSize=sizeof(es); es.es_Flags=0;
-    es.es_Title=(UBYTE*)"Verify RDB Block";
+    es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_TITLE);
     es.es_TextFormat=(UBYTE*)msg;
-    es.es_GadgetFormat=(UBYTE*)"OK";
+    es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
     EasyRequest(win, &es, NULL);
 
     FreeVec(fbuf); FreeVec(dbuf);
@@ -3428,23 +3406,23 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify Extended Backup";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_EXT_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify Extended Backup";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\nCannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_EXT_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     { struct FileRequester *fr; BOOL chosen = FALSE;
       { struct TagItem at[] = {
-            { ASLFR_TitleText,    (ULONG)"Select Extended Backup File to Verify" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_RDB_ASL_SELECT_EXT_VERIFY) },
             { ASLFR_InitialDrawer,(ULONG)"RAM:" },
             { TAG_DONE, 0 } };
         fr = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, at); }
@@ -3463,9 +3441,9 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
     fh = Open((UBYTE *)load_path, MODE_OLDFILE);
     if (!fh) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify Extended Backup";
-        es.es_TextFormat=(UBYTE*)"Cannot open backup file.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_EXT_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_OPEN_BACKUP);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -3473,9 +3451,9 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
         hdr[0] != ERDB_MAGIC || hdr[1] != ERDB_VERSION) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify Extended Backup";
-        es.es_TextFormat=(UBYTE*)"Not a valid ERDB backup file\n(bad magic or version).";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_EXT_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NOT_VALID_ERDB);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -3486,12 +3464,12 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
     if (block_size != bd->block_size) {
         Close(fh);
         { char msg[120];
-          sprintf(msg, "Block size mismatch:\nbackup=%lu, device=%lu. Aborted.",
+          sprintf(msg, GS(MSG_RDB_VERIFY_BLKSZ_MISMATCH_FMT),
                   (unsigned long)block_size, (unsigned long)bd->block_size);
           es.es_StructSize=sizeof(es); es.es_Flags=0;
-          es.es_Title=(UBYTE*)"Verify Extended Backup";
+          es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_EXT_TITLE);
           es.es_TextFormat=(UBYTE*)msg;
-          es.es_GadgetFormat=(UBYTE*)"OK";
+          es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
           EasyRequest(win, &es, NULL); }
         return;
     }
@@ -3499,9 +3477,9 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
     if (num_blocks == 0 || num_blocks > 1024) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Verify Extended Backup";
-        es.es_TextFormat=(UBYTE*)"Unreasonable block count in header. Aborted.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_RDB_VERIFY_EXT_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_UNREASONABLE_BLKCOUNT);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -3519,7 +3497,7 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
     vrdb_list.lh_Tail     = NULL;
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
-    sprintf(line, "--- Verify Extended Backup: %lu blocks from blk %lu ---",
+    sprintf(line, GS(MSG_RDB_VE_HDR_FMT),
             (unsigned long)num_blocks, (unsigned long)block_lo);
     vrdb_add(line);
     vrdb_add("");
@@ -3529,23 +3507,23 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
         ULONG i, diff = 0;
 
         if (Read(fh, fbuf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(line, "Blk %lu: FILE READ ERROR", (unsigned long)disk_blk);
+            sprintf(line, GS(MSG_RDB_VE_FILE_READ_ERR_FMT), (unsigned long)disk_blk);
             vrdb_add(line); bad_blocks++; break;
         }
         if (!BlockDev_ReadBlock(bd, disk_blk, dbuf)) {
-            sprintf(line, "Blk %lu: DISK READ ERROR", (unsigned long)disk_blk);
+            sprintf(line, GS(MSG_RDB_VE_DISK_READ_ERR_FMT), (unsigned long)disk_blk);
             vrdb_add(line); bad_blocks++; continue;
         }
         for (i = 0; i < block_size; i++) {
             if (fbuf[i] != dbuf[i]) diff++;
         }
         if (diff == 0) {
-            sprintf(line, "Blk %lu: MATCH", (unsigned long)disk_blk);
+            sprintf(line, GS(MSG_RDB_VE_MATCH_FMT), (unsigned long)disk_blk);
         } else {
             ULONG first = 0;
             for (first = 0; first < block_size; first++)
                 if (fbuf[first] != dbuf[first]) break;
-            sprintf(line, "Blk %lu: MISMATCH  %lu byte(s) differ, first @ 0x%04lX",
+            sprintf(line, GS(MSG_RDB_VE_MISMATCH_FMT),
                     (unsigned long)disk_blk,
                     (unsigned long)diff,
                     (unsigned long)first);
@@ -3559,10 +3537,10 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
 
     vrdb_add("");
     if (bad_blocks == 0) {
-        sprintf(line, "RESULT: PASS  All %lu blocks match.",
+        sprintf(line, GS(MSG_RDB_VE_RESULT_PASS_FMT),
                 (unsigned long)num_blocks);
     } else {
-        sprintf(line, "RESULT: FAIL  %lu/%lu blocks have differences.",
+        sprintf(line, GS(MSG_RDB_VE_RESULT_FAIL_FMT),
                 (unsigned long)bad_blocks, (unsigned long)num_blocks);
     }
     vrdb_add(line);
@@ -3600,7 +3578,7 @@ void rdb_verify_extended(struct Window *win, struct BlockDev *bd)
               { WA_Left,      (ULONG)((scr_w - win_w) / 2) },
               { WA_Top,       (ULONG)((scr_h - win_h) / 2) },
               { WA_Width,     win_w }, { WA_Height, win_h },
-              { WA_Title,     (ULONG)"Verify Extended Backup" },
+              { WA_Title,     (ULONG)GS(MSG_RDB_VERIFY_EXT_TITLE) },
               { WA_Gadgets,   (ULONG)glist },
               { WA_PubScreen, (ULONG)scr },
               { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|

@@ -20,6 +20,7 @@
 #include <proto/gadtools.h>
 
 #include "clib.h"
+#include "locale_support.h"
 #include "rdb.h"
 #include "version.h"
 #include "partview_internal.h"
@@ -68,9 +69,11 @@ static UWORD blocksize_index(ULONG bsz)
     return 0;   /* default 512 */
 }
 
-/* BufMemType - maps cycle index ↔ MEMF_* value */
-static const char * const bufmem_labels[] = {
-    "Any", "Public", "Chip", "Fast", "24-bit DMA", NULL
+/* BufMemType - maps cycle index ↔ MEMF_* value.  Labels are user-facing and
+   localized, so they are filled in at runtime (see bufmem_label_ids). */
+static const LONG bufmem_label_ids[] = {
+    MSG_DLG_BUFMEM_ANY, MSG_DLG_BUFMEM_PUBLIC, MSG_DLG_BUFMEM_CHIP,
+    MSG_DLG_BUFMEM_FAST, MSG_DLG_BUFMEM_24BIT_DMA
 };
 static const ULONG bufmem_values[] = { 0UL, 1UL, 2UL, 4UL, 8UL };
 #define NUM_BUFMEM_TYPES 5
@@ -289,8 +292,16 @@ void partition_advanced_dialog(struct PartInfo *pi)
     struct Window  *win          = NULL;
     UWORD           cur_bufmem   = bufmem_index(pi->buf_mem_type);
 
+    const char *bufmem_labels[NUM_BUFMEM_TYPES + 1];
+    UWORD       bl_i;
+
     char buffers_str[16], bootblks_str[16], maxtrans_str[16], mask_str[16];
     char reserved_str[16], interleave_str[16], control_str[16], devflags_str[16];
+
+    for (bl_i = 0; bl_i < NUM_BUFMEM_TYPES; bl_i++)
+        bufmem_labels[bl_i] = GS(bufmem_label_ids[bl_i]);
+    bufmem_labels[NUM_BUFMEM_TYPES] = NULL;
+
     sprintf(buffers_str,    "%lu",     (unsigned long)(pi->num_buffer  > 0 ? pi->num_buffer  : 30));
     sprintf(bootblks_str,   "%lu",     (unsigned long)(pi->boot_blocks > 0 ? pi->boot_blocks :  2));
     sprintf(maxtrans_str,   "0x%08lX", (unsigned long)pi->max_transfer);
@@ -343,14 +354,14 @@ void partition_advanced_dialog(struct PartInfo *pi)
       *(pgad)=CreateGadgetA(STRING_KIND,prev,&ng,st_); \
       if (!*(pgad)) goto cleanup; prev=*(pgad); } row++;
 
-            STR_GAD(ADLG_RESERVED,    "Reserved Blks", reserved_str,   6,  &reserved_gad)
-            STR_GAD(ADLG_INTERLEAVE,  "Interleave",    interleave_str, 6,  &interleave_gad)
-            STR_GAD(ADLG_BUFFERS,     "Buffers",       buffers_str,    6,  &buffers_gad)
+            STR_GAD(ADLG_RESERVED,    GS(MSG_DLG_RESERVED_BLKS), reserved_str,   6,  &reserved_gad)
+            STR_GAD(ADLG_INTERLEAVE,  GS(MSG_DLG_INTERLEAVE),    interleave_str, 6,  &interleave_gad)
+            STR_GAD(ADLG_BUFFERS,     GS(MSG_DLG_BUFFERS),       buffers_str,    6,  &buffers_gad)
 
             /* BufMemType cycle */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
             ng.ng_Width=gad_w; ng.ng_Height=row_h;
-            ng.ng_GadgetText="Buf Mem Type"; ng.ng_GadgetID=ADLG_BUFMEMTYPE;
+            ng.ng_GadgetText=GS(MSG_DLG_BUF_MEM_TYPE); ng.ng_GadgetID=ADLG_BUFMEMTYPE;
             ng.ng_Flags=PLACETEXT_LEFT;
             { struct TagItem bmt[]={{GTCY_Labels,(ULONG)bufmem_labels},
                                     {GTCY_Active,(ULONG)cur_bufmem},{TAG_DONE,0}};
@@ -358,11 +369,11 @@ void partition_advanced_dialog(struct PartInfo *pi)
               if (!prev) goto cleanup; }
             row++;
 
-            STR_GAD(ADLG_BOOTBLOCKS,  "Boot Blocks",  bootblks_str,  6,  &bootblks_gad)
-            STR_GAD(ADLG_MAXTRANSFER, "MaxTransfer",  maxtrans_str, 12, &maxtrans_gad)
-            STR_GAD(ADLG_MASK,        "Mask",         mask_str,     12, &mask_gad)
-            STR_GAD(ADLG_CONTROL,     "Control",      control_str,  12, &control_gad)
-            STR_GAD(ADLG_DEVFLAGS,    "Dev Flags",    devflags_str, 12, &devflags_gad)
+            STR_GAD(ADLG_BOOTBLOCKS,  GS(MSG_DLG_BOOT_BLOCKS),  bootblks_str,  6,  &bootblks_gad)
+            STR_GAD(ADLG_MAXTRANSFER, GS(MSG_DLG_MAXTRANSFER),  maxtrans_str, 12, &maxtrans_gad)
+            STR_GAD(ADLG_MASK,        GS(MSG_DLG_MASK),         mask_str,     12, &mask_gad)
+            STR_GAD(ADLG_CONTROL,     GS(MSG_DLG_CONTROL),      control_str,  12, &control_gad)
+            STR_GAD(ADLG_DEVFLAGS,    GS(MSG_DLG_DEV_FLAGS),    devflags_str, 12, &devflags_gad)
 
 #undef STR_GAD
 #undef ROW_Y
@@ -374,12 +385,12 @@ void partition_advanced_dialog(struct PartInfo *pi)
                 struct TagItem bt[] = { { TAG_DONE, 0 } };
                 ng.ng_TopEdge=btn_y; ng.ng_Height=row_h;
                 ng.ng_Width=half_w; ng.ng_Flags=PLACETEXT_IN;
-                ng.ng_LeftEdge=bor_l+pad; ng.ng_GadgetText="OK";
+                ng.ng_LeftEdge=bor_l+pad; ng.ng_GadgetText=GS(MSG_OK);
                 ng.ng_GadgetID=ADLG_OK;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
                 if (!prev) goto cleanup;
                 ng.ng_LeftEdge=bor_l+pad+half_w+pad;
-                ng.ng_GadgetText="Cancel"; ng.ng_GadgetID=ADLG_CANCEL;
+                ng.ng_GadgetText=GS(MSG_CANCEL); ng.ng_GadgetID=ADLG_CANCEL;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
                 if (!prev) goto cleanup;
             }
@@ -390,7 +401,7 @@ void partition_advanced_dialog(struct PartInfo *pi)
                 { WA_Left,      (ULONG)((scr->Width -win_w)/2) },
                 { WA_Top,       (ULONG)((scr->Height-win_h)/2) },
                 { WA_Width,     win_w }, { WA_Height, win_h },
-                { WA_Title,     (ULONG)"Advanced Partition Settings" },
+                { WA_Title,     (ULONG)GS(MSG_DLG_ADV_TITLE) },
                 { WA_Gadgets,   (ULONG)glist },
                 { WA_PubScreen, (ULONG)scr },
                 { WA_IDCMP,     IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|IDCMP_REFRESHWINDOW },
@@ -545,12 +556,12 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
         if (size_mb == 0 && total_bytes > 0) size_mb = 1;
         sprintf(sizemb_str, "%lu", (unsigned long)size_mb);
     }
-    sprintf(locyl_str,   "Lo: %lu", (unsigned long)pi->low_cyl);
+    sprintf(locyl_str,   GS(MSG_DLG_LOCYL_FMT), (unsigned long)pi->low_cyl);
     sprintf(bootpri_str, "%ld", (long)pi->boot_pri);
     /* Default volume label for a new partition.  Empty means "do not format";
        prefilling makes quick-format the default (the "Do not format" checkbox
        and clearing this field are the opt-outs). */
-    strncpy(volname_str, "Empty", sizeof(volname_str) - 1);
+    strncpy(volname_str, GS(MSG_DLG_VOLNAME_DEFAULT), sizeof(volname_str) - 1);
     volname_str[sizeof(volname_str) - 1] = '\0';
 
     scr = LockPubScreen(NULL);
@@ -600,7 +611,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
             /* Row 0: Name */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
             ng.ng_Width=gad_w; ng.ng_Height=row_h;
-            ng.ng_GadgetText="Name"; ng.ng_GadgetID=PDLG_NAME;
+            ng.ng_GadgetText=GS(MSG_DLG_NAME); ng.ng_GadgetID=PDLG_NAME;
             ng.ng_Flags=PLACETEXT_LEFT;
             { struct TagItem st[]={{GTST_String,(ULONG)pi->drive_name},
                                    {GTST_MaxChars,30},{TAG_DONE,0}};
@@ -611,18 +622,18 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
             /* Lo Cylinder - reference display only, not editable */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
             ng.ng_Width=gad_w; ng.ng_Height=row_h;
-            ng.ng_GadgetText="Cylinder"; ng.ng_GadgetID=0; ng.ng_Flags=PLACETEXT_LEFT;
+            ng.ng_GadgetText=GS(MSG_DLG_CYLINDER); ng.ng_GadgetID=0; ng.ng_Flags=PLACETEXT_LEFT;
             { struct TagItem tt[]={{GTTX_Text,(ULONG)locyl_str},{TAG_DONE,0}};
               prev=CreateGadgetA(TEXT_KIND,prev,&ng,tt);
               if (!prev) goto cleanup; }
             row++;
 
-            STR_GAD(PDLG_SIZEMB,  "Size (MB)",    sizemb_str,  10, &sizemb_gad)
+            STR_GAD(PDLG_SIZEMB,  GS(MSG_DLG_SIZE_MB),    sizemb_str,  10, &sizemb_gad)
 
             /* Filesystem (cycle) */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
             ng.ng_Width=gad_w; ng.ng_Height=row_h;
-            ng.ng_GadgetText="FileSystem"; ng.ng_GadgetID=PDLG_TYPE;
+            ng.ng_GadgetText=GS(MSG_DLG_FILESYSTEM); ng.ng_GadgetID=PDLG_TYPE;
             ng.ng_Flags=PLACETEXT_LEFT;
             { struct TagItem ct[]={{GTCY_Labels,(ULONG)dlg_fs_labels},
                                    {GTCY_Active,(ULONG)cur_fs},{TAG_DONE,0}};
@@ -633,7 +644,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
             /* Block Size (cycle) */
             ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=ROW_Y(row);
             ng.ng_Width=gad_w; ng.ng_Height=row_h;
-            ng.ng_GadgetText="Block Size"; ng.ng_GadgetID=PDLG_BLOCKSIZE;
+            ng.ng_GadgetText=GS(MSG_DLG_BLOCK_SIZE); ng.ng_GadgetID=PDLG_BLOCKSIZE;
             ng.ng_Flags=PLACETEXT_LEFT;
             { struct TagItem bs[]={{GTCY_Labels,(ULONG)blocksize_labels},
                                    {GTCY_Active,(ULONG)cur_bsz},{TAG_DONE,0}};
@@ -641,7 +652,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
               if (!prev) goto cleanup; }
             row++;
 
-            STR_GAD(PDLG_BOOTPRI, "Boot Priority", bootpri_str, 8, &bootpri_gad)
+            STR_GAD(PDLG_BOOTPRI, GS(MSG_DLG_BOOT_PRIORITY), bootpri_str, 8, &bootpri_gad)
 
             /* Row 5: Bootable [x]   Automount [x] */
             {
@@ -653,7 +664,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                 cbt[0].ti_Data = (ULONG)is_bootable;
                 ng.ng_LeftEdge=bor_l+pad; ng.ng_TopEdge=ROW_Y(row);
                 ng.ng_Width=half; ng.ng_Height=row_h;
-                ng.ng_GadgetText="Bootable"; ng.ng_GadgetID=PDLG_BOOTABLE;
+                ng.ng_GadgetText=GS(MSG_DLG_BOOTABLE); ng.ng_GadgetID=PDLG_BOOTABLE;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 boot_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                 if (!boot_gad) goto cleanup; prev=boot_gad;
@@ -661,7 +672,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                 cbt[0].ti_Data=(ULONG)is_automount;
                 ng.ng_LeftEdge=bor_l+pad+half+pad; ng.ng_TopEdge=ROW_Y(row);
                 ng.ng_Width=half; ng.ng_Height=row_h;
-                ng.ng_GadgetText="Automount"; ng.ng_GadgetID=PDLG_AUTOMOUNT;
+                ng.ng_GadgetText=GS(MSG_DLG_AUTOMOUNT); ng.ng_GadgetID=PDLG_AUTOMOUNT;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 automount_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                 if (!automount_gad) goto cleanup; prev=automount_gad;
@@ -678,7 +689,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                 cbt[0].ti_Data=(ULONG)is_dirscsi;
                 ng.ng_LeftEdge=bor_l+pad; ng.ng_TopEdge=ROW_Y(row);
                 ng.ng_Width=half; ng.ng_Height=row_h;
-                ng.ng_GadgetText="Direct SCSI"; ng.ng_GadgetID=PDLG_DIRSCSI;
+                ng.ng_GadgetText=GS(MSG_DLG_DIRECT_SCSI); ng.ng_GadgetID=PDLG_DIRSCSI;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 dirscsi_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                 if (!dirscsi_gad) goto cleanup; prev=dirscsi_gad;
@@ -686,7 +697,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                 cbt[0].ti_Data=(ULONG)is_syncscsi;
                 ng.ng_LeftEdge=bor_l+pad+half+pad; ng.ng_TopEdge=ROW_Y(row);
                 ng.ng_Width=half; ng.ng_Height=row_h;
-                ng.ng_GadgetText="Sync SCSI"; ng.ng_GadgetID=PDLG_SYNCSCSI;
+                ng.ng_GadgetText=GS(MSG_DLG_SYNC_SCSI); ng.ng_GadgetID=PDLG_SYNCSCSI;
                 ng.ng_Flags=PLACETEXT_RIGHT;
                 syncscsi_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                 if (!syncscsi_gad) goto cleanup; prev=syncscsi_gad;
@@ -696,13 +707,13 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
             /* New partitions only: Volume name + "Do not format" checkbox.
                Format runs after the table is written, on a temporary mount. */
             if (is_new) {
-                STR_GAD(PDLG_VOLNAME, "Volume name", volname_str, 31, &volname_gad)
+                STR_GAD(PDLG_VOLNAME, GS(MSG_DLG_VOLUME_NAME), volname_str, 31, &volname_gad)
                 {
                     struct TagItem cbt[] = { { GTCB_Checked, 0 }, { TAG_DONE, 0 } };
                     cbt[0].ti_Data = (ULONG)FALSE;   /* format by default */
                     ng.ng_LeftEdge=bor_l+pad; ng.ng_TopEdge=ROW_Y(row);
                     ng.ng_Width=inner_w-pad*2; ng.ng_Height=row_h;
-                    ng.ng_GadgetText="Do not format"; ng.ng_GadgetID=PDLG_NOFORMAT;
+                    ng.ng_GadgetText=GS(MSG_DLG_DO_NOT_FORMAT); ng.ng_GadgetID=PDLG_NOFORMAT;
                     ng.ng_Flags=PLACETEXT_RIGHT;
                     noformat_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,cbt);
                     if (!noformat_gad) goto cleanup; prev=noformat_gad;
@@ -721,13 +732,13 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                 ng.ng_TopEdge=btn_y; ng.ng_Height=row_h;
                 ng.ng_Width=third; ng.ng_Flags=PLACETEXT_IN;
                 ng.ng_LeftEdge=bor_l+pad;
-                ng.ng_GadgetText="OK"; ng.ng_GadgetID=PDLG_OK;
+                ng.ng_GadgetText=GS(MSG_OK); ng.ng_GadgetID=PDLG_OK;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if (!prev) goto cleanup;
                 ng.ng_LeftEdge=bor_l+pad+third+pad;
-                ng.ng_GadgetText="Advanced..."; ng.ng_GadgetID=PDLG_ADVANCED;
+                ng.ng_GadgetText=GS(MSG_DLG_ADVANCED); ng.ng_GadgetID=PDLG_ADVANCED;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if (!prev) goto cleanup;
                 ng.ng_LeftEdge=bor_l+pad+(third+pad)*2;
-                ng.ng_GadgetText="Cancel"; ng.ng_GadgetID=PDLG_CANCEL;
+                ng.ng_GadgetText=GS(MSG_CANCEL); ng.ng_GadgetID=PDLG_CANCEL;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if (!prev) goto cleanup;
             }
         }
@@ -792,14 +803,15 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                                                (new_dos_type != old_dos_type ||
                                                 new_fs_bsz   != old_fs_bsz);
                         if (destructive) {
-                            struct EasyStruct es = {
-                                sizeof(struct EasyStruct), 0,
-                                DISKPART_VERTITLE " - Warning",
-                                "Changing the filesystem or block size\n"
-                                "will DESTROY ALL DATA on %s.\n\n"
-                                "Continue?",
-                                "Yes, destroy data|Cancel"
-                            };
+                            static char warn_title[80]; /* Intuition keeps ptr */
+                            struct EasyStruct es;
+                            sprintf(warn_title, "%s%s", DISKPART_VERTITLE,
+                                    GS(MSG_DLG_WARN_SUFFIX));
+                            es.es_StructSize   = sizeof(es);
+                            es.es_Flags        = 0;
+                            es.es_Title        = (UBYTE *)warn_title;
+                            es.es_TextFormat   = (UBYTE *)GS(MSG_DLG_DESTROY_BODY);
+                            es.es_GadgetFormat = (UBYTE *)GS(MSG_DLG_DESTROY_GADGETS);
                             if (!EasyRequest(win, &es, NULL,
                                              (ULONG)pi->drive_name, TAG_DONE))
                                 break; /* user cancelled - stay in dialog */
@@ -879,14 +891,12 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
             }
         }
         if (need_reboot) {
-            struct EasyStruct es = {
-                sizeof(struct EasyStruct), 0,
-                DISKPART_VERTITLE,
-                "Filesystem or block size changed.\n"
-                "A reboot is required for this\n"
-                "partition to be recognised correctly.",
-                "OK"
-            };
+            struct EasyStruct es;
+            es.es_StructSize   = sizeof(es);
+            es.es_Flags        = 0;
+            es.es_Title        = (UBYTE *)DISKPART_VERTITLE;
+            es.es_TextFormat   = (UBYTE *)GS(MSG_DLG_REBOOT_BODY);
+            es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &es, NULL, TAG_DONE);
         }
     }
@@ -904,27 +914,16 @@ void show_about(struct Window *win)
 {
     struct EasyStruct es;
     char body[512];
-    sprintf(body,
-        "DiskPart %s\n"
-        "Built: %s\n"
-        "AmigaOS 2.x RDB Hard Disk Partition Editor\n"
-        "\n"
-        "A native GadTools application with full RDB support.\n"
-        "No external library dependencies beyond the ROM.\n"
-        "\n"
-        "Director: John Hertell\n"
-        "Code: Claude Code (Anthropic)\n"
-        "\n"
-        "https://github.com/ChuckyGang/DiskPart\n"
-        "\n"
-        "MIT License \xa9 2026 John Hertell",
+    static char about_title[80];   /* Intuition keeps the pointer */
+    sprintf(body, GS(MSG_DLG_ABOUT_BODY),
         DISKPART_VERSION, DiskPart_BuildStamp);
+    sprintf(about_title, "%s%s", GS(MSG_DLG_ABOUT_PREFIX), DISKPART_VERTITLE);
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
-    es.es_Title        = (UBYTE *)"About " DISKPART_VERTITLE;
+    es.es_Title        = (UBYTE *)about_title;
     es.es_TextFormat   = (UBYTE *)body;
-    es.es_GadgetFormat = (UBYTE *)"OK";
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
     EasyRequestArgs(win, &es, NULL, NULL);
 }
 
@@ -1018,9 +1017,9 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
       *(pgad)=CreateGadgetA(STRING_KIND,prev,&ng,_gs); \
       if (!*(pgad)) goto geom_cleanup; prev=*(pgad); } row++;
 
-            GSTR_GAD(GDLG_CYLS,  "Cylinders",   cyls_str,  &cyls_gad)
-            GSTR_GAD(GDLG_HEADS, "Heads",        heads_str, &heads_gad)
-            GSTR_GAD(GDLG_SECS,  "Sectors/Trk", secs_str,  &secs_gad)
+            GSTR_GAD(GDLG_CYLS,  GS(MSG_DLG_CYLINDERS),   cyls_str,  &cyls_gad)
+            GSTR_GAD(GDLG_HEADS, GS(MSG_DLG_HEADS),       heads_str, &heads_gad)
+            GSTR_GAD(GDLG_SECS,  GS(MSG_DLG_SECTORS_TRK), secs_str,  &secs_gad)
 
             /* Row 3: size field + Calc button (fills CHS with H=16 S=63) */
             {
@@ -1033,7 +1032,7 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
                   ng.ng_TopEdge   = row3_y;
                   ng.ng_Width     = (WORD)str_w;
                   ng.ng_Height    = (WORD)row_h;
-                  ng.ng_GadgetText = "Size (e.g. 2G)";
+                  ng.ng_GadgetText = GS(MSG_DLG_SIZE_EG);
                   ng.ng_GadgetID  = GDLG_SIZE;
                   ng.ng_Flags     = PLACETEXT_LEFT;
                   size_gad = CreateGadgetA(STRING_KIND, prev, &ng, _gs);
@@ -1044,7 +1043,7 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
                   ng.ng_TopEdge   = row3_y;
                   ng.ng_Width     = (WORD)calc_w;
                   ng.ng_Height    = (WORD)row_h;
-                  ng.ng_GadgetText = "Calc";
+                  ng.ng_GadgetText = GS(MSG_DLG_CALC);
                   ng.ng_GadgetID  = GDLG_CALC;
                   ng.ng_Flags     = PLACETEXT_IN;
                   prev = CreateGadgetA(BUTTON_KIND, prev, &ng, _bt);
@@ -1060,12 +1059,12 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
                 struct TagItem bt[] = { { TAG_DONE, 0 } };
                 ng.ng_TopEdge=(WORD)btn_y; ng.ng_Height=(WORD)row_h;
                 ng.ng_Width=(WORD)half_w; ng.ng_Flags=PLACETEXT_IN;
-                ng.ng_LeftEdge=(WORD)(bor_l+pad); ng.ng_GadgetText="OK";
+                ng.ng_LeftEdge=(WORD)(bor_l+pad); ng.ng_GadgetText=GS(MSG_OK);
                 ng.ng_GadgetID=GDLG_OK;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
                 if (!prev) goto geom_cleanup;
                 ng.ng_LeftEdge=(WORD)(bor_l+pad+half_w+pad);
-                ng.ng_GadgetText="Cancel"; ng.ng_GadgetID=GDLG_CANCEL;
+                ng.ng_GadgetText=GS(MSG_CANCEL); ng.ng_GadgetID=GDLG_CANCEL;
                 prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
                 if (!prev) goto geom_cleanup;
             }
@@ -1077,7 +1076,7 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
                 { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
                 { WA_Width,     (ULONG)win_w },
                 { WA_Height,    (ULONG)win_h },
-                { WA_Title,     (ULONG)"Manual Geometry Entry" },
+                { WA_Title,     (ULONG)GS(MSG_DLG_GEOM_TITLE) },
                 { WA_Gadgets,   (ULONG)glist },
                 { WA_PubScreen, (ULONG)scr },
                 { WA_IDCMP,     IDCMP_CLOSEWINDOW | IDCMP_GADGETUP |
@@ -1103,8 +1102,8 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
               (WORD)((y_) + _rp->TxBaseline)); \
     Text(_rp, (str_), (WORD)strlen(str_)); \
 } while(0)
-    GEOM_WARN(win, warn_y,            warn_fh, "WARNING: Incorrect values may cause data loss.");
-    GEOM_WARN(win, warn_y+warn_fh+3,  warn_fh, "Use only when automatic detection fails.");
+    GEOM_WARN(win, warn_y,            warn_fh, GS(MSG_DLG_GEOM_WARN1));
+    GEOM_WARN(win, warn_y+warn_fh+3,  warn_fh, GS(MSG_DLG_GEOM_WARN2));
 
     {
         BOOL running = TRUE;
@@ -1180,8 +1179,8 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
                 case IDCMP_REFRESHWINDOW:
                     GT_BeginRefresh(win);
                     GT_EndRefresh(win, TRUE);
-                    GEOM_WARN(win, warn_y,           warn_fh, "WARNING: Incorrect values may cause data loss.");
-                    GEOM_WARN(win, warn_y+warn_fh+3, warn_fh, "Use only when automatic detection fails.");
+                    GEOM_WARN(win, warn_y,           warn_fh, GS(MSG_DLG_GEOM_WARN1));
+                    GEOM_WARN(win, warn_y+warn_fh+3, warn_fh, GS(MSG_DLG_GEOM_WARN2));
                     break;
                 }
             }

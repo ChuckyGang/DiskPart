@@ -19,6 +19,7 @@
 
 #include "clib.h"
 #include "devices.h"
+#include "locale_support.h"
 #include "rdb.h"
 
 /* ------------------------------------------------------------------ */
@@ -315,7 +316,7 @@ void DevNameList_FormatDisplay(struct DevNameList *nl, UWORD col_chars)
             UWORD vlen, name_col, nlen, j;
             char *p = nl->display[i];
 
-            sprintf(ver, "v%u.%u", (unsigned)nl->vers[i], (unsigned)nl->revs[i]);
+            sprintf(ver, GS(MSG_DEV_VERSION_FMT), (unsigned)nl->vers[i], (unsigned)nl->revs[i]);
             vlen     = (UWORD)strlen(ver);
             name_col = (col_chars > vlen + 1) ? (col_chars - vlen - 1) : 1;
 
@@ -451,7 +452,7 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
                           rdb->sectors * 512UL;
             FormatSize(total, sz);
             if (total >= (UQUAD)1024*1024*1024)
-                sprintf(sz + strlen(sz), " (%lu MB)", (unsigned long)(total / (1024UL*1024UL)));
+                sprintf(sz + strlen(sz), GS(MSG_DEV_SIZE_MB_FMT), (unsigned long)(total / (1024UL*1024UL)));
             have_size = TRUE;
 
             if (!have_brand) {
@@ -468,32 +469,32 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
                if available, otherwise from TD_GETGEOMETRY. */
             FormatSize(bd->total_bytes, sz);
             if (bd->total_bytes >= (UQUAD)1024*1024*1024)
-                sprintf(sz + strlen(sz), " (%lu MB)",
+                sprintf(sz + strlen(sz), GS(MSG_DEV_SIZE_MB_FMT),
                         (unsigned long)(bd->total_bytes / (1024UL*1024UL)));
             have_size = TRUE;
         }
 
         if (have_brand && have_size) {
             if (vendor[0] && product[0])
-                sprintf(ue->display, "Unit %lu   %s %s   %s",
+                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND2_SIZE_FMT),
                         (unsigned long)unit, vendor, product, sz);
             else
-                sprintf(ue->display, "Unit %lu   %s   %s",
+                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND1_SIZE_FMT),
                         (unsigned long)unit,
                         vendor[0] ? vendor : product, sz);
         } else if (have_brand) {
             if (vendor[0] && product[0])
-                sprintf(ue->display, "Unit %lu   %s %s",
+                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND2_FMT),
                         (unsigned long)unit, vendor, product);
             else
-                sprintf(ue->display, "Unit %lu   %s",
+                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND1_FMT),
                         (unsigned long)unit,
                         vendor[0] ? vendor : product);
         } else if (have_size) {
-            sprintf(ue->display, "Unit %lu   %s",
+            sprintf(ue->display, GS(MSG_DEV_UNIT_SIZE_FMT),
                     (unsigned long)unit, sz);
         } else {
-            sprintf(ue->display, "Unit %lu", (unsigned long)unit);
+            sprintf(ue->display, GS(MSG_DEV_UNIT_FMT), (unsigned long)unit);
         }
 
         if (cb) cb(cb_data, unit, PROBE_FOUND, ue->display);

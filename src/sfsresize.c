@@ -63,6 +63,7 @@ extern struct IntuitionBase *IntuitionBase;
 #include "ffsresize.h"
 #include "sfsresize.h"
 #include "sfs_util.h"
+#include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
 /* SFS on-disk block IDs                                               */
@@ -266,7 +267,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
     sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
     if (heads == 0 || sectors == 0) {
-        sprintf(err_buf, "Invalid geometry (h=%lu s=%lu)",
+        sprintf(err_buf, GS(MSG_SFS_INVALID_GEOMETRY),
                 (unsigned long)heads, (unsigned long)sectors);
         return FALSE;
     }
@@ -277,16 +278,14 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Phase 1-2: read first 512 bytes, validate id, extract blocksize  */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Reading SFS root block...");
+    SFS_PROGRESS(GS(MSG_SFS_READING_ROOT));
     if (!BlockDev_ReadBlock(bd, phys_base, scratch)) {
-        sprintf(err_buf, "Cannot read SFS block 0 (phys %lu)", (unsigned long)phys_base);
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_BLOCK0), (unsigned long)phys_base);
         return FALSE;
     }
     if (sfs_getl(scratch, SFS_RB_ID) != SFS_ROOT_ID) {
         sprintf(err_buf,
-                "SFS block 0 id=0x%08lX (expected 0x%08lX).\n"
-                "Not SFS or wrong partition start.\n"
-                "phys=%lu low=%lu h=%lu s=%lu",
+                GS(MSG_SFS_BLOCK0_BAD_ID),
                 (unsigned long)sfs_getl(scratch, SFS_RB_ID),
                 (unsigned long)SFS_ROOT_ID,
                 (unsigned long)phys_base,
@@ -298,7 +297,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     sfs_blocksize = sfs_getl(scratch, SFS_RB_BLOCKSIZE);
     if (sfs_blocksize < 512 || (sfs_blocksize & (sfs_blocksize - 1)) ||
         (sfs_blocksize % 512) != 0) {
-        sprintf(err_buf, "SFS blocksize=%lu invalid.", (unsigned long)sfs_blocksize);
+        sprintf(err_buf, GS(MSG_SFS_BLOCKSIZE_INVALID), (unsigned long)sfs_blocksize);
         return FALSE;
     }
     sfs_phys = sfs_blocksize / 512;
@@ -314,7 +313,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     buf_bmb_read = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
     if (!buf_root0 || !buf_orig0 || !buf_rootend || !buf_newend ||
         !buf_bmb_work || !buf_bmb_read) {
-        sprintf(err_buf, "Out of memory (6x%lu bytes)", (unsigned long)sfs_blocksize);
+        sprintf(err_buf, GS(MSG_SFS_OOM_BUFFERS), (unsigned long)sfs_blocksize);
         goto done;
     }
 
@@ -324,7 +323,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* flushes can race with our writes and win on seqnum).              */
     /* FFS uses the same pattern: Inhibit first, then read+write.        */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Inhibiting SFS handler...");
+    SFS_PROGRESS(GS(MSG_SFS_INHIBITING));
     if (pi->drive_name[0]) {
         sprintf(inh_name, "%s:", pi->drive_name);
         if (Inhibit((STRPTR)inh_name, DOSTRUE)) did_inhibit = TRUE;
@@ -334,17 +333,17 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* Phase 4: read + validate start root block                         */
     /* ---------------------------------------------------------------- */
     if (!sfs_read_block(bd, phys_base, 0, sfs_phys, buf_root0)) {
-        sprintf(err_buf, "Cannot read SFS root block 0"); goto done;
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_ROOT0)); goto done;
     }
     if (!sfs_verify_checksum(buf_root0, sfs_blocksize)) {
-        sprintf(err_buf, "SFS root block 0 bad checksum."); goto done;
+        sprintf(err_buf, GS(MSG_SFS_ROOT0_BAD_CHECKSUM)); goto done;
     }
     if (sfs_getw(buf_root0, SFS_RB_VERSION) != 3) {
-        sprintf(err_buf, "SFS root version=%u (expected 3).",
+        sprintf(err_buf, GS(MSG_SFS_ROOT_BAD_VERSION),
                 (unsigned)sfs_getw(buf_root0, SFS_RB_VERSION)); goto done;
     }
     if (sfs_getl(buf_root0, SFS_RB_OWNBLOCK) != 0) {
-        sprintf(err_buf, "SFS root block 0 ownblock=%lu (expected 0).",
+        sprintf(err_buf, GS(MSG_SFS_ROOT0_BAD_OWNBLOCK),
                 (unsigned long)sfs_getl(buf_root0, SFS_RB_OWNBLOCK)); goto done;
     }
 
@@ -361,7 +360,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     seq_start   = sfs_getw(buf_root0, SFS_RB_SEQNUM);
 
     if (totalblocks < 2) {
-        sprintf(err_buf, "SFS totalblocks=%lu too small.", (unsigned long)totalblocks);
+        sprintf(err_buf, GS(MSG_SFS_TOTALBLOCKS_SMALL), (unsigned long)totalblocks);
         goto done;
     }
     for (k = 0; k < sfs_blocksize; k++) buf_orig0[k] = buf_root0[k];
@@ -369,7 +368,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Phase 5: read end root at totalblocks-1                           */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Reading SFS end root...");
+    SFS_PROGRESS(GS(MSG_SFS_READING_END_ROOT));
     end_root_valid = FALSE; seq_end = 0;
     if (sfs_read_block(bd, phys_base, totalblocks-1, sfs_phys, buf_rootend))
         if (sfs_verify_checksum(buf_rootend, sfs_blocksize) &&
@@ -406,7 +405,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     blocks_inbitmap = (sfs_blocksize - (ULONG)SFS_BM_HEADER_SIZE) * 8;
     if (blocks_inbitmap == 0) {
-        sprintf(err_buf, "SFS blocksize too small for bitmap."); goto done;
+        sprintf(err_buf, GS(MSG_SFS_BLOCKSIZE_SMALL_BITMAP)); goto done;
     }
     old_bmb_count = (totalblocks     + blocks_inbitmap - 1) / blocks_inbitmap;
     new_bmb_count = (new_totalblocks + blocks_inbitmap - 1) / blocks_inbitmap;
@@ -421,7 +420,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     if (num_new_bmb > 0) {
 
         /* ---- Phase 8a: read bitmap block(s) covering natural positions ---- */
-        SFS_PROGRESS("Checking new bitmap block positions...");
+        SFS_PROGRESS(GS(MSG_SFS_CHECKING_POSITIONS));
         {
             ULONG need_idx[1 + MAX_MOD_BMB];
             int   need_n = 0, dup, j;
@@ -450,15 +449,15 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                     mod_buf[mi]  = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
                     mod_orig[mi] = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
                     if (!mod_buf[mi] || !mod_orig[mi]) {
-                        sprintf(err_buf, "Out of memory (bmb cache)"); goto done;
+                        sprintf(err_buf, GS(MSG_SFS_OOM_BMB_CACHE)); goto done;
                     }
                     if (!sfs_read_block(bd, phys_base, blk, sfs_phys, mod_buf[mi])) {
-                        sprintf(err_buf, "Cannot read bitmap block %lu", (unsigned long)blk);
+                        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_BMB), (unsigned long)blk);
                         goto done;
                     }
                     if (!sfs_verify_checksum(mod_buf[mi], sfs_blocksize) ||
                         sfs_getl(mod_buf[mi], SFS_RB_ID) != SFS_BITMAP_ID) {
-                        sprintf(err_buf, "Bad bitmap block %lu", (unsigned long)blk);
+                        sprintf(err_buf, GS(MSG_SFS_BAD_BMB), (unsigned long)blk);
                         goto done;
                     }
                     for (j = 0; (ULONG)j < sfs_blocksize; j++)
@@ -527,19 +526,19 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             }
 
             /* Write updated existing bitmap blocks */
-            SFS_PROGRESS("Writing bitmap blocks (natural)...");
+            SFS_PROGRESS(GS(MSG_SFS_WRITING_BMB_NATURAL));
             for (mi = 0; mi < num_mod; mi++) {
                 ULONG blk = bitmapbase + mod_idx[mi];
                 sfs_set_checksum(mod_buf[mi], sfs_blocksize);
                 if (!sfs_write_block(bd, phys_base, blk, sfs_phys, mod_buf[mi])) {
-                    sprintf(err_buf, "Cannot write bitmap block %lu.", (unsigned long)blk);
+                    sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_BMB), (unsigned long)blk);
                     goto done;
                 }
                 mod_written[mi] = 1;
             }
 
             /* Write new bitmap blocks in natural positions */
-            SFS_PROGRESS("Writing new bitmap blocks...");
+            SFS_PROGRESS(GS(MSG_SFS_WRITING_NEW_BMB));
             for (k = 0; k < num_new_bmb; k++) {
                 ULONG blk      = bitmapbase + old_bmb_count + k;
                 ULONG bmb_idx  = old_bmb_count + k;
@@ -565,7 +564,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
                 sfs_set_checksum(buf_bmb_work, sfs_blocksize);
                 if (!sfs_write_block(bd, phys_base, blk, sfs_phys, buf_bmb_work)) {
-                    sprintf(err_buf, "Cannot write new bitmap block %lu.", (unsigned long)blk);
+                    sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_NEW_BMB), (unsigned long)blk);
                     goto done;
                 }
             }
@@ -587,9 +586,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                is always beyond new_bitmapbase+new_bmb_count if delta_sfs > new_bmb_count. */
             if (delta_sfs <= new_bmb_count) {
                 sprintf(err_buf,
-                        "Extended area (%lu blks) too small for relocated\n"
-                        "bitmap (%lu bmb blocks). Need delta > %lu.\n"
-                        "Grow by a larger amount to use bitmap relocation.",
+                        GS(MSG_SFS_EXT_AREA_TOO_SMALL),
                         (unsigned long)delta_sfs,
                         (unsigned long)new_bmb_count,
                         (unsigned long)new_bmb_count);
@@ -598,7 +595,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
             new_bitmapbase_for_root = new_bitmapbase;
 
-            SFS_PROGRESS("Relocating SFS bitmap...");
+            SFS_PROGRESS(GS(MSG_SFS_RELOCATING_BITMAP));
 
             /* Write all new_bmb_count bitmap blocks to new positions */
             for (k = 0; k < new_bmb_count; k++) {
@@ -618,7 +615,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                     /* Copy old bitmap data for this index */
                     if (!sfs_read_block(bd, phys_base, bitmapbase+k, sfs_phys,
                                          buf_bmb_read)) {
-                        sprintf(err_buf, "Cannot read old bitmap block %lu.",
+                        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_OLD_BMB),
                                 (unsigned long)(bitmapbase+k));
                         goto done;
                     }
@@ -666,7 +663,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
                 sfs_set_checksum(buf_bmb_work, sfs_blocksize);
                 if (!sfs_write_block(bd, phys_base, new_blk, sfs_phys, buf_bmb_work)) {
-                    sprintf(err_buf, "Cannot write relocated bitmap block %lu.",
+                    sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_RELOC_BMB),
                             (unsigned long)new_blk);
                     goto done;
                 }
@@ -695,16 +692,16 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             mod_buf[mi]  = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
             mod_orig[mi] = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
             if (!mod_buf[mi] || !mod_orig[mi]) {
-                sprintf(err_buf, "Out of memory (bmb cache)"); goto done;
+                sprintf(err_buf, GS(MSG_SFS_OOM_BMB_CACHE)); goto done;
             }
-            SFS_PROGRESS("Reading bitmap block...");
+            SFS_PROGRESS(GS(MSG_SFS_READING_BMB));
             if (!sfs_read_block(bd, phys_base, blk, sfs_phys, mod_buf[mi])) {
-                sprintf(err_buf, "Cannot read bitmap block %lu", (unsigned long)blk);
+                sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_BMB), (unsigned long)blk);
                 goto done;
             }
             if (!sfs_verify_checksum(mod_buf[mi], sfs_blocksize) ||
                 sfs_getl(mod_buf[mi], SFS_RB_ID) != SFS_BITMAP_ID) {
-                sprintf(err_buf, "Bad bitmap block %lu", (unsigned long)blk); goto done;
+                sprintf(err_buf, GS(MSG_SFS_BAD_BMB), (unsigned long)blk); goto done;
             }
             for (j = 0; (ULONG)j < sfs_blocksize; j++)
                 mod_orig[mi][j] = mod_buf[mi][j];
@@ -729,12 +726,12 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         if (mi < num_mod)
             sfs_bm_set_used(mod_buf[mi], ne_bmb * blocks_inbitmap, new_totalblocks-1);
 
-        SFS_PROGRESS("Writing bitmap blocks...");
+        SFS_PROGRESS(GS(MSG_SFS_WRITING_BMB));
         for (mi = 0; mi < num_mod; mi++) {
             ULONG blk = bitmapbase + mod_idx[mi];
             sfs_set_checksum(mod_buf[mi], sfs_blocksize);
             if (!sfs_write_block(bd, phys_base, blk, sfs_phys, mod_buf[mi])) {
-                sprintf(err_buf, "Cannot write bitmap block %lu.", (unsigned long)blk);
+                sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_BMB), (unsigned long)blk);
                 goto done;
             }
             mod_written[mi] = 1;
@@ -744,7 +741,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Write new end root at new_totalblocks-1                           */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Writing new SFS end root...");
+    SFS_PROGRESS(GS(MSG_SFS_WRITING_NEW_END_ROOT));
     {
         ULONG j;
         for (j = 0; j < sfs_blocksize; j++) buf_newend[j] = buf_root0[j];
@@ -756,7 +753,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         sfs_setw(buf_newend, SFS_RB_SEQNUM, (UWORD)(new_seqnum + 1));
         sfs_set_checksum(buf_newend, sfs_blocksize);
         if (!sfs_write_block(bd, phys_base, new_totalblocks-1, sfs_phys, buf_newend)) {
-            sprintf(err_buf, "Cannot write new SFS end root at block %lu.",
+            sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_END_ROOT),
                     (unsigned long)(new_totalblocks-1));
             goto done;
         }
@@ -766,7 +763,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* ---------------------------------------------------------------- */
     /* Write updated start root (highest seqnum -> authoritative)        */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Writing updated SFS start root...");
+    SFS_PROGRESS(GS(MSG_SFS_WRITING_START_ROOT));
     sfs_setl(buf_root0, SFS_RB_TOTALBLOCKS, new_totalblocks);
     sfs_setl(buf_root0, SFS_RB_LASTBYTEH,   new_lastbyteh);
     sfs_setl(buf_root0, SFS_RB_LASTBYTE,    new_lastbyte_lo);
@@ -774,8 +771,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     sfs_setw(buf_root0, SFS_RB_SEQNUM, (UWORD)(new_seqnum + 2));
     sfs_set_checksum(buf_root0, sfs_blocksize);
     if (!sfs_write_block(bd, phys_base, 0, sfs_phys, buf_root0)) {
-        sprintf(err_buf, "Cannot write updated SFS start root.\n"
-                "Run 'SFScheck %s:' after reboot.", pi->drive_name);
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_START_ROOT), pi->drive_name);
         goto done;
     }
     root0_written = 1;
@@ -790,7 +786,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* it permanently invalid regardless of DosEnvec.                    */
     /* Failure is non-fatal: the grow succeeded; warn in diagnostic.     */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Invalidating old end root...");
+    SFS_PROGRESS(GS(MSG_SFS_INVALIDATING_OLD_ROOT));
     {
         ULONG inv_j;
         for (inv_j = 0; inv_j < sfs_blocksize; inv_j++) buf_bmb_work[inv_j] = 0;
@@ -819,7 +815,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* (Workbench Info requester).  Count from the now-updated bitmap so   */
     /* the value is exact.  Failure is non-fatal.                          */
     /* ---------------------------------------------------------------- */
-    SFS_PROGRESS("Updating free block cache...");
+    SFS_PROGRESS(GS(MSG_SFS_UPDATING_FREE_CACHE));
     {
         ULONG k2, j2;
         ULONG freeblocks_off = sfs_blocksize - (ULONG)SFS_RI_FREEBLOCKS_FROM_END;
@@ -866,7 +862,7 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG vrf_j, vrf_n;
         const ULONG *vrf_bmp;
 
-        SFS_PROGRESS("Verifying writes...");
+        SFS_PROGRESS(GS(MSG_SFS_VERIFYING_WRITES));
         /* Read back root block 0 */
         if (sfs_read_block(bd, phys_base, 0, sfs_phys, buf_bmb_read)) {
             vrf_tb = sfs_getl(buf_bmb_read, SFS_RB_TOTALBLOCKS);
@@ -910,17 +906,9 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             }
 
             sprintf(err_buf,
-                    "%s\n"
-                    "cyl+%lu bpc=%lu delta=%lu\n"
-                    "blks %lu->%lu\n"
-                    "bmb_base %lu->%lu\n"
-                    "VRF:tb=%lu bm=%lu bmbLFree=%lu\n"
-                    "VRF2:newbmFree=%lu (exp %lu)\n"
-                    "OldRoot: %s\n"
-                    "FreeBlks: %s (%lu->%lu)\n"
-                    "DH0: stays inhibited until reboot.",
-                    use_relocation ? "Bitmap relocated."
-                                   : "Bitmap extended.",
+                    GS(MSG_SFS_DIAG_SUMMARY),
+                    use_relocation ? GS(MSG_SFS_DIAG_RELOCATED)
+                                   : GS(MSG_SFS_DIAG_EXTENDED),
                     (unsigned long)cyl_diff,
                     (unsigned long)bpc,
                     (unsigned long)delta_sfs,
@@ -934,8 +922,10 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                     (unsigned long)vrf2_free,
                     (unsigned long)(num_new_bmb > 0 ?
                         blocks_inbitmap : 0),
-                    old_end_inv ? "invalidated" : "WARN: not invalidated",
-                    objc_updated ? "OK" : "WARN:fail",
+                    old_end_inv ? GS(MSG_SFS_DIAG_INVALIDATED)
+                                : GS(MSG_SFS_DIAG_NOT_INVALIDATED),
+                    objc_updated ? GS(MSG_SFS_DIAG_OBJC_OK)
+                                 : GS(MSG_SFS_DIAG_OBJC_FAIL),
                     (unsigned long)objc_old_free,
                     (unsigned long)ri_free_counted);
         }

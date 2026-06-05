@@ -31,6 +31,7 @@
 #include <proto/dos.h>
 
 #include "clib.h"
+#include "locale_support.h"
 #include "rdb.h"
 #include "imagecopy.h"
 #include "quickformat.h"
@@ -68,13 +69,13 @@ static void sc_puts(const char *s) { PutStr((CONST_STRPTR)s); }
 
 static void sc_err(ULONG ln, const char *msg)
 {
-    sprintf(s_ebuf, "ERROR line %lu: %s\n", ln, msg);
+    sprintf(s_ebuf, GS(MSG_SCR_ERROR_LINE_FMT), ln, msg);
     sc_puts(s_ebuf);
 }
 
 static void sc_warn(ULONG ln, const char *msg)
 {
-    sprintf(s_ebuf, "WARNING line %lu: %s\n", ln, msg);
+    sprintf(s_ebuf, GS(MSG_SCR_WARNING_LINE_FMT), ln, msg);
     sc_puts(s_ebuf);
 }
 
@@ -90,12 +91,12 @@ static BOOL sc_ask_yn(const char *question)
     LONG got;
 
     if (s_st.force) {
-        sprintf(s_ebuf, "%s (Y/N): Y\n", question);
+        sprintf(s_ebuf, GS(MSG_SCR_YN_FORCE_FMT), question);
         sc_puts(s_ebuf);
         return TRUE;
     }
 
-    sprintf(s_ebuf, "%s (Y/N): ", question);
+    sprintf(s_ebuf, GS(MSG_SCR_YN_PROMPT_FMT), question);
     sc_puts(s_ebuf);
     Flush(Output());
 
@@ -311,21 +312,20 @@ static void open_finish(ULONG ln)
 
     FormatSize(s_st.bd->total_bytes, szbuf);
     if (s_st.bd->disk_brand[0])
-        sprintf(s_msg, "  %s  %s\n", s_st.bd->disk_brand, szbuf);
+        sprintf(s_msg, GS(MSG_SCR_OPEN_BRAND_SIZE_FMT), s_st.bd->disk_brand, szbuf);
     else
-        sprintf(s_msg, "  %s\n", szbuf);
+        sprintf(s_msg, GS(MSG_SCR_OPEN_SIZE_FMT), szbuf);
     sc_puts(s_msg);
 
     memset(&s_st.rdb, 0, sizeof(s_st.rdb));
     if (RDB_Read(s_st.bd, &s_st.rdb) && s_st.rdb.valid) {
-        sprintf(s_msg, "  Existing RDB: %lu cylinders, "
-                "%u partition(s), %u filesystem(s).\n",
+        sprintf(s_msg, GS(MSG_SCR_EXISTING_RDB_FMT),
                 (ULONG)s_st.rdb.cylinders,
                 (unsigned)s_st.rdb.num_parts,
                 (unsigned)s_st.rdb.num_fs);
         sc_puts(s_msg);
     } else {
-        sc_puts("  No RDB found.\n");
+        sc_puts(GS(MSG_SCR_NO_RDB_FOUND));
         s_st.rdb.valid = FALSE;
     }
 
@@ -338,7 +338,7 @@ static void open_close_existing(ULONG ln)
 {
     if (s_st.bd) {
         if (s_st.dirty)
-            sc_warn(ln, "Previous device had unsaved changes.");
+            sc_warn(ln, GS(MSG_SCR_PREV_UNSAVED));
         RDB_FreeCode(&s_st.rdb);
         BlockDev_Close(s_st.bd);
         s_st.bd = NULL; s_st.rdb_ready = FALSE; s_st.dirty = FALSE;
@@ -357,16 +357,16 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
     if (ntok >= 3 && ci_eq(tok[1], "FILE")) {
         const char *path = tok[2];
         open_close_existing(ln);
-        sprintf(s_msg, "Opening image file \"%s\"...\n", path);
+        sprintf(s_msg, GS(MSG_SCR_OPENING_IMAGE_FMT), path);
         sc_puts(s_msg);
         s_st.bd = BlockDev_OpenFile(path);
-        if (!s_st.bd) { sc_err(ln, "Cannot open image file."); return RETURN_ERROR; }
+        if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_CANNOT_OPEN_IMAGE)); return RETURN_ERROR; }
         open_finish(ln);
         return RETURN_OK;
     }
 
     if (ntok < 3) {
-        sc_err(ln, "OPEN requires <device> <unit> or FILE <path>");
+        sc_err(ln, GS(MSG_SCR_OPEN_USAGE));
         return RETURN_ERROR;
     }
 
@@ -376,11 +376,11 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
 
         open_close_existing(ln);
 
-        sprintf(s_msg, "Opening %s unit %lu...\n", devname, unit);
+        sprintf(s_msg, GS(MSG_SCR_OPENING_DEV_FMT), devname, unit);
         sc_puts(s_msg);
 
         s_st.bd = BlockDev_Open(devname, unit);
-        if (!s_st.bd) { sc_err(ln, "Cannot open device."); return RETURN_ERROR; }
+        if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_CANNOT_OPEN_DEV)); return RETURN_ERROR; }
         open_finish(ln);
         return RETURN_OK;
     }
@@ -400,32 +400,32 @@ static LONG do_create(ULONG ln, char **tok, UWORD ntok)
     char        szbuf[20];
 
     if (ntok < 3 || !ci_eq(tok[1], "FILE")) {
-        sc_err(ln, "CREATE requires FILE <path> SIZE=<n>[K|M|G]");
+        sc_err(ln, GS(MSG_SCR_CREATE_USAGE));
         return RETURN_ERROR;
     }
     path = tok[2];
 
     sz_s = kwarg(tok, ntok, "SIZE");
-    if (!sz_s) { sc_err(ln, "CREATE requires SIZE=<n>[K|M|G]"); return RETURN_ERROR; }
+    if (!sz_s) { sc_err(ln, GS(MSG_SCR_CREATE_NEED_SIZE)); return RETURN_ERROR; }
     size_bytes = parse_size_bytes(sz_s);
     if (size_bytes < 512) {
-        sc_err(ln, "CREATE SIZE must be at least 512 bytes.");
+        sc_err(ln, GS(MSG_SCR_CREATE_SIZE_MIN));
         return RETURN_ERROR;
     }
     /* dos.library Seek is signed 32-bit. */
     if (size_bytes > (UQUAD)0x7FFFFE00UL) {
-        sc_err(ln, "CREATE SIZE exceeds the 2 GB dos.library image-file limit.");
+        sc_err(ln, GS(MSG_SCR_CREATE_SIZE_MAX));
         return RETURN_ERROR;
     }
 
     open_close_existing(ln);
 
     FormatSize(size_bytes, szbuf);
-    sprintf(s_msg, "Creating image file \"%s\" (%s)...\n", path, szbuf);
+    sprintf(s_msg, GS(MSG_SCR_CREATING_IMAGE_FMT), path, szbuf);
     sc_puts(s_msg);
 
     s_st.bd = BlockDev_CreateFile(path, size_bytes);
-    if (!s_st.bd) { sc_err(ln, "Cannot create image file."); return RETURN_ERROR; }
+    if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_CANNOT_CREATE_IMAGE)); return RETURN_ERROR; }
     open_finish(ln);
     return RETURN_OK;
 }
@@ -436,8 +436,8 @@ static LONG do_create(ULONG ln, char **tok, UWORD ntok)
 
 static LONG do_init(ULONG ln, char **tok, UWORD ntok)
 {
-    if (ntok < 2) { sc_err(ln, "INIT requires NEW or NEWGEO."); return RETURN_ERROR; }
-    if (!s_st.bd) { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+    if (ntok < 2) { sc_err(ln, GS(MSG_SCR_INIT_USAGE)); return RETURN_ERROR; }
+    if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
 
     /* ---- NEW ---- */
     if (ci_eq(tok[1], "NEW")) {
@@ -445,21 +445,19 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         char  szbuf[20];
 
         if (s_st.rdb.valid) {
-            sprintf(s_msg,
-                    "WARNING line %lu: existing RDB found "
-                    "(%lu cylinders, %u partition(s)).\n",
+            sprintf(s_msg, GS(MSG_SCR_INIT_EXISTING_RDB_FMT),
                     ln, (ULONG)s_st.rdb.cylinders,
                     (unsigned)s_st.rdb.num_parts);
             sc_puts(s_msg);
-            if (!sc_ask_yn("Destroy existing RDB and write a new one?")) {
-                sc_puts("Aborted.\n");
+            if (!sc_ask_yn(GS(MSG_SCR_INIT_DESTROY_ASK))) {
+                sc_puts(GS(MSG_SCR_ABORTED));
                 return RETURN_ERROR;
             }
         }
         RDB_FreeCode(&s_st.rdb);
 
         if (!BlockDev_GetGeometry(s_st.bd, &cyls, &heads, &sects))
-            { sc_err(ln, "Cannot read disk geometry."); return RETURN_ERROR; }
+            { sc_err(ln, GS(MSG_SCR_CANNOT_READ_GEO)); return RETURN_ERROR; }
 
         RDB_InitFresh(&s_st.rdb, cyls, heads, sects);
         s_st.dirty = TRUE;
@@ -467,9 +465,7 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         {
             UQUAD total = (UQUAD)cyls * heads * sects * 512UL;
             FormatSize(total, szbuf);
-            sprintf(s_msg,
-                    "  RDB initialised: %lu cyls x %lu heads "
-                    "x %lu sectors  (%s)\n",
+            sprintf(s_msg, GS(MSG_SCR_RDB_INIT_FMT),
                     cyls, heads, sects, szbuf);
         }
         sc_puts(s_msg);
@@ -482,11 +478,11 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         char  sold[20], snew[20];
 
         if (!s_st.rdb.valid)
-            { sc_err(ln, "No RDB. Use INIT NEW first."); return RETURN_ERROR; }
+            { sc_err(ln, GS(MSG_SCR_NO_RDB_INIT)); return RETURN_ERROR; }
         if (s_st.rdb.heads == 0 || s_st.rdb.sectors == 0)
-            { sc_err(ln, "RDB geometry invalid (heads/sectors = 0)."); return RETURN_ERROR; }
+            { sc_err(ln, GS(MSG_SCR_RDB_GEO_INVALID)); return RETURN_ERROR; }
         if (s_st.bd->total_bytes == 0)
-            { sc_err(ln, "Cannot determine disk size."); return RETURN_ERROR; }
+            { sc_err(ln, GS(MSG_SCR_CANNOT_DET_SIZE)); return RETURN_ERROR; }
 
         new_cyls = (ULONG)((s_st.bd->total_bytes / 512UL)
                            / ((UQUAD)s_st.rdb.heads * s_st.rdb.sectors));
@@ -496,15 +492,13 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         FormatSize(s_st.bd->total_bytes, snew);
 
         if (new_cyls <= s_st.rdb.cylinders) {
-            sprintf(s_msg,
-                    "  Disk not larger than RDB (%lu cyls / %s"
-                    " vs %lu cyls / %s). No change.\n",
+            sprintf(s_msg, GS(MSG_SCR_NEWGEO_NOCHANGE_FMT),
                     (ULONG)s_st.rdb.cylinders, sold, new_cyls, snew);
             sc_puts(s_msg);
             return RETURN_OK;
         }
 
-        sprintf(s_msg, "  Geometry: %lu cyls (%s)  ->  %lu cyls (%s)\n",
+        sprintf(s_msg, GS(MSG_SCR_NEWGEO_CHANGE_FMT),
                 (ULONG)s_st.rdb.cylinders, sold, new_cyls, snew);
         sc_puts(s_msg);
 
@@ -514,7 +508,7 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         return RETURN_OK;
     }
 
-    sc_err(ln, "INIT: unknown mode. Use NEW or NEWGEO.");
+    sc_err(ln, GS(MSG_SCR_INIT_UNKNOWN_MODE));
     return RETURN_ERROR;
 }
 
@@ -534,41 +528,41 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     UWORD  nlen, i;
 
     if (!s_st.bd)
-        { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
-        { sc_err(ln, "No RDB. Use INIT NEW first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_INIT)); return RETURN_ERROR; }
     if (s_st.rdb.num_parts >= MAX_PARTITIONS)
-        { sc_err(ln, "Partition table full."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_PART_TABLE_FULL)); return RETURN_ERROR; }
 
     /* NAME (required) */
     v = kwarg(tok, ntok, "NAME");
     if (!v || !v[0]) {
-        sc_err(ln, "ADDPART requires NAME=<drivename>.");
+        sc_err(ln, GS(MSG_SCR_ADDPART_NEED_NAME));
         return RETURN_ERROR;
     }
     strncpy(name, v, 30); name[30] = '\0';
     nlen = (UWORD)strlen(name);
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
-    if (nlen == 0) { sc_err(ln, "ADDPART: NAME is empty."); return RETURN_ERROR; }
+    if (nlen == 0) { sc_err(ln, GS(MSG_SCR_ADDPART_NAME_EMPTY)); return RETURN_ERROR; }
 
     /* LOW (required) - literal cyl or NEXT */
     v = kwarg(tok, ntok, "LOW");
-    if (!v) { sc_err(ln, "ADDPART requires LOW=<cyl|NEXT>."); return RETURN_ERROR; }
+    if (!v) { sc_err(ln, GS(MSG_SCR_ADDPART_NEED_LOW)); return RETURN_ERROR; }
     low = parse_low(v, &s_st.rdb);
 
     /* HIGH (required) - literal cyl, END, or +NNN[KMG] */
     v = kwarg(tok, ntok, "HIGH");
-    if (!v) { sc_err(ln, "ADDPART requires HIGH=<cyl|END|+size>."); return RETURN_ERROR; }
+    if (!v) { sc_err(ln, GS(MSG_SCR_ADDPART_NEED_HIGH)); return RETURN_ERROR; }
     if (!parse_high(v, low, s_st.rdb.hi_cyl,
                     s_st.rdb.heads, s_st.rdb.sectors, &high)) {
-        sc_err(ln, "ADDPART: HIGH value invalid or size too small.");
+        sc_err(ln, GS(MSG_SCR_ADDPART_HIGH_INVALID));
         return RETURN_ERROR;
     }
 
     /* TYPE (optional) */
     v = kwarg(tok, ntok, "TYPE");
     if (v && !parse_dostype(v, &dostype))
-        { sc_err(ln, "ADDPART: unrecognised TYPE."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_ADDPART_BAD_TYPE)); return RETURN_ERROR; }
 
     /* BOOTPRI (optional) - implies BOOTABLE */
     v = kwarg(tok, ntok, "BOOTPRI");
@@ -579,14 +573,14 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
 
     /* Validate range */
     if (low > high)
-        { sc_err(ln, "ADDPART: LOW > HIGH."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_ADDPART_LOW_GT_HIGH)); return RETURN_ERROR; }
     if (low < s_st.rdb.lo_cyl) {
-        sprintf(s_msg, "ADDPART: LOW %lu below reserved area (lo_cyl=%lu).",
+        sprintf(s_msg, GS(MSG_SCR_ADDPART_LOW_RESERVED_FMT),
                 low, (ULONG)s_st.rdb.lo_cyl);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
     if (high > s_st.rdb.hi_cyl) {
-        sprintf(s_msg, "ADDPART: HIGH %lu exceeds disk (hi_cyl=%lu).",
+        sprintf(s_msg, GS(MSG_SCR_ADDPART_HIGH_EXCEEDS_FMT),
                 high, (ULONG)s_st.rdb.hi_cyl);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
@@ -595,9 +589,7 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     for (i = 0; i < s_st.rdb.num_parts; i++) {
         struct PartInfo *ex = &s_st.rdb.parts[i];
         if (low <= ex->high_cyl && high >= ex->low_cyl) {
-            sprintf(s_msg,
-                    "ADDPART: cyls %lu-%lu overlap partition "
-                    "%s (%lu-%lu).",
+            sprintf(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
                     low, high, ex->drive_name,
                     (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
             sc_err(ln, s_msg); return RETURN_ERROR;
@@ -640,7 +632,7 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
         char dtbuf[16], szbuf[20];
         FormatDosType(dostype, dtbuf);
         FormatSize((UQUAD)(high - low + 1) * blks_cyl * 512UL, szbuf);
-        sprintf(s_msg, "  Added: %-6s  cyls %lu-%lu  %s  (%s)\n",
+        sprintf(s_msg, GS(MSG_SCR_ADDPART_ADDED_FMT),
                 name, low, high, dtbuf, szbuf);
     }
     sc_puts(s_msg);
@@ -658,23 +650,23 @@ static LONG do_delpart(ULONG ln, char **tok, UWORD ntok)
     UWORD nlen, i, j;
 
     if (!s_st.bd)
-        { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
-        { sc_err(ln, "No RDB. Use OPEN or INIT NEW first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
 
     v = kwarg(tok, ntok, "NAME");
     if (!v || !v[0]) {
-        sc_err(ln, "DELPART requires NAME=<drivename>.");
+        sc_err(ln, GS(MSG_SCR_DELPART_NEED_NAME));
         return RETURN_ERROR;
     }
     strncpy(name, v, 30); name[30] = '\0';
     nlen = (UWORD)strlen(name);
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
-    if (nlen == 0) { sc_err(ln, "DELPART: NAME is empty."); return RETURN_ERROR; }
+    if (nlen == 0) { sc_err(ln, GS(MSG_SCR_DELPART_NAME_EMPTY)); return RETURN_ERROR; }
 
     for (i = 0; i < s_st.rdb.num_parts; i++) {
         if (ci_eq(s_st.rdb.parts[i].drive_name, name)) {
-            sprintf(s_msg, "  Deleted: %-6s  cyls %lu-%lu\n",
+            sprintf(s_msg, GS(MSG_SCR_DELPART_DELETED_FMT),
                     s_st.rdb.parts[i].drive_name,
                     (ULONG)s_st.rdb.parts[i].low_cyl,
                     (ULONG)s_st.rdb.parts[i].high_cyl);
@@ -694,7 +686,7 @@ static LONG do_delpart(ULONG ln, char **tok, UWORD ntok)
         }
     }
 
-    sprintf(s_msg, "DELPART: partition \"%s\" not found.", name);
+    sprintf(s_msg, GS(MSG_SCR_DELPART_NOT_FOUND_FMT), name);
     sc_err(ln, s_msg);
     return RETURN_ERROR;
 }
@@ -716,9 +708,9 @@ static LONG do_checkrdb(ULONG ln)
     ULONG errs;
 
     if (!s_st.bd)
-        { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
-        { sc_err(ln, "No RDB. Use OPEN or INIT NEW first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
 
     errs = RDB_IntegrityCheck(s_st.bd, &s_st.rdb, checkrdb_cb, NULL);
     return (errs == 0) ? RETURN_OK : RETURN_WARN;
@@ -737,22 +729,22 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
     ULONG i, diff_count = 0, first_diff = 0xFFFFFFFFUL;
 
     if (!s_st.bd)
-        { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
-        { sc_err(ln, "No RDB. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN)); return RETURN_ERROR; }
 
     path = kwarg(tok, ntok, "FILE");
     if (!path || !path[0])
-        { sc_err(ln, "VERIFYRDB requires FILE=<path>."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_VERIFYRDB_NEED_FILE)); return RETURN_ERROR; }
 
     fh = Open((UBYTE *)path, MODE_OLDFILE);
-    if (!fh) { sc_err(ln, "VERIFYRDB: Cannot open file."); return RETURN_ERROR; }
+    if (!fh) { sc_err(ln, GS(MSG_SCR_VERIFYRDB_CANT_OPEN)); return RETURN_ERROR; }
     Seek(fh, 0, OFFSET_END);
     fsize = Seek(fh, 0, OFFSET_BEGINNING);
 
     if (fsize != (LONG)s_st.bd->block_size) {
         Close(fh);
-        sprintf(s_msg, "VERIFYRDB: File size (%ld) != block size (%lu).",
+        sprintf(s_msg, GS(MSG_SCR_VERIFYRDB_SIZE_FMT),
                 (long)fsize, (unsigned long)s_st.bd->block_size);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
@@ -767,13 +759,13 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
 
     if (Read(fh, fbuf, fsize) != fsize) {
         Close(fh); FreeVec(fbuf); FreeVec(dbuf);
-        sc_err(ln, "VERIFYRDB: File read error."); return RETURN_ERROR;
+        sc_err(ln, GS(MSG_SCR_VERIFYRDB_READ_ERR)); return RETURN_ERROR;
     }
     Close(fh);
 
     if (!BlockDev_ReadBlock(s_st.bd, s_st.rdb.block_num, dbuf)) {
         FreeVec(fbuf); FreeVec(dbuf);
-        sc_err(ln, "VERIFYRDB: Cannot read RDB block from disk."); return RETURN_ERROR;
+        sc_err(ln, GS(MSG_SCR_VERIFYRDB_DISK_ERR)); return RETURN_ERROR;
     }
 
     for (i = 0; i < s_st.bd->block_size; i++) {
@@ -785,9 +777,9 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
     FreeVec(fbuf); FreeVec(dbuf);
 
     if (diff_count == 0) {
-        sc_puts("VERIFYRDB: MATCH\n"); return RETURN_OK;
+        sc_puts(GS(MSG_SCR_VERIFYRDB_MATCH)); return RETURN_OK;
     } else {
-        sprintf(s_msg, "VERIFYRDB: MISMATCH - %lu byte(s) differ, first @ offset %lu.\n",
+        sprintf(s_msg, GS(MSG_SCR_VERIFYRDB_MISMATCH_FMT),
                 (unsigned long)diff_count, (unsigned long)first_diff);
         sc_puts(s_msg);
         return RETURN_WARN;
@@ -808,19 +800,19 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
     UBYTE *fbuf = NULL, *dbuf = NULL;
 
     if (!s_st.bd)
-        { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
 
     path = kwarg(tok, ntok, "FILE");
     if (!path || !path[0])
-        { sc_err(ln, "VERIFYEXT requires FILE=<path>."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_VERIFYEXT_NEED_FILE)); return RETURN_ERROR; }
 
     fh = Open((UBYTE *)path, MODE_OLDFILE);
-    if (!fh) { sc_err(ln, "VERIFYEXT: Cannot open file."); return RETURN_ERROR; }
+    if (!fh) { sc_err(ln, GS(MSG_SCR_VERIFYEXT_CANT_OPEN)); return RETURN_ERROR; }
 
     if (Read(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ ||
         hdr[0] != ERDB_MAGIC || hdr[1] != ERDB_VERSION) {
         Close(fh);
-        sc_err(ln, "VERIFYEXT: Not a valid ERDB backup (bad magic/version).");
+        sc_err(ln, GS(MSG_SCR_VERIFYEXT_BAD_MAGIC));
         return RETURN_ERROR;
     }
 
@@ -830,13 +822,13 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
 
     if (block_size != s_st.bd->block_size) {
         Close(fh);
-        sprintf(s_msg, "VERIFYEXT: Block size mismatch: backup=%lu, device=%lu.",
+        sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_BSIZE_FMT),
                 (unsigned long)block_size, (unsigned long)s_st.bd->block_size);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
     if (num_blocks == 0 || num_blocks > 1024) {
         Close(fh);
-        sc_err(ln, "VERIFYEXT: Unreasonable block count in header.");
+        sc_err(ln, GS(MSG_SCR_VERIFYEXT_BAD_COUNT));
         return RETURN_ERROR;
     }
 
@@ -848,7 +840,7 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
         return RETURN_ERROR;
     }
 
-    sprintf(s_msg, "VERIFYEXT: Checking %lu blocks from block %lu...\n",
+    sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_CHECKING_FMT),
             (unsigned long)num_blocks, (unsigned long)block_lo);
     sc_puts(s_msg);
 
@@ -857,23 +849,23 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
         ULONG i, diff = 0;
 
         if (Read(fh, fbuf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(s_msg, "  Blk %lu: FILE READ ERROR\n", (unsigned long)disk_blk);
+            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_FILE_RERR_FMT), (unsigned long)disk_blk);
             sc_puts(s_msg); bad_blocks++; break;
         }
         if (!BlockDev_ReadBlock(s_st.bd, disk_blk, dbuf)) {
-            sprintf(s_msg, "  Blk %lu: DISK READ ERROR\n", (unsigned long)disk_blk);
+            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_DISK_RERR_FMT), (unsigned long)disk_blk);
             sc_puts(s_msg); bad_blocks++; continue;
         }
         for (i = 0; i < block_size; i++)
             if (fbuf[i] != dbuf[i]) diff++;
 
         if (diff == 0) {
-            sprintf(s_msg, "  Blk %lu: MATCH\n", (unsigned long)disk_blk);
+            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_BLK_MATCH_FMT), (unsigned long)disk_blk);
         } else {
             ULONG first = 0;
             for (first = 0; first < block_size; first++)
                 if (fbuf[first] != dbuf[first]) break;
-            sprintf(s_msg, "  Blk %lu: MISMATCH  %lu byte(s), first @ 0x%04lX\n",
+            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_BLK_MISMATCH_FMT),
                     (unsigned long)disk_blk, (unsigned long)diff, (unsigned long)first);
             bad_blocks++;
         }
@@ -883,11 +875,11 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
     FreeVec(fbuf); FreeVec(dbuf);
 
     if (bad_blocks == 0) {
-        sprintf(s_msg, "VERIFYEXT: PASS  All %lu blocks match.\n",
+        sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_PASS_FMT),
                 (unsigned long)num_blocks);
         sc_puts(s_msg); return RETURN_OK;
     } else {
-        sprintf(s_msg, "VERIFYEXT: FAIL  %lu/%lu blocks have differences.\n",
+        sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_FAIL_FMT),
                 (unsigned long)bad_blocks, (unsigned long)num_blocks);
         sc_puts(s_msg); return RETURN_WARN;
     }
@@ -907,16 +899,16 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
     char   dtbuf[16];
 
     if (!s_st.bd)
-        { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
-        { sc_err(ln, "No RDB. Use INIT NEW first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_INIT)); return RETURN_ERROR; }
     if (s_st.rdb.num_fs >= MAX_FILESYSTEMS)
-        { sc_err(ln, "Filesystem table full."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_FS_TABLE_FULL)); return RETURN_ERROR; }
 
     /* TYPE (required) */
     v = kwarg(tok, ntok, "TYPE");
     if (!v || !parse_dostype(v, &dostype))
-        { sc_err(ln, "ADDFS requires TYPE=<dostype>."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_ADDFS_NEED_TYPE)); return RETURN_ERROR; }
 
     /* VERSION (optional) */
     v = kwarg(tok, ntok, "VERSION");
@@ -950,12 +942,12 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
         LONG   fsize;
         UBYTE *buf;
 
-        sprintf(s_msg, "  Loading %s...\n", v);
+        sprintf(s_msg, GS(MSG_SCR_ADDFS_LOADING_FMT), v);
         sc_puts(s_msg);
 
         fh = Open((STRPTR)v, MODE_OLDFILE);
         if (!fh) {
-            sprintf(s_msg, "ADDFS: cannot open \"%s\".", v);
+            sprintf(s_msg, GS(MSG_SCR_ADDFS_CANT_OPEN_FMT), v);
             sc_err(ln, s_msg); return RETURN_ERROR;
         }
 
@@ -963,20 +955,20 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
         fsize = Seek(fh, 0, OFFSET_BEGINNING);
         if (fsize <= 0) {
             Close(fh);
-            sc_err(ln, "ADDFS: FILE is empty or seek failed.");
+            sc_err(ln, GS(MSG_SCR_ADDFS_EMPTY));
             return RETURN_ERROR;
         }
 
         buf = (UBYTE *)AllocVec((ULONG)fsize, MEMF_PUBLIC | MEMF_CLEAR);
         if (!buf) {
             Close(fh);
-            sc_err(ln, "ADDFS: not enough memory to load FILE.");
+            sc_err(ln, GS(MSG_SCR_ADDFS_NOMEM));
             return RETURN_ERROR;
         }
 
         if (Read(fh, buf, fsize) != fsize) {
             FreeVec(buf); Close(fh);
-            sc_err(ln, "ADDFS: read error.");
+            sc_err(ln, GS(MSG_SCR_ADDFS_READ_ERR));
             return RETURN_ERROR;
         }
         Close(fh);
@@ -987,7 +979,7 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
         {
             char szbuf[20];
             FormatSize((UQUAD)fsize, szbuf);
-            sprintf(s_msg, "  Loaded %s\n", szbuf);
+            sprintf(s_msg, GS(MSG_SCR_ADDFS_LOADED_FMT), szbuf);
             sc_puts(s_msg);
         }
     }
@@ -997,11 +989,11 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
 
     FormatDosType(dostype, dtbuf);
     if (version)
-        sprintf(s_msg, "  Added FS: %s  v%lu.%lu\n",
+        sprintf(s_msg, GS(MSG_SCR_ADDFS_ADDED_VER_FMT),
                 dtbuf,
                 (ULONG)(version >> 16), (ULONG)(version & 0xFFFF));
     else
-        sprintf(s_msg, "  Added FS: %s\n", dtbuf);
+        sprintf(s_msg, GS(MSG_SCR_ADDFS_ADDED_FMT), dtbuf);
     sc_puts(s_msg);
     return RETURN_OK;
 }
@@ -1013,13 +1005,12 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
 static LONG do_write(ULONG ln)
 {
     if (!s_st.bd)
-        { sc_err(ln, "No device open."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_WRITE_NO_DEV)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
-        { sc_err(ln, "No RDB to write. Use INIT NEW first."); return RETURN_ERROR; }
+        { sc_err(ln, GS(MSG_SCR_WRITE_NO_RDB)); return RETURN_ERROR; }
 
     if (s_st.dryrun) {
-        sprintf(s_msg, "DRYRUN: would write RDB  "
-                "(%u partition(s), %u filesystem(s)).\n",
+        sprintf(s_msg, GS(MSG_SCR_WRITE_DRYRUN_FMT),
                 (unsigned)s_st.rdb.num_parts,
                 (unsigned)s_st.rdb.num_fs);
         sc_puts(s_msg);
@@ -1027,22 +1018,21 @@ static LONG do_write(ULONG ln)
         return RETURN_OK;
     }
 
-    sprintf(s_msg, "About to write RDB  "
-            "(%u partition(s), %u filesystem(s)).\n",
+    sprintf(s_msg, GS(MSG_SCR_WRITE_ABOUT_FMT),
             (unsigned)s_st.rdb.num_parts,
             (unsigned)s_st.rdb.num_fs);
     sc_puts(s_msg);
-    if (!sc_ask_yn("Write RDB to disk?")) {
-        sc_puts("Aborted.\n");
+    if (!sc_ask_yn(GS(MSG_SCR_WRITE_ASK))) {
+        sc_puts(GS(MSG_SCR_ABORTED));
         return RETURN_ERROR;
     }
 
-    sc_puts("Writing RDB... ");
+    sc_puts(GS(MSG_SCR_WRITING_RDB));
     if (!RDB_Write(s_st.bd, &s_st.rdb)) {
-        sc_puts("FAILED.\n");
+        sc_puts(GS(MSG_SCR_FAILED));
         return RETURN_ERROR;
     }
-    sc_puts("OK.\n");
+    sc_puts(GS(MSG_SCR_OK_DOT));
     s_st.dirty = FALSE;
 
     /* Quick-format any partition that was given a VOLNAME (device backend only). */
@@ -1052,17 +1042,17 @@ static LONG do_write(ULONG ln)
             struct PartInfo *pi = &s_st.rdb.parts[i];
             if (!pi->want_format || pi->volume_name[0] == '\0') continue;
             if (s_st.bd->backend == BD_FILE) {
-                sprintf(s_msg, "  %s: format skipped (image file).\n",
+                sprintf(s_msg, GS(MSG_SCR_FMT_SKIPPED_FMT),
                         pi->drive_name);
             } else {
                 char err[80], mounted[40];
                 err[0] = '\0';
                 if (QuickFormat_Partition(s_st.bd, pi, mounted, err, sizeof(err))) {
-                    sprintf(s_msg, "  Formatted %s as \"%s\".\n",
+                    sprintf(s_msg, GS(MSG_SCR_FORMATTED_FMT),
                             mounted[0] ? mounted : pi->drive_name,
                             pi->volume_name);
                 } else {
-                    sprintf(s_msg, "  %s: format failed - %s\n",
+                    sprintf(s_msg, GS(MSG_SCR_FMT_FAILED_FMT),
                             pi->drive_name, err);
                 }
             }
@@ -1084,9 +1074,9 @@ static LONG do_write(ULONG ln)
             if (re_added) continue;
             err[0] = '\0';
             if (UnmountDevice(nm, err, sizeof(err)))
-                sprintf(s_msg, "  %s unmounted.\n", nm);
+                sprintf(s_msg, GS(MSG_SCR_UNMOUNTED_FMT), nm);
             else
-                sprintf(s_msg, "  %s still mounted (%s); reboot to free it.\n",
+                sprintf(s_msg, GS(MSG_SCR_STILL_MOUNTED_FMT),
                         nm, err);
             sc_puts(s_msg);
         }
@@ -1108,7 +1098,7 @@ static BOOL script_prog_cb(void *ud, ULONG cur, ULONG total)
     (void)ud;
 
     if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
-        sc_puts("\n** Cancelled.\n");
+        sc_puts(GS(MSG_SCR_CANCELLED));
         return FALSE;
     }
 
@@ -1116,13 +1106,13 @@ static BOOL script_prog_cb(void *ud, ULONG cur, ULONG total)
         ULONG pct = (cur * 100UL) / total;
         if (cur != total && pct < s_prog_pct + 5) return TRUE;
         s_prog_pct = pct;
-        sprintf(s_msg, "  %lu%% (%lu / %lu blocks)\n",
+        sprintf(s_msg, GS(MSG_SCR_PROG_PCT_FMT),
                 (unsigned long)pct,
                 (unsigned long)cur, (unsigned long)total);
     } else {
         if (cur < s_prog_blocks + 102400) return TRUE;   /* every 50 MB */
         s_prog_blocks = cur;
-        sprintf(s_msg, "  %lu blocks copied\n", (unsigned long)cur);
+        sprintf(s_msg, GS(MSG_SCR_PROG_BLOCKS_FMT), (unsigned long)cur);
     }
     sc_puts(s_msg);
     Flush(Output());
@@ -1135,17 +1125,17 @@ static LONG do_imageout(ULONG ln, char **tok, UWORD ntok)
     char  errbuf[80];
     BOOL  ok;
 
-    if (!s_st.bd) { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+    if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     path = kwarg(tok, ntok, "FILE");
-    if (!path) { sc_err(ln, "IMAGEOUT requires FILE=<path>."); return RETURN_ERROR; }
+    if (!path) { sc_err(ln, GS(MSG_SCR_IMAGEOUT_NEED_FILE)); return RETURN_ERROR; }
 
     if (s_st.dryrun) {
-        sprintf(s_msg, "DRYRUN: would dump device to \"%s\".\n", path);
+        sprintf(s_msg, GS(MSG_SCR_IMAGEOUT_DRYRUN_FMT), path);
         sc_puts(s_msg);
         return RETURN_OK;
     }
 
-    sprintf(s_msg, "Writing image to: %s\n", path);
+    sprintf(s_msg, GS(MSG_SCR_WRITING_IMAGE_FMT), path);
     sc_puts(s_msg);
     s_prog_pct = 0;
     s_prog_blocks = 0;
@@ -1154,11 +1144,11 @@ static LONG do_imageout(ULONG ln, char **tok, UWORD ntok)
                               script_prog_cb, NULL,
                               errbuf, sizeof(errbuf));
     if (!ok) {
-        sprintf(s_msg, "Dump failed: %s\n", errbuf[0] ? errbuf : "(unknown)");
+        sprintf(s_msg, GS(MSG_SCR_DUMP_FAILED_FMT), errbuf[0] ? errbuf : GS(MSG_SCR_UNKNOWN));
         sc_err(ln, s_msg);
         return RETURN_ERROR;
     }
-    sc_puts("Done.\n");
+    sc_puts(GS(MSG_SCR_DONE));
     return RETURN_OK;
 }
 
@@ -1168,23 +1158,23 @@ static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
     char  errbuf[80];
     BOOL  ok;
 
-    if (!s_st.bd) { sc_err(ln, "No device open. Use OPEN first."); return RETURN_ERROR; }
+    if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     path = kwarg(tok, ntok, "FILE");
-    if (!path) { sc_err(ln, "IMAGEIN requires FILE=<path>."); return RETURN_ERROR; }
+    if (!path) { sc_err(ln, GS(MSG_SCR_IMAGEIN_NEED_FILE)); return RETURN_ERROR; }
 
     if (s_st.dryrun) {
-        sprintf(s_msg, "DRYRUN: would restore image \"%s\" to device.\n", path);
+        sprintf(s_msg, GS(MSG_SCR_IMAGEIN_DRYRUN_FMT), path);
         sc_puts(s_msg);
         return RETURN_OK;
     }
 
-    sc_puts("WARNING: this will OVERWRITE the open device from block 0.\n");
-    if (!sc_ask_yn("Are you sure you want to restore?")) {
-        sc_puts("Aborted.\n");
+    sc_puts(GS(MSG_SCR_IMAGEIN_WARN));
+    if (!sc_ask_yn(GS(MSG_SCR_IMAGEIN_ASK))) {
+        sc_puts(GS(MSG_SCR_ABORTED));
         return RETURN_OK;
     }
 
-    sprintf(s_msg, "Reading image from: %s\n", path);
+    sprintf(s_msg, GS(MSG_SCR_READING_IMAGE_FMT), path);
     sc_puts(s_msg);
     s_prog_pct = 0;
     s_prog_blocks = 0;
@@ -1193,11 +1183,11 @@ static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
                               script_prog_cb, NULL,
                               errbuf, sizeof(errbuf));
     if (!ok) {
-        sprintf(s_msg, "Restore failed: %s\n", errbuf[0] ? errbuf : "(unknown)");
+        sprintf(s_msg, GS(MSG_SCR_RESTORE_FAILED_FMT), errbuf[0] ? errbuf : GS(MSG_SCR_UNKNOWN));
         sc_err(ln, s_msg);
         return RETURN_ERROR;
     }
-    sc_puts("Done.\n");
+    sc_puts(GS(MSG_SCR_DONE));
     /* Re-read RDB so subsequent INFO/etc. reflect what was just written. */
     RDB_FreeCode(&s_st.rdb);
     memset(&s_st.rdb, 0, sizeof(s_st.rdb));
@@ -1218,14 +1208,13 @@ static LONG do_info(ULONG ln)
     (void)ln;
 
     if (!s_st.rdb_ready || !s_st.rdb.valid) {
-        sc_puts("No RDB loaded.\n");
+        sc_puts(GS(MSG_SCR_INFO_NO_RDB));
         return RETURN_OK;
     }
 
     FormatSize((UQUAD)s_st.rdb.cylinders
                * s_st.rdb.heads * s_st.rdb.sectors * 512UL, szbuf);
-    sprintf(s_msg,
-            "Geometry  : %lu cyls x %lu heads x %lu sectors  (%s)\n",
+    sprintf(s_msg, GS(MSG_SCR_INFO_GEO_FMT),
             (ULONG)s_st.rdb.cylinders,
             (ULONG)s_st.rdb.heads,
             (ULONG)s_st.rdb.sectors,
@@ -1233,12 +1222,12 @@ static LONG do_info(ULONG ln)
     sc_puts(s_msg);
 
     if (s_st.rdb.lo_cyl > 0) {
-        sprintf(s_msg, "Reserved  : cyls 0-%lu\n",
+        sprintf(s_msg, GS(MSG_SCR_INFO_RESERVED_FMT),
                 (ULONG)s_st.rdb.lo_cyl - 1);
         sc_puts(s_msg);
     }
 
-    sprintf(s_msg, "Partitions: %u\n", (unsigned)s_st.rdb.num_parts);
+    sprintf(s_msg, GS(MSG_SCR_INFO_PARTS_FMT), (unsigned)s_st.rdb.num_parts);
     sc_puts(s_msg);
 
     for (i = 0; i < s_st.rdb.num_parts; i++) {
@@ -1249,14 +1238,14 @@ static LONG do_info(ULONG ln)
         FormatDosType(pi->dos_type, dtbuf);
         FormatSize((UQUAD)(pi->high_cyl - pi->low_cyl + 1) * blks * 512UL,
                    szbuf);
-        sprintf(s_msg, "  %2u: %-6s  cyls %4lu-%4lu  %-8s  pri %4ld  %s\n",
+        sprintf(s_msg, GS(MSG_SCR_INFO_PART_ROW_FMT),
                 i, pi->drive_name,
                 (ULONG)pi->low_cyl, (ULONG)pi->high_cyl,
                 dtbuf, (long)pi->boot_pri, szbuf);
         sc_puts(s_msg);
     }
 
-    sprintf(s_msg, "Filesystems: %u\n", (unsigned)s_st.rdb.num_fs);
+    sprintf(s_msg, GS(MSG_SCR_INFO_FS_COUNT_FMT), (unsigned)s_st.rdb.num_fs);
     sc_puts(s_msg);
 
     for (i = 0; i < s_st.rdb.num_fs; i++) {
@@ -1265,20 +1254,20 @@ static LONG do_info(ULONG ln)
         if (fi->code_size > 0) {
             FormatSize((UQUAD)fi->code_size, szbuf);
             if (fi->version)
-                sprintf(s_msg, "  %2u: %-8s  v%lu.%lu  %s\n",
+                sprintf(s_msg, GS(MSG_SCR_INFO_FS_VER_SZ_FMT),
                         i, dtbuf,
                         (ULONG)(fi->version >> 16),
                         (ULONG)(fi->version & 0xFFFF), szbuf);
             else
-                sprintf(s_msg, "  %2u: %-8s  %s\n", i, dtbuf, szbuf);
+                sprintf(s_msg, GS(MSG_SCR_INFO_FS_SZ_FMT), i, dtbuf, szbuf);
         } else {
             if (fi->version)
-                sprintf(s_msg, "  %2u: %-8s  v%lu.%lu\n",
+                sprintf(s_msg, GS(MSG_SCR_INFO_FS_VER_FMT),
                         i, dtbuf,
                         (ULONG)(fi->version >> 16),
                         (ULONG)(fi->version & 0xFFFF));
             else
-                sprintf(s_msg, "  %2u: %-8s\n", i, dtbuf);
+                sprintf(s_msg, GS(MSG_SCR_INFO_FS_FMT), i, dtbuf);
         }
         sc_puts(s_msg);
     }
@@ -1292,13 +1281,13 @@ static LONG do_info(ULONG ln)
 
 static LONG do_close(ULONG ln)
 {
-    if (!s_st.bd) { sc_warn(ln, "No device open."); return RETURN_OK; }
+    if (!s_st.bd) { sc_warn(ln, GS(MSG_SCR_WRITE_NO_DEV)); return RETURN_OK; }
     if (s_st.dirty)
-        sc_warn(ln, "Closing with unsaved changes (WRITE not called).");
+        sc_warn(ln, GS(MSG_SCR_CLOSE_UNSAVED));
     RDB_FreeCode(&s_st.rdb);
     BlockDev_Close(s_st.bd);
     s_st.bd = NULL; s_st.rdb_ready = FALSE; s_st.dirty = FALSE;
-    sc_puts("Device closed.\n");
+    sc_puts(GS(MSG_SCR_DEVICE_CLOSED));
     return RETURN_OK;
 }
 
@@ -1311,16 +1300,16 @@ static LONG do_reboot(ULONG ln)
     UWORD i;
     (void)ln;
 
-    if (!sc_ask_yn("Reboot now?")) {
-        sc_puts("Reboot skipped.\n");
+    if (!sc_ask_yn(GS(MSG_SCR_REBOOT_ASK))) {
+        sc_puts(GS(MSG_SCR_REBOOT_SKIPPED));
         return RETURN_OK;
     }
 
-    sc_puts("Rebooting in 3 seconds...\n");
+    sc_puts(GS(MSG_SCR_REBOOTING));
     Flush(Output());
 
     for (i = 3; i > 0; i--) {
-        sprintf(s_msg, "%u...\n", (unsigned)i);
+        sprintf(s_msg, GS(MSG_SCR_COUNTDOWN_FMT), (unsigned)i);
         sc_puts(s_msg);
         Flush(Output());
         Delay(50);   /* 50 ticks = 1 second at 50 Hz */
@@ -1356,7 +1345,7 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "CLOSE"))   return do_close(ln);
     if (ci_eq(tok[0], "REBOOT"))  return do_reboot(ln);
 
-    sprintf(s_msg, "Unknown command \"%s\".", tok[0]);
+    sprintf(s_msg, GS(MSG_SCR_UNKNOWN_CMD_FMT), tok[0]);
     sc_err(ln, s_msg);
     return RETURN_ERROR;
 }
@@ -1378,12 +1367,12 @@ LONG script_run(const char *filename, BOOL dryrun, BOOL force)
 
     fh = Open((STRPTR)filename, MODE_OLDFILE);
     if (!fh) {
-        PrintFault(IoErr(), (STRPTR)"DiskPart SCRIPT");
+        PrintFault(IoErr(), (STRPTR)GS(MSG_SCR_PRINTFAULT_HDR));
         return RETURN_ERROR;
     }
 
-    if (dryrun) sc_puts("DRYRUN: disk writes suppressed.\n\n");
-    sprintf(s_msg, "Script: %s\n\n", filename);
+    if (dryrun) sc_puts(GS(MSG_SCR_DRYRUN_SUPPRESSED));
+    sprintf(s_msg, GS(MSG_SCR_SCRIPT_HDR_FMT), filename);
     sc_puts(s_msg);
 
     while (rc == RETURN_OK) {
@@ -1396,11 +1385,11 @@ LONG script_run(const char *filename, BOOL dryrun, BOOL force)
 
     if (s_st.bd) {
         if (s_st.dirty)
-            sc_puts("WARNING: script ended with unsaved changes.\n");
+            sc_puts(GS(MSG_SCR_ENDED_UNSAVED));
         RDB_FreeCode(&s_st.rdb);
         BlockDev_Close(s_st.bd);
     }
 
-    sc_puts(rc == RETURN_OK ? "\nScript completed.\n" : "\nScript aborted.\n");
+    sc_puts(rc == RETURN_OK ? GS(MSG_SCR_COMPLETED) : GS(MSG_SCR_ABORTED_RUN));
     return rc;
 }

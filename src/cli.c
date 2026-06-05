@@ -26,6 +26,7 @@
 #include "imagecopy.h"
 #include "script.h"
 #include "quickformat.h"
+#include "locale_support.h"
 #include "cli.h"
 
 extern struct ExecBase   *SysBase;
@@ -159,7 +160,7 @@ static BOOL resolve_target(LONG *args, char *devname, ULONG *unit)
         ULONG len = 0;
         while (path[len]) len++;
         if (len == 0 || len > 58) {
-            cli_puts("ERROR: IMAGE path is empty or too long.\n");
+            cli_puts(GS(MSG_CLI_IMAGE_PATH_BAD));
             return FALSE;
         }
         sprintf(devname, "FILE:%s", path);
@@ -167,12 +168,11 @@ static BOOL resolve_target(LONG *args, char *devname, ULONG *unit)
         return TRUE;
     }
     if (!args[ARG_DEV]) {
-        cli_puts("This command requires DEV <device>:<unit> or IMAGE <path>.\n");
+        cli_puts(GS(MSG_CLI_NEED_DEV_OR_IMAGE));
         return FALSE;
     }
     if (!parse_dev((const char *)args[ARG_DEV], devname, unit)) {
-        cli_puts("ERROR: DEV format must be <device>:<unit> "
-                 "(e.g. uaehf.device:3).\n");
+        cli_puts(GS(MSG_CLI_DEV_FORMAT_BAD));
         return FALSE;
     }
     return TRUE;
@@ -195,33 +195,33 @@ static LONG maybe_create_image(LONG *args)
     if (!args[ARG_CREATE]) return RETURN_OK;
 
     if (!args[ARG_IMAGE]) {
-        cli_puts("ERROR: CREATE requires IMAGE=<path>.\n");
+        cli_puts(GS(MSG_CLI_CREATE_NEED_IMAGE));
         return RETURN_ERROR;
     }
     if (!args[ARG_SIZE]) {
-        cli_puts("ERROR: CREATE requires SIZE=<n>[K|M|G].\n");
+        cli_puts(GS(MSG_CLI_CREATE_NEED_SIZE));
         return RETURN_ERROR;
     }
 
     path       = (const char *)args[ARG_IMAGE];
     size_bytes = parse_size_bytes((const char *)args[ARG_SIZE]);
     if (size_bytes < 512) {
-        cli_puts("ERROR: SIZE must be at least 512 bytes.\n");
+        cli_puts(GS(MSG_CLI_SIZE_MIN));
         return RETURN_ERROR;
     }
     /* dos.library Seek is signed 32-bit. */
     if (size_bytes > (UQUAD)0x7FFFFE00UL) {
-        cli_puts("ERROR: SIZE exceeds the 2 GB dos.library image-file limit.\n");
+        cli_puts(GS(MSG_CLI_SIZE_MAX));
         return RETURN_ERROR;
     }
 
     FormatSize(size_bytes, szbuf);
-    sprintf(outbuf, "Creating image \"%s\" (%s)...\n", path, szbuf);
+    sprintf(outbuf, GS(MSG_CLI_CREATING_IMAGE), path, szbuf);
     cli_puts(outbuf);
 
     bd = BlockDev_CreateFile(path, size_bytes);
     if (!bd) {
-        cli_puts("ERROR: failed to create image file.\n");
+        cli_puts(GS(MSG_CLI_CREATE_IMAGE_FAIL));
         return RETURN_ERROR;
     }
     BlockDev_Close(bd);
@@ -346,12 +346,12 @@ static BOOL ask_yn(const char *question, BOOL force)
     LONG got;
 
     if (force) {
-        sprintf(outbuf, "%s (Y/N): Y\n", question);
+        sprintf(outbuf, GS(MSG_CLI_PROMPT_YN_FORCED), question);
         cli_puts(outbuf);
         return TRUE;
     }
 
-    sprintf(outbuf, "%s (Y/N): ", question);
+    sprintf(outbuf, GS(MSG_CLI_PROMPT_YN), question);
     cli_puts(outbuf);
     Flush(Output());   /* ensure prompt appears before Read() blocks */
 
@@ -370,10 +370,10 @@ static void print_dev_info(struct BlockDev *bd)
     char szbuf[20];
     FormatSize(bd->total_bytes, szbuf);
     if (bd->disk_brand[0])
-        sprintf(outbuf, "Device : %s unit %lu  [%s  %s]\n",
+        sprintf(outbuf, GS(MSG_CLI_DEVICE_LINE_BRAND),
                 bd->devname, (ULONG)bd->unit, bd->disk_brand, szbuf);
     else
-        sprintf(outbuf, "Device : %s unit %lu  [%s]\n",
+        sprintf(outbuf, GS(MSG_CLI_DEVICE_LINE),
                 bd->devname, (ULONG)bd->unit, szbuf);
     cli_puts(outbuf);
 }
@@ -391,11 +391,11 @@ static LONG cmd_listdev(BOOL probe_units)
     Devices_Scan(&s_devnames);
 
     if (s_devnames.count == 0) {
-        cli_puts("No block devices found.\n");
+        cli_puts(GS(MSG_CLI_NO_BLOCK_DEVS));
         return RETURN_OK;
     }
 
-    sprintf(outbuf, "Block devices: %u\n\n", (unsigned)s_devnames.count);
+    sprintf(outbuf, GS(MSG_CLI_BLOCK_DEVS_COUNT), (unsigned)s_devnames.count);
     cli_puts(outbuf);
 
     for (i = 0; i < s_devnames.count; i++) {
@@ -413,14 +413,14 @@ static LONG cmd_listdev(BOOL probe_units)
             static struct UnitList ul;
             UWORD j;
 
-            sprintf(outbuf, "  Probing units for %s...\n",
+            sprintf(outbuf, GS(MSG_CLI_PROBING_UNITS),
                     s_devnames.names[i]);
             cli_puts(outbuf);
 
             Devices_GetUnitsForName(s_devnames.names[i], &ul, NULL, NULL);
 
             if (ul.count == 0) {
-                cli_puts("  (no units found)\n");
+                cli_puts(GS(MSG_CLI_NO_UNITS_FOUND));
             } else {
                 for (j = 0; j < ul.count; j++) {
                     sprintf(outbuf, "  %s\n", ul.entries[j].display);
@@ -490,19 +490,19 @@ static LONG cmd_smart(const char *devname, ULONG unit)
     BYTE   err;
     UWORD  revision, i;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
     if (!buf) {
-        cli_puts("ERROR: Out of memory.\n");
+        cli_puts(GS(MSG_CLI_OUT_OF_MEMORY));
         BlockDev_Close(bd);
         return RETURN_ERROR;
     }
@@ -546,15 +546,12 @@ static LONG cmd_smart(const char *devname, ULONG unit)
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
 
     if (err == IOERR_NOCMD) {
-        cli_puts("ERROR: Device does not support HD_SCSICMD (not a SCSI device).\n");
+        cli_puts(GS(MSG_CLI_SMART_NO_SCSICMD));
         FreeVec(buf); BlockDev_Close(bd);
         return RETURN_ERROR;
     }
     if (err != 0 || scmd.scsi_Status != 0) {
-        sprintf(outbuf,
-                "ERROR: SMART command failed  "
-                "(io_Error=%d, scsi_Status=%u).\n"
-                "The drive may not support SMART or ATA PASS-THROUGH.\n",
+        sprintf(outbuf, GS(MSG_CLI_SMART_CMD_FAILED),
                 (int)err, (unsigned)scmd.scsi_Status);
         cli_puts(outbuf);
         FreeVec(buf); BlockDev_Close(bd);
@@ -563,14 +560,14 @@ static LONG cmd_smart(const char *devname, ULONG unit)
 
     revision = (UWORD)buf[0] | ((UWORD)buf[1] << 8);
     if (bd->disk_brand[0])
-        sprintf(outbuf, "SMART - %s  (revision %u)\n\n", bd->disk_brand, (unsigned)revision);
+        sprintf(outbuf, GS(MSG_CLI_SMART_HDR_BRAND), bd->disk_brand, (unsigned)revision);
     else
-        sprintf(outbuf, "SMART - %s unit %lu  (revision %u)\n\n",
+        sprintf(outbuf, GS(MSG_CLI_SMART_HDR),
                 devname, unit, (unsigned)revision);
     cli_puts(outbuf);
 
-    cli_puts("ID  Attribute                 Cur Wst Raw\n");
-    cli_puts("--- ------------------------- --- --- ----------\n");
+    cli_puts(GS(MSG_CLI_SMART_TABLE_HDR));
+    cli_puts(GS(MSG_CLI_SMART_TABLE_SEP));
 
     for (i = 0; i < 30; i++) {
         UBYTE *a    = buf + 2 + i * 12;   /* 30 × 12-byte records starting at byte 2 */
@@ -593,13 +590,13 @@ static LONG cmd_smart(const char *devname, ULONG unit)
                     (unsigned)id, smart_name(id),
                     (unsigned)val, (unsigned)worst,
                     raw_hi, raw_lo,
-                    (flags & 0x01) ? " PRE-FAIL" : "");
+                    (flags & 0x01) ? GS(MSG_CLI_SMART_PREFAIL) : "");
         else
             sprintf(outbuf, "%3u %-25s %3u %3u %10lu%s\n",
                     (unsigned)id, smart_name(id),
                     (unsigned)val, (unsigned)worst,
                     raw_lo,
-                    (flags & 0x01) ? " PRE-FAIL" : "");
+                    (flags & 0x01) ? GS(MSG_CLI_SMART_PREFAIL) : "");
         cli_puts(outbuf);
     }
 
@@ -618,12 +615,12 @@ static LONG cmd_info(const char *devname, ULONG unit)
     UWORD i;
     char dtbuf[16], szbuf[20];
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -632,22 +629,22 @@ static LONG cmd_info(const char *devname, ULONG unit)
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("No valid RDB found.\n");
+        cli_puts(GS(MSG_CLI_NO_RDB_FOUND));
         BlockDev_Close(bd);
         return RETURN_OK;
     }
 
     FormatSize((UQUAD)s_rdb.cylinders * s_rdb.heads * s_rdb.sectors * 512UL, szbuf);
-    sprintf(outbuf, "Geometry   : %lu cyls x %lu heads x %lu sectors  (%s)\n",
+    sprintf(outbuf, GS(MSG_CLI_INFO_GEOMETRY),
             (ULONG)s_rdb.cylinders, (ULONG)s_rdb.heads,
             (ULONG)s_rdb.sectors, szbuf);
     cli_puts(outbuf);
-    sprintf(outbuf, "RDB blocks : %lu-%lu  |  Partition area: cyls %lu-%lu\n",
+    sprintf(outbuf, GS(MSG_CLI_INFO_RDB_BLOCKS),
             s_rdb.rdb_block_lo, s_rdb.rdb_block_hi,
             (ULONG)s_rdb.lo_cyl, (ULONG)s_rdb.hi_cyl);
     cli_puts(outbuf);
 
-    sprintf(outbuf, "\nPartitions : %u\n", (unsigned)s_rdb.num_parts);
+    sprintf(outbuf, GS(MSG_CLI_INFO_PARTITIONS), (unsigned)s_rdb.num_parts);
     cli_puts(outbuf);
     for (i = 0; i < s_rdb.num_parts; i++) {
         struct PartInfo *pi = &s_rdb.parts[i];
@@ -656,14 +653,14 @@ static LONG cmd_info(const char *devname, ULONG unit)
                      : s_rdb.heads * s_rdb.sectors;
         FormatDosType(pi->dos_type, dtbuf);
         FormatSize((UQUAD)(pi->high_cyl - pi->low_cyl + 1) * blks * 512UL, szbuf);
-        sprintf(outbuf, "  %2u: %-6s  cyls %4lu-%4lu  %-8s  pri %4ld  %s\n",
+        sprintf(outbuf, GS(MSG_CLI_INFO_PART_ROW),
                 (unsigned)i, pi->drive_name,
                 (ULONG)pi->low_cyl, (ULONG)pi->high_cyl,
                 dtbuf, (long)pi->boot_pri, szbuf);
         cli_puts(outbuf);
     }
 
-    sprintf(outbuf, "\nFilesystems: %u\n", (unsigned)s_rdb.num_fs);
+    sprintf(outbuf, GS(MSG_CLI_INFO_FILESYSTEMS), (unsigned)s_rdb.num_fs);
     cli_puts(outbuf);
     for (i = 0; i < s_rdb.num_fs; i++) {
         struct FSInfo *fi = &s_rdb.filesystems[i];
@@ -705,42 +702,42 @@ static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
     BPTR   fh;
     LONG   rc = RETURN_ERROR;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found. Nothing to backup.\n");
+        cli_puts(GS(MSG_CLI_NO_RDB_NOTHING_BACKUP));
         BlockDev_Close(bd);
         return RETURN_ERROR;
     }
 
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { cli_puts("ERROR: Out of memory.\n"); BlockDev_Close(bd); return RETURN_ERROR; }
+    if (!buf) { cli_puts(GS(MSG_CLI_OUT_OF_MEMORY)); BlockDev_Close(bd); return RETURN_ERROR; }
 
-    sprintf(outbuf, "Reading RDB block %lu... ", s_rdb.block_num);
+    sprintf(outbuf, GS(MSG_CLI_READING_RDB_BLOCK), s_rdb.block_num);
     cli_puts(outbuf);
     if (!BlockDev_ReadBlock(bd, s_rdb.block_num, buf)) {
-        cli_puts("FAILED.\n");
+        cli_puts(GS(MSG_CLI_FAILED));
         goto backup_done;
     }
-    cli_puts("OK.\n");
+    cli_puts(GS(MSG_CLI_OK));
 
-    sprintf(outbuf, "Saving to %s... ", path);
+    sprintf(outbuf, GS(MSG_CLI_SAVING_TO), path);
     cli_puts(outbuf);
     fh = Open((STRPTR)path, MODE_NEWFILE);
-    if (!fh) { cli_puts("FAILED (cannot create file).\n"); goto backup_done; }
+    if (!fh) { cli_puts(GS(MSG_CLI_FAILED_CREATE_FILE)); goto backup_done; }
     if (Write(fh, buf, (LONG)bd->block_size) != (LONG)bd->block_size)
-        cli_puts("FAILED (write error).\n");
+        cli_puts(GS(MSG_CLI_FAILED_WRITE_ERROR));
     else
-        { cli_puts("OK.\n"); rc = RETURN_OK; }
+        { cli_puts(GS(MSG_CLI_OK)); rc = RETURN_OK; }
     Close(fh);
 
 backup_done:
@@ -763,23 +760,22 @@ static LONG cmd_restore(const char *devname, ULONG unit,
     LONG   fsize;
     LONG   rc = RETURN_ERROR;
 
-    cli_puts("WARNING: This will OVERWRITE block 0 on the disk!\n"
-             "Restoring an incorrect backup WILL cause data loss.\n\n");
-    if (!ask_yn("Are you sure you want to restore?", force))
+    cli_puts(GS(MSG_CLI_RESTORE_WARNING));
+    if (!ask_yn(GS(MSG_CLI_ASK_RESTORE), force))
         return RETURN_OK;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (!fh) {
-        sprintf(outbuf, "ERROR: Cannot open \"%s\".\n", path);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN_FILE), path);
         cli_puts(outbuf);
         BlockDev_Close(bd);
         return RETURN_ERROR;
@@ -787,7 +783,7 @@ static LONG cmd_restore(const char *devname, ULONG unit,
     Seek(fh, 0, OFFSET_END);
     fsize = Seek(fh, 0, OFFSET_BEGINNING);
     if (fsize != (LONG)bd->block_size) {
-        sprintf(outbuf, "ERROR: File size (%ld) != block size (%lu). Aborted.\n",
+        sprintf(outbuf, GS(MSG_CLI_FILESIZE_NE_BLOCKSIZE),
                 (long)fsize, bd->block_size);
         cli_puts(outbuf);
         Close(fh); BlockDev_Close(bd);
@@ -795,24 +791,24 @@ static LONG cmd_restore(const char *devname, ULONG unit,
     }
 
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { cli_puts("ERROR: Out of memory.\n"); Close(fh); BlockDev_Close(bd); return RETURN_ERROR; }
+    if (!buf) { cli_puts(GS(MSG_CLI_OUT_OF_MEMORY)); Close(fh); BlockDev_Close(bd); return RETURN_ERROR; }
 
     if (Read(fh, buf, fsize) != fsize) {
-        cli_puts("ERROR: File read error.\n");
+        cli_puts(GS(MSG_CLI_FILE_READ_ERROR));
         goto restore_done;
     }
     Close(fh); fh = 0;
 
-    sprintf(outbuf, "LAST CHANCE: Write backup to block 0 of %s unit %lu?",
+    sprintf(outbuf, GS(MSG_CLI_LAST_CHANCE_BLOCK0),
             devname, unit);
-    if (!ask_yn(outbuf, force)) { cli_puts("Aborted.\n"); rc = RETURN_OK; goto restore_done; }
+    if (!ask_yn(outbuf, force)) { cli_puts(GS(MSG_CLI_ABORTED)); rc = RETURN_OK; goto restore_done; }
 
-    cli_puts("Writing block 0... ");
+    cli_puts(GS(MSG_CLI_WRITING_BLOCK0));
     if (!BlockDev_WriteBlock(bd, 0, buf))
-        cli_puts("FAILED.\n");
+        cli_puts(GS(MSG_CLI_FAILED));
     else {
-        cli_puts("OK.\n");
-        cli_puts("RDB restored. Please reboot.\n");
+        cli_puts(GS(MSG_CLI_OK));
+        cli_puts(GS(MSG_CLI_RDB_RESTORED_REBOOT));
         rc = RETURN_OK;
     }
 
@@ -837,27 +833,27 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
     BPTR   fh;
     LONG   rc = RETURN_ERROR;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found. Nothing to backup.\n");
+        cli_puts(GS(MSG_CLI_NO_RDB_NOTHING_BACKUP));
         BlockDev_Close(bd);
         return RETURN_ERROR;
     }
 
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { cli_puts("ERROR: Out of memory.\n"); BlockDev_Close(bd); return RETURN_ERROR; }
+    if (!buf) { cli_puts(GS(MSG_CLI_OUT_OF_MEMORY)); BlockDev_Close(bd); return RETURN_ERROR; }
 
     if (!BlockDev_ReadBlock(bd, s_rdb.block_num, buf)) {
-        cli_puts("ERROR: Cannot read RDSK block.\n"); goto backupext_done;
+        cli_puts(GS(MSG_CLI_CANNOT_READ_RDSK)); goto backupext_done;
     }
     rdsk = (struct RigidDiskBlock *)buf;
     block_lo  = s_rdb.rdb_block_lo;
@@ -865,18 +861,18 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
     if (block_hi == RDB_END_MARK || block_hi < block_lo) block_hi = block_lo;
     num_blocks = block_hi - block_lo + 1;
 
-    sprintf(outbuf, "Backing up %lu blocks (%lu-%lu) to %s...\n",
+    sprintf(outbuf, GS(MSG_CLI_BACKING_UP_BLOCKS),
             num_blocks, block_lo, block_hi, path);
     cli_puts(outbuf);
 
     fh = Open((STRPTR)path, MODE_NEWFILE);
-    if (!fh) { cli_puts("ERROR: Cannot create file.\n"); goto backupext_done; }
+    if (!fh) { cli_puts(GS(MSG_CLI_CANNOT_CREATE_FILE)); goto backupext_done; }
 
     hdr[0]=ERDB_MAGIC; hdr[1]=ERDB_VERSION;
     hdr[2]=block_lo;   hdr[3]=bd->block_size;
     hdr[4]=num_blocks; hdr[5]=hdr[6]=hdr[7]=0;
     if (Write(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ) {
-        cli_puts("ERROR: Write error (header).\n"); Close(fh); goto backupext_done;
+        cli_puts(GS(MSG_CLI_WRITE_ERROR_HEADER)); Close(fh); goto backupext_done;
     }
 
     for (blk = block_lo; blk <= block_hi; blk++) {
@@ -884,14 +880,14 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
         if (!BlockDev_ReadBlock(bd, blk, buf))
             for (k = 0; k < bd->block_size; k++) buf[k] = 0;
         if (Write(fh, buf, (LONG)bd->block_size) != (LONG)bd->block_size) {
-            sprintf(outbuf, "ERROR: Write error at block %lu.\n", blk);
+            sprintf(outbuf, GS(MSG_CLI_WRITE_ERROR_AT_BLOCK), blk);
             cli_puts(outbuf);
             Close(fh); goto backupext_done;
         }
     }
     Close(fh);
 
-    sprintf(outbuf, "Extended backup saved: %lu blocks (%lu-%lu).\n",
+    sprintf(outbuf, GS(MSG_CLI_EXT_BACKUP_SAVED),
             num_blocks, block_lo, block_hi);
     cli_puts(outbuf);
     rc = RETURN_OK;
@@ -918,23 +914,22 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
     LONG   fsize;
     LONG   rc = RETURN_ERROR;
 
-    cli_puts("WARNING: This will OVERWRITE multiple RDB blocks on the disk!\n"
-             "An incorrect backup WILL destroy the disk layout.\n\n");
-    if (!ask_yn("Are you sure you want to restore?", force))
+    cli_puts(GS(MSG_CLI_RESTOREEXT_WARNING));
+    if (!ask_yn(GS(MSG_CLI_ASK_RESTORE), force))
         return RETURN_OK;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (!fh) {
-        sprintf(outbuf, "ERROR: Cannot open \"%s\".\n", path);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN_FILE), path);
         cli_puts(outbuf);
         BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -944,7 +939,7 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
     if (fsize < ERDB_HDR_SZ ||
         Read(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ ||
         hdr[0] != ERDB_MAGIC || hdr[1] != ERDB_VERSION) {
-        cli_puts("ERROR: Not a valid extended RDB backup.\n");
+        cli_puts(GS(MSG_CLI_NOT_VALID_EXT_BACKUP));
         goto restoreext_done;
     }
     block_lo   = hdr[2];
@@ -952,37 +947,37 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
     num_blocks = hdr[4];
 
     if (block_size != bd->block_size) {
-        cli_puts("ERROR: Block size mismatch. Aborted.\n"); goto restoreext_done;
+        cli_puts(GS(MSG_CLI_BLOCKSIZE_MISMATCH_ABORT)); goto restoreext_done;
     }
     if (fsize != (LONG)(ERDB_HDR_SZ + num_blocks * block_size)) {
-        cli_puts("ERROR: File size mismatch - backup may be corrupt. Aborted.\n");
+        cli_puts(GS(MSG_CLI_FILESIZE_MISMATCH_CORRUPT));
         goto restoreext_done;
     }
 
-    sprintf(outbuf, "LAST CHANCE: Write %lu blocks (%lu-%lu) to %s unit %lu?",
+    sprintf(outbuf, GS(MSG_CLI_LAST_CHANCE_BLOCKS),
             num_blocks, block_lo, block_lo + num_blocks - 1, devname, unit);
-    if (!ask_yn(outbuf, force)) { cli_puts("Aborted.\n"); rc = RETURN_OK; goto restoreext_done; }
+    if (!ask_yn(outbuf, force)) { cli_puts(GS(MSG_CLI_ABORTED)); rc = RETURN_OK; goto restoreext_done; }
 
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { cli_puts("ERROR: Out of memory.\n"); goto restoreext_done; }
+    if (!buf) { cli_puts(GS(MSG_CLI_OUT_OF_MEMORY)); goto restoreext_done; }
 
     for (blk = 0; blk < num_blocks; blk++) {
         if (Read(fh, buf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(outbuf, "ERROR: Read error at offset %lu.\n", blk);
+            sprintf(outbuf, GS(MSG_CLI_READ_ERROR_AT_OFFSET), blk);
             cli_puts(outbuf);
             FreeVec(buf); goto restoreext_done;
         }
         if (!BlockDev_WriteBlock(bd, block_lo + blk, buf)) {
-            sprintf(outbuf, "ERROR: Write failed at block %lu.\n", block_lo + blk);
+            sprintf(outbuf, GS(MSG_CLI_WRITE_FAILED_AT_BLOCK), block_lo + blk);
             cli_puts(outbuf);
             FreeVec(buf); goto restoreext_done;
         }
     }
     FreeVec(buf);
 
-    sprintf(outbuf, "Extended restore complete: %lu blocks written.\n", num_blocks);
+    sprintf(outbuf, GS(MSG_CLI_EXT_RESTORE_COMPLETE), num_blocks);
     cli_puts(outbuf);
-    cli_puts("Please reboot for changes to take effect.\n");
+    cli_puts(GS(MSG_CLI_REBOOT_TO_TAKE_EFFECT));
     rc = RETURN_OK;
 
 restoreext_done:
@@ -1011,60 +1006,60 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
     LONG   rc;
 
     if (!name_s || !name_s[0])
-        { cli_puts("ADDPART requires NAME=<drivename>.\n"); return RETURN_WARN; }
+        { cli_puts(GS(MSG_CLI_ADDPART_NEED_NAME)); return RETURN_WARN; }
     strncpy(name, name_s, 30); name[30] = '\0';
     nlen = (UWORD)strlen(name);
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
-    if (nlen == 0) { cli_puts("ADDPART: NAME is empty.\n"); return RETURN_WARN; }
+    if (nlen == 0) { cli_puts(GS(MSG_CLI_ADDPART_NAME_EMPTY)); return RETURN_WARN; }
 
-    if (!low_s)  { cli_puts("ADDPART requires LOW=.\n");  return RETURN_WARN; }
-    if (!high_s) { cli_puts("ADDPART requires HIGH=.\n"); return RETURN_WARN; }
+    if (!low_s)  { cli_puts(GS(MSG_CLI_ADDPART_NEED_LOW));  return RETURN_WARN; }
+    if (!high_s) { cli_puts(GS(MSG_CLI_ADDPART_NEED_HIGH)); return RETURN_WARN; }
 
     if (type_s && !cli_parse_dostype(type_s, &dostype))
-        { cli_puts("ADDPART: unrecognised TYPE.\n"); return RETURN_WARN; }
+        { cli_puts(GS(MSG_CLI_ADDPART_BAD_TYPE)); return RETURN_WARN; }
     if (bootpri_s) { bootpri = strtol(bootpri_s, NULL, 10); bootable = TRUE; }
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found. Run INIT NEW first.\n");
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
         BlockDev_Close(bd); return RETURN_ERROR;
     }
     if (s_rdb.num_parts >= MAX_PARTITIONS) {
-        cli_puts("ERROR: Partition table full.\n");
+        cli_puts(GS(MSG_CLI_PART_TABLE_FULL));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
     low = cli_parse_low(low_s, &s_rdb);
     if (!cli_parse_high(high_s, low, s_rdb.hi_cyl,
                         s_rdb.heads, s_rdb.sectors, &high)) {
-        cli_puts("ERROR: HIGH value invalid or size too small.\n");
+        cli_puts(GS(MSG_CLI_HIGH_INVALID));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
     if (low > high)
-        { cli_puts("ERROR: LOW > HIGH.\n"); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
+        { cli_puts(GS(MSG_CLI_LOW_GT_HIGH)); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
     if (low < s_rdb.lo_cyl) {
-        sprintf(outbuf, "ERROR: LOW %lu below reserved area (lo_cyl=%lu).\n",
+        sprintf(outbuf, GS(MSG_CLI_LOW_BELOW_RESERVED),
                 low, (ULONG)s_rdb.lo_cyl);
         cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
     if (high > s_rdb.hi_cyl) {
-        sprintf(outbuf, "ERROR: HIGH %lu exceeds disk (hi_cyl=%lu).\n",
+        sprintf(outbuf, GS(MSG_CLI_HIGH_EXCEEDS_DISK),
                 high, (ULONG)s_rdb.hi_cyl);
         cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
     for (i = 0; i < s_rdb.num_parts; i++) {
         struct PartInfo *ex = &s_rdb.parts[i];
         if (low <= ex->high_cyl && high >= ex->low_cyl) {
-            sprintf(outbuf, "ERROR: cyls %lu-%lu overlap partition %s (%lu-%lu).\n",
+            sprintf(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
                     low, high, ex->drive_name,
                     (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
             cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1093,27 +1088,27 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
                          ? s_rdb.heads * s_rdb.sectors : 1;
         FormatDosType(dostype, dtbuf);
         FormatSize((UQUAD)(high - low + 1) * blks_cyl * 512UL, szbuf);
-        sprintf(outbuf, "Adding: %-6s  cyls %lu-%lu  %s  (%s)\n",
+        sprintf(outbuf, GS(MSG_CLI_ADDING_PART),
                 name, low, high, dtbuf, szbuf);
         cli_puts(outbuf);
     }
 
-    sprintf(outbuf, "Write RDB? (%u partition(s), %u filesystem(s))",
+    sprintf(outbuf, GS(MSG_CLI_WRITE_RDB_PROMPT),
             (unsigned)s_rdb.num_parts, (unsigned)s_rdb.num_fs);
     if (!ask_yn(outbuf, force)) {
-        cli_puts("Aborted. No changes written.\n");
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
     }
 
-    cli_puts("Writing RDB... ");
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
     rc = RDB_Write(bd, &s_rdb) ? RETURN_OK : RETURN_ERROR;
-    cli_puts(rc == RETURN_OK ? "OK.\n" : "FAILED.\n");
+    cli_puts(rc == RETURN_OK ? GS(MSG_CLI_OK) : GS(MSG_CLI_FAILED));
 
     /* Quick-format the new partition if VOLNAME was given (empty = no format).
        pi still points at the partition we just added. */
     if (rc == RETURN_OK && volname_s && volname_s[0]) {
         if (bd->backend == BD_FILE) {
-            cli_puts("VOLNAME ignored: image files can't be OS-formatted.\n");
+            cli_puts(GS(MSG_CLI_VOLNAME_IGNORED));
         } else {
             char err[80], mounted[40];
             err[0] = '\0';
@@ -1122,10 +1117,10 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
             if (!pi->heads)   pi->heads   = s_rdb.heads;
             if (!pi->sectors) pi->sectors = s_rdb.sectors;
             if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
-                sprintf(outbuf, "Formatted %s as \"%s\".\n",
+                sprintf(outbuf, GS(MSG_CLI_FORMATTED_AS),
                         mounted[0] ? mounted : pi->drive_name, pi->volume_name);
             } else {
-                sprintf(outbuf, "Format failed: %s\n", err);
+                sprintf(outbuf, GS(MSG_CLI_FORMAT_FAILED), err);
             }
             cli_puts(outbuf);
         }
@@ -1151,7 +1146,7 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
     LONG   rc;
 
     if (!type_s || !cli_parse_dostype(type_s, &dostype))
-        { cli_puts("ADDFS requires TYPE=<dostype>.\n"); return RETURN_WARN; }
+        { cli_puts(GS(MSG_CLI_ADDFS_NEED_TYPE)); return RETURN_WARN; }
 
     if (version_s) {
         if (version_s[0] == '0' && (version_s[1] == 'x' || version_s[1] == 'X'))
@@ -1163,21 +1158,21 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
     }
     if (stacksize_s) stack_size = strtoul(stacksize_s, NULL, 10);
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found. Run INIT NEW first.\n");
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
         BlockDev_Close(bd); return RETURN_ERROR;
     }
     if (s_rdb.num_fs >= MAX_FILESYSTEMS) {
-        cli_puts("ERROR: Filesystem table full.\n");
+        cli_puts(GS(MSG_CLI_FS_TABLE_FULL));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
@@ -1196,54 +1191,54 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
         LONG   fsize;
         UBYTE *buf;
 
-        sprintf(outbuf, "Loading %s... ", file_s);
+        sprintf(outbuf, GS(MSG_CLI_LOADING), file_s);
         cli_puts(outbuf);
         fh = Open((STRPTR)file_s, MODE_OLDFILE);
         if (!fh) {
-            cli_puts("FAILED (cannot open file).\n");
+            cli_puts(GS(MSG_CLI_FAILED_OPEN_FILE));
             RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
         Seek(fh, 0, OFFSET_END);
         fsize = Seek(fh, 0, OFFSET_BEGINNING);
         if (fsize <= 0) {
-            cli_puts("FAILED (empty or seek error).\n");
+            cli_puts(GS(MSG_CLI_FAILED_EMPTY_SEEK));
             Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
         buf = (UBYTE *)AllocVec((ULONG)fsize, MEMF_PUBLIC | MEMF_CLEAR);
         if (!buf) {
-            cli_puts("FAILED (out of memory).\n");
+            cli_puts(GS(MSG_CLI_FAILED_OUT_OF_MEMORY));
             Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
         if (Read(fh, buf, fsize) != fsize) {
-            cli_puts("FAILED (read error).\n");
+            cli_puts(GS(MSG_CLI_FAILED_READ_ERROR));
             FreeVec(buf); Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
         Close(fh);
         fi->code      = buf;
         fi->code_size = (ULONG)fsize;
         { char szbuf[20]; FormatSize((UQUAD)fsize, szbuf);
-          sprintf(outbuf, "OK (%s)\n", szbuf); cli_puts(outbuf); }
+          sprintf(outbuf, GS(MSG_CLI_OK_SIZE), szbuf); cli_puts(outbuf); }
     }
     s_rdb.num_fs++;
 
     FormatDosType(dostype, dtbuf);
     if (version)
-        sprintf(outbuf, "Adding FS: %s  v%lu.%lu\n", dtbuf,
+        sprintf(outbuf, GS(MSG_CLI_ADDING_FS_VER), dtbuf,
                 (ULONG)(version >> 16), (ULONG)(version & 0xFFFF));
     else
-        sprintf(outbuf, "Adding FS: %s\n", dtbuf);
+        sprintf(outbuf, GS(MSG_CLI_ADDING_FS), dtbuf);
     cli_puts(outbuf);
 
-    sprintf(outbuf, "Write RDB? (%u partition(s), %u filesystem(s))",
+    sprintf(outbuf, GS(MSG_CLI_WRITE_RDB_PROMPT),
             (unsigned)s_rdb.num_parts, (unsigned)s_rdb.num_fs);
     if (!ask_yn(outbuf, force)) {
-        cli_puts("Aborted. No changes written.\n");
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
     }
 
-    cli_puts("Writing RDB... ");
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
     rc = RDB_Write(bd, &s_rdb) ? RETURN_OK : RETURN_ERROR;
-    cli_puts(rc == RETURN_OK ? "OK.\n" : "FAILED.\n");
+    cli_puts(rc == RETURN_OK ? GS(MSG_CLI_OK) : GS(MSG_CLI_FAILED));
 
     RDB_FreeCode(&s_rdb);
     BlockDev_Close(bd);
@@ -1267,17 +1262,17 @@ static LONG cmd_check(const char *devname, ULONG unit)
     struct BlockDev *bd;
     ULONG errs;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found.\n");
+        cli_puts(GS(MSG_CLI_ERR_NO_RDB_FOUND));
         BlockDev_Close(bd); return RETURN_ERROR;
     }
 
@@ -1301,33 +1296,33 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
     ULONG i, diff_count = 0, first_diff = 0xFFFFFFFFUL;
 
     if (!path || !path[0]) {
-        cli_puts("VERIFY requires a FILE path.\n"); return RETURN_WARN;
+        cli_puts(GS(MSG_CLI_VERIFY_NEED_FILE)); return RETURN_WARN;
     }
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found.\n");
+        cli_puts(GS(MSG_CLI_ERR_NO_RDB_FOUND));
         BlockDev_Close(bd); return RETURN_ERROR;
     }
 
     fh = Open((UBYTE *)path, MODE_OLDFILE);
     if (!fh) {
-        cli_puts("ERROR: Cannot open backup file.\n");
+        cli_puts(GS(MSG_CLI_CANNOT_OPEN_BACKUP));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
     Seek(fh, 0, OFFSET_END);
     fsize = Seek(fh, 0, OFFSET_BEGINNING);
 
     if (fsize != (LONG)bd->block_size) {
-        sprintf(outbuf, "ERROR: File size (%ld) != block size (%lu).\n",
+        sprintf(outbuf, GS(MSG_CLI_FILESIZE_NE_BLOCKSIZE2),
                 (long)fsize, (unsigned long)bd->block_size);
         cli_puts(outbuf);
         Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1342,14 +1337,14 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
     }
 
     if (Read(fh, fbuf, fsize) != fsize) {
-        cli_puts("ERROR: File read error.\n");
+        cli_puts(GS(MSG_CLI_FILE_READ_ERROR));
         Close(fh); FreeVec(fbuf); FreeVec(dbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
     Close(fh);
 
     if (!BlockDev_ReadBlock(bd, s_rdb.block_num, dbuf)) {
-        cli_puts("ERROR: Cannot read RDB block from disk.\n");
+        cli_puts(GS(MSG_CLI_CANNOT_READ_RDB_DISK));
         FreeVec(fbuf); FreeVec(dbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1365,10 +1360,10 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
     RDB_FreeCode(&s_rdb); BlockDev_Close(bd);
 
     if (diff_count == 0) {
-        cli_puts("VERIFY: MATCH - backup matches RDB block on disk.\n");
+        cli_puts(GS(MSG_CLI_VERIFY_MATCH));
         return RETURN_OK;
     } else {
-        sprintf(outbuf, "VERIFY: MISMATCH - %lu byte(s) differ, first at offset %lu.\n",
+        sprintf(outbuf, GS(MSG_CLI_VERIFY_MISMATCH),
                 (unsigned long)diff_count, (unsigned long)first_diff);
         cli_puts(outbuf);
         return RETURN_WARN;
@@ -1385,27 +1380,27 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
     UBYTE *fbuf = NULL, *dbuf = NULL;
 
     if (!path || !path[0]) {
-        cli_puts("VERIFYEXT requires a FILE path.\n"); return RETURN_WARN;
+        cli_puts(GS(MSG_CLI_VERIFYEXT_NEED_FILE)); return RETURN_WARN;
     }
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
     fh = Open((UBYTE *)path, MODE_OLDFILE);
     if (!fh) {
-        cli_puts("ERROR: Cannot open backup file.\n");
+        cli_puts(GS(MSG_CLI_CANNOT_OPEN_BACKUP));
         BlockDev_Close(bd); return RETURN_ERROR;
     }
 
     if (Read(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ ||
         hdr[0] != ERDB_MAGIC || hdr[1] != ERDB_VERSION) {
         Close(fh); BlockDev_Close(bd);
-        cli_puts("ERROR: Not a valid ERDB backup (bad magic/version).\n");
+        cli_puts(GS(MSG_CLI_NOT_VALID_ERDB));
         return RETURN_ERROR;
     }
 
@@ -1414,13 +1409,13 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
     num_blocks = hdr[4];
 
     if (block_size != bd->block_size) {
-        sprintf(outbuf, "ERROR: Block size mismatch: backup=%lu, device=%lu.\n",
+        sprintf(outbuf, GS(MSG_CLI_BLOCKSIZE_MISMATCH_DETAIL),
                 (unsigned long)block_size, (unsigned long)bd->block_size);
         cli_puts(outbuf);
         Close(fh); BlockDev_Close(bd); return RETURN_ERROR;
     }
     if (num_blocks == 0 || num_blocks > 1024) {
-        cli_puts("ERROR: Unreasonable block count in header.\n");
+        cli_puts(GS(MSG_CLI_UNREASONABLE_BLOCK_COUNT));
         Close(fh); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
@@ -1432,7 +1427,7 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
         BlockDev_Close(bd); return RETURN_ERROR;
     }
 
-    sprintf(outbuf, "Verifying %lu blocks from block %lu...\n",
+    sprintf(outbuf, GS(MSG_CLI_VERIFYING_BLOCKS),
             (unsigned long)num_blocks, (unsigned long)block_lo);
     cli_puts(outbuf);
 
@@ -1441,23 +1436,23 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
         ULONG i, diff = 0;
 
         if (Read(fh, fbuf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(outbuf, "  Blk %lu: FILE READ ERROR\n", (unsigned long)disk_blk);
+            sprintf(outbuf, GS(MSG_CLI_BLK_FILE_READ_ERROR), (unsigned long)disk_blk);
             cli_puts(outbuf); bad_blocks++; break;
         }
         if (!BlockDev_ReadBlock(bd, disk_blk, dbuf)) {
-            sprintf(outbuf, "  Blk %lu: DISK READ ERROR\n", (unsigned long)disk_blk);
+            sprintf(outbuf, GS(MSG_CLI_BLK_DISK_READ_ERROR), (unsigned long)disk_blk);
             cli_puts(outbuf); bad_blocks++; continue;
         }
         for (i = 0; i < block_size; i++)
             if (fbuf[i] != dbuf[i]) diff++;
 
         if (diff == 0) {
-            sprintf(outbuf, "  Blk %lu: MATCH\n", (unsigned long)disk_blk);
+            sprintf(outbuf, GS(MSG_CLI_BLK_MATCH), (unsigned long)disk_blk);
         } else {
             ULONG first = 0;
             for (first = 0; first < block_size; first++)
                 if (fbuf[first] != dbuf[first]) break;
-            sprintf(outbuf, "  Blk %lu: MISMATCH  %lu byte(s), first @ 0x%04lX\n",
+            sprintf(outbuf, GS(MSG_CLI_BLK_MISMATCH),
                     (unsigned long)disk_blk,
                     (unsigned long)diff,
                     (unsigned long)first);
@@ -1470,12 +1465,12 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
     BlockDev_Close(bd);
 
     if (bad_blocks == 0) {
-        sprintf(outbuf, "VERIFY: PASS  All %lu blocks match.\n",
+        sprintf(outbuf, GS(MSG_CLI_VERIFY_PASS),
                 (unsigned long)num_blocks);
         cli_puts(outbuf);
         return RETURN_OK;
     } else {
-        sprintf(outbuf, "VERIFY: FAIL  %lu/%lu blocks have differences.\n",
+        sprintf(outbuf, GS(MSG_CLI_VERIFY_FAIL),
                 (unsigned long)bad_blocks, (unsigned long)num_blocks);
         cli_puts(outbuf);
         return RETURN_WARN;
@@ -1495,34 +1490,34 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
     LONG   rc;
 
     if (!name_s || !name_s[0])
-        { cli_puts("DELPART requires NAME=<drivename>.\n"); return RETURN_WARN; }
+        { cli_puts(GS(MSG_CLI_DELPART_NEED_NAME)); return RETURN_WARN; }
     strncpy(name, name_s, 30); name[30] = '\0';
     nlen = (UWORD)strlen(name);
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
-    if (nlen == 0) { cli_puts("DELPART: NAME is empty.\n"); return RETURN_WARN; }
+    if (nlen == 0) { cli_puts(GS(MSG_CLI_DELPART_NAME_EMPTY)); return RETURN_WARN; }
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found.\n");
+        cli_puts(GS(MSG_CLI_ERR_NO_RDB_FOUND));
         BlockDev_Close(bd); return RETURN_ERROR;
     }
 
     for (i = 0; i < s_rdb.num_parts; i++) {
         if (str_eq_ci(s_rdb.parts[i].drive_name, name)) {
-            sprintf(outbuf, "Delete: %-6s  cyls %lu-%lu  - are you sure?",
+            sprintf(outbuf, GS(MSG_CLI_DELETE_CONFIRM),
                     s_rdb.parts[i].drive_name,
                     (ULONG)s_rdb.parts[i].low_cyl,
                     (ULONG)s_rdb.parts[i].high_cyl);
             if (!ask_yn(outbuf, force)) {
-                cli_puts("Aborted. No changes written.\n");
+                cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
                 RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
             }
 
@@ -1530,18 +1525,18 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
                 s_rdb.parts[j] = s_rdb.parts[j + 1];
             s_rdb.num_parts--;
 
-            cli_puts("Writing RDB... ");
+            cli_puts(GS(MSG_CLI_WRITING_RDB));
             rc = RDB_Write(bd, &s_rdb) ? RETURN_OK : RETURN_ERROR;
-            cli_puts(rc == RETURN_OK ? "OK.\n" : "FAILED.\n");
+            cli_puts(rc == RETURN_OK ? GS(MSG_CLI_OK) : GS(MSG_CLI_FAILED));
 
             /* Unmount the deleted device so it's gone without a reboot. */
             if (rc == RETURN_OK) {
                 char err[80];
                 err[0] = '\0';
                 if (UnmountDevice(name, err, sizeof(err)))
-                    sprintf(outbuf, "%s unmounted.\n", name);
+                    sprintf(outbuf, GS(MSG_CLI_UNMOUNTED), name);
                 else
-                    sprintf(outbuf, "%s still mounted (%s); reboot to free it.\n",
+                    sprintf(outbuf, GS(MSG_CLI_STILL_MOUNTED),
                             name, err);
                 cli_puts(outbuf);
             }
@@ -1552,7 +1547,7 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
         }
     }
 
-    sprintf(outbuf, "ERROR: Partition \"%s\" not found.\n", name);
+    sprintf(outbuf, GS(MSG_CLI_PART_NOT_FOUND), name);
     cli_puts(outbuf);
     RDB_FreeCode(&s_rdb);
     BlockDev_Close(bd);
@@ -1574,27 +1569,25 @@ static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
     /* Check for existing RDB - affects question wording only */
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (RDB_Read(bd, &s_rdb) && s_rdb.valid) {
-        sprintf(outbuf,
-                "WARNING: existing RDB found  "
-                "(%lu cylinders, %u partition(s)).\n",
+        sprintf(outbuf, GS(MSG_CLI_INIT_EXISTING_RDB),
                 (ULONG)s_rdb.cylinders, (unsigned)s_rdb.num_parts);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb);
-        question = "Destroy existing RDB and write a new one?";
+        question = GS(MSG_CLI_INIT_Q_DESTROY);
     } else {
-        question = "Write new RDB?";
+        question = GS(MSG_CLI_INIT_Q_NEW);
     }
 
     /* Read physical geometry */
     if (!BlockDev_GetGeometry(bd, &cyls, &heads, &sects)) {
-        cli_puts("ERROR: Cannot read disk geometry.\n");
+        cli_puts(GS(MSG_CLI_CANNOT_READ_GEOMETRY));
         return RETURN_ERROR;
     }
 
     {
         UQUAD total = (UQUAD)cyls * heads * sects * 512UL;
         FormatSize(total, szbuf);
-        sprintf(outbuf, "Geometry : %lu cyls x %lu heads x %lu sectors  (%s)\n",
+        sprintf(outbuf, GS(MSG_CLI_GEOMETRY_LINE),
                 cyls, heads, sects, szbuf);
         cli_puts(outbuf);
     }
@@ -1604,13 +1597,13 @@ static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
 
     RDB_InitFresh(&s_rdb, cyls, heads, sects);
 
-    cli_puts("Writing RDB... ");
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
     if (!RDB_Write(bd, &s_rdb)) {
-        cli_puts("FAILED.\n");
+        cli_puts(GS(MSG_CLI_FAILED));
         return RETURN_ERROR;
     }
-    cli_puts("OK.\n");
-    cli_puts("RDB written. No partitions yet.\n");
+    cli_puts(GS(MSG_CLI_OK));
+    cli_puts(GS(MSG_CLI_RDB_WRITTEN_NO_PARTS));
     return RETURN_OK;
 }
 
@@ -1628,18 +1621,18 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
     /* Require an existing RDB */
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
-        cli_puts("ERROR: No valid RDB found. Use INIT NEW first.\n");
+        cli_puts(GS(MSG_CLI_NO_RDB_USE_INIT));
         return RETURN_ERROR;
     }
 
     if (s_rdb.heads == 0 || s_rdb.sectors == 0) {
-        cli_puts("ERROR: RDB has invalid geometry (heads or sectors = 0).\n");
+        cli_puts(GS(MSG_CLI_RDB_INVALID_GEOMETRY));
         RDB_FreeCode(&s_rdb);
         return RETURN_ERROR;
     }
 
     if (bd->total_bytes == 0) {
-        cli_puts("ERROR: Cannot determine actual disk size.\n");
+        cli_puts(GS(MSG_CLI_CANNOT_DETERMINE_SIZE));
         RDB_FreeCode(&s_rdb);
         return RETURN_ERROR;
     }
@@ -1655,24 +1648,22 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
         FormatSize(bd->total_bytes, szbuf_new);
     }
 
-    sprintf(outbuf,
-            "RDB geometry : %lu cylinders  (%s)\n"
-            "Disk reports : %lu cylinders  (%s)\n",
+    sprintf(outbuf, GS(MSG_CLI_NEWGEO_COMPARE),
             (ULONG)s_rdb.cylinders, szbuf_old,
             new_cyls,               szbuf_new);
     cli_puts(outbuf);
 
     if (new_cyls <= s_rdb.cylinders) {
-        cli_puts("Disk is not larger than RDB geometry. No update needed.\n");
+        cli_puts(GS(MSG_CLI_NEWGEO_NO_UPDATE));
         RDB_FreeCode(&s_rdb);
         return RETURN_OK;
     }
 
-    sprintf(outbuf, "Cylinder count will change: %lu -> %lu\n",
+    sprintf(outbuf, GS(MSG_CLI_NEWGEO_CHANGE),
             (ULONG)s_rdb.cylinders, new_cyls);
     cli_puts(outbuf);
 
-    if (!ask_yn("Update RDB cylinder count?", force)) {
+    if (!ask_yn(GS(MSG_CLI_NEWGEO_ASK_UPDATE), force)) {
         RDB_FreeCode(&s_rdb);
         return RETURN_OK;
     }
@@ -1681,15 +1672,15 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
     s_rdb.hi_cyl    = new_cyls - 1;
     /* lo_cyl stays the same - partitions are already at their cylinder offsets */
 
-    cli_puts("Writing updated RDB... ");
+    cli_puts(GS(MSG_CLI_WRITING_UPDATED_RDB));
     if (!RDB_Write(bd, &s_rdb)) {
-        cli_puts("FAILED.\n");
+        cli_puts(GS(MSG_CLI_FAILED));
         RDB_FreeCode(&s_rdb);
         return RETURN_ERROR;
     }
-    cli_puts("OK.\n");
+    cli_puts(GS(MSG_CLI_OK));
 
-    sprintf(outbuf, "RDB updated to %lu cylinders (%s).\n",
+    sprintf(outbuf, GS(MSG_CLI_RDB_UPDATED_CYLS),
             new_cyls, szbuf_new);
     cli_puts(outbuf);
 
@@ -1708,18 +1699,17 @@ static LONG cmd_init(const char *devname, ULONG unit,
     LONG rc;
 
     if (!str_eq_ci(mode, "NEW") && !str_eq_ci(mode, "NEWGEO")) {
-        sprintf(outbuf,
-                "INIT: unknown mode \"%s\". Use NEW or NEWGEO.\n", mode);
+        sprintf(outbuf, GS(MSG_CLI_INIT_UNKNOWN_MODE), mode);
         cli_puts(outbuf);
         return RETURN_WARN;
     }
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -1753,7 +1743,7 @@ static BOOL cli_prog_cb(void *ud, ULONG cur, ULONG total)
     /* Ctrl+C check - SetSignal(0,...) returns the previous mask and
      * clears the bits we passed in. */
     if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
-        cli_puts("\n** Cancelled.\n");
+        cli_puts(GS(MSG_CLI_CANCELLED));
         return FALSE;
     }
 
@@ -1761,13 +1751,13 @@ static BOOL cli_prog_cb(void *ud, ULONG cur, ULONG total)
         ULONG pct = (cur * 100UL) / total;
         if (cur != total && pct < p->last_pct + 5) return TRUE;
         p->last_pct = pct;
-        sprintf(outbuf, "  %lu%% (%lu / %lu blocks)\n",
+        sprintf(outbuf, GS(MSG_CLI_PROGRESS_PCT),
                 (unsigned long)pct,
                 (unsigned long)cur, (unsigned long)total);
     } else {
         if (cur < p->last_blocks + 102400) return TRUE;   /* every 50 MB */
         p->last_blocks = cur;
-        sprintf(outbuf, "  %lu blocks copied\n", (unsigned long)cur);
+        sprintf(outbuf, GS(MSG_CLI_PROGRESS_BLOCKS), (unsigned long)cur);
     }
     cli_puts(outbuf);
     Flush(Output());
@@ -1782,30 +1772,26 @@ static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
     BOOL  ok;
     struct CliProg prog;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     if (bd->total_bytes > IMAGE_LARGE_THRESHOLD) {
         FormatSize(bd->total_bytes, szbuf);
-        sprintf(outbuf,
-            "WARNING: source is %s (>2 GB).\n"
-            "  Destination filesystem must support large files\n"
-            "  (SFS, PFS3, FFS-NSD or FFS post-OS3.5) - older\n"
-            "  FFS will fail near the 2 GB mark.\n", szbuf);
+        sprintf(outbuf, GS(MSG_CLI_IMAGEOUT_LARGE_WARN), szbuf);
         cli_puts(outbuf);
     }
 
     FormatSize(bd->total_bytes, szbuf);
-    sprintf(outbuf, "Source size: %s\n", szbuf);
+    sprintf(outbuf, GS(MSG_CLI_SOURCE_SIZE), szbuf);
     cli_puts(outbuf);
-    sprintf(outbuf, "Writing image to: %s\n", path);
+    sprintf(outbuf, GS(MSG_CLI_WRITING_IMAGE_TO), path);
     cli_puts(outbuf);
 
     prog.last_pct = 0;
@@ -1818,12 +1804,12 @@ static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
     BlockDev_Close(bd);
 
     if (!ok) {
-        sprintf(outbuf, "ERROR: dump failed: %s\n",
-                errbuf[0] ? errbuf : "(unknown)");
+        sprintf(outbuf, GS(MSG_CLI_DUMP_FAILED),
+                errbuf[0] ? errbuf : GS(MSG_CLI_UNKNOWN));
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
-    cli_puts("Done.\n");
+    cli_puts(GS(MSG_CLI_DONE));
     return RETURN_OK;
 }
 
@@ -1835,21 +1821,20 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
     BOOL  ok;
     struct CliProg prog;
 
-    cli_puts("WARNING: This will OVERWRITE the destination from block 0.\n"
-             "All existing partitions and data on the target will be lost.\n\n");
-    if (!ask_yn("Are you sure you want to restore?", force))
+    cli_puts(GS(MSG_CLI_IMAGEIN_WARNING));
+    if (!ask_yn(GS(MSG_CLI_ASK_RESTORE), force))
         return RETURN_OK;
 
-    sprintf(outbuf, "Opening %s unit %lu...\n", devname, unit);
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, "ERROR: Cannot open %s unit %lu.\n", devname, unit);
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
-    sprintf(outbuf, "Reading image from: %s\n", path);
+    sprintf(outbuf, GS(MSG_CLI_READING_IMAGE_FROM), path);
     cli_puts(outbuf);
 
     prog.last_pct = 0;
@@ -1862,12 +1847,12 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
     BlockDev_Close(bd);
 
     if (!ok) {
-        sprintf(outbuf, "ERROR: restore failed: %s\n",
-                errbuf[0] ? errbuf : "(unknown)");
+        sprintf(outbuf, GS(MSG_CLI_RESTORE_FAILED),
+                errbuf[0] ? errbuf : GS(MSG_CLI_UNKNOWN));
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
-    cli_puts("Done. A reboot may be required for the new layout.\n");
+    cli_puts(GS(MSG_CLI_DONE_REBOOT));
     return RETURN_OK;
 }
 

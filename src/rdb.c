@@ -25,6 +25,7 @@
 
 #include "clib.h"
 #include "rdb.h"
+#include "locale_support.h"
 
 /* TD_READ64/TD_WRITE64 are not in the Bartman SDK trackdisk.h but are
    supported by most modern AmigaOS hard disk drivers (CMD_NONSTD=9). */
@@ -956,62 +957,62 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
     if (_sl >= 2 && _sl <= 128) { \
         ULONG _s = 0, _k; \
         for (_k = 0; _k < _sl; _k++) _s += (buf_)[_k]; \
-        if (_s != 0) IC_ERR("    CHECKSUM BAD"); \
-        else IC_OUT("    Checksum: OK"); \
-    } else { IC_LINE("    Checksum: skipped (SummedLongs=%lu)", _sl); } \
+        if (_s != 0) IC_ERR(GS(MSG_RDBC_CHECKSUM_BAD)); \
+        else IC_OUT(GS(MSG_RDBC_CHECKSUM_OK)); \
+    } else { IC_LINE(GS(MSG_RDBC_CHECKSUM_SKIPPED), _sl); } \
 } while(0)
 
-    if (!rdb || !rdb->valid) { IC_ERR("No valid RDB."); return 1; }
+    if (!rdb || !rdb->valid) { IC_ERR(GS(MSG_RDBC_NO_VALID_RDB)); return 1; }
 
     buf = (ULONG *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { IC_ERR("Out of memory."); return 1; }
+    if (!buf) { IC_ERR(GS(MSG_RDBC_OUT_OF_MEMORY)); return 1; }
 
-    IC_LINE("Device: %s unit %lu", bd->devname, (ULONG)bd->unit);
+    IC_LINE(GS(MSG_RDBC_DEVICE_UNIT), bd->devname, (ULONG)bd->unit);
     IC_OUT("");
 
     /* --- RDSK block --- */
-    IC_LINE("RDSK block %lu:", rdb->block_num);
+    IC_LINE(GS(MSG_RDBC_RDSK_BLOCK), rdb->block_num);
     if (!BlockDev_ReadBlock(bd, rdb->block_num, buf)) {
-        IC_ERR("  READ FAILED");
+        IC_ERR(GS(MSG_RDBC_READ_FAILED_2));
     } else if (buf[0] != IDNAME_RIGIDDISK) {
-        IC_ERRLINE("  ID WRONG: 0x%08lX (expected RDSK)", buf[0]);
+        IC_ERRLINE(GS(MSG_RDBC_ID_WRONG_RDSK), buf[0]);
     } else {
         IC_CHKSUM(buf[1], buf);
-        IC_LINE("  Geometry: %lu x %lu x %lu  cyls %lu-%lu",
+        IC_LINE(GS(MSG_RDBC_GEOMETRY),
                 (ULONG)rdb->cylinders, (ULONG)rdb->heads, (ULONG)rdb->sectors,
                 (ULONG)rdb->lo_cyl, (ULONG)rdb->hi_cyl);
-        IC_LINE("  RDB blocks: %lu-%lu",
+        IC_LINE(GS(MSG_RDBC_RDB_BLOCKS),
                 rdb->rdb_block_lo, rdb->rdb_block_hi);
         if (rdb->cylinders == 0 || rdb->heads == 0 || rdb->sectors == 0)
-            IC_ERR("  ERROR: zero geometry field");
+            IC_ERR(GS(MSG_RDBC_ERR_ZERO_GEOM));
         if (rdb->lo_cyl > rdb->hi_cyl)
-            IC_ERRLINE("  ERROR: lo_cyl %lu > hi_cyl %lu",
+            IC_ERRLINE(GS(MSG_RDBC_ERR_LOCYL_GT_HICYL),
                        (ULONG)rdb->lo_cyl, (ULONG)rdb->hi_cyl);
     }
 
     /* --- PART blocks --- */
     IC_OUT("");
-    IC_LINE("Partitions: %u", (unsigned)rdb->num_parts);
+    IC_LINE(GS(MSG_RDBC_PARTITIONS), (unsigned)rdb->num_parts);
     for (i = 0; i < rdb->num_parts; i++) {
         const struct PartInfo *pi = &rdb->parts[i];
         char dtbuf[16];
         FormatDosType(pi->dos_type, dtbuf);
-        IC_LINE("  [%u] %-6s  blk %lu  cyls %lu-%lu  %s",
+        IC_LINE(GS(MSG_RDBC_PART_ENTRY),
                 (unsigned)i, pi->drive_name, pi->block_num,
                 (ULONG)pi->low_cyl, (ULONG)pi->high_cyl, dtbuf);
         if (!BlockDev_ReadBlock(bd, pi->block_num, buf)) {
-            IC_ERR("    READ FAILED"); continue;
+            IC_ERR(GS(MSG_RDBC_READ_FAILED_4)); continue;
         }
         if (buf[0] != IDNAME_PARTITION) {
-            IC_ERRLINE("    ID WRONG: 0x%08lX", buf[0]);
+            IC_ERRLINE(GS(MSG_RDBC_ID_WRONG_4), buf[0]);
         } else {
             IC_CHKSUM(buf[1], buf);
         }
         if (pi->low_cyl > pi->high_cyl)
-            IC_ERRLINE("    ERROR: low_cyl %lu > high_cyl %lu",
+            IC_ERRLINE(GS(MSG_RDBC_ERR_LOWCYL_GT_HIGHCYL),
                        (ULONG)pi->low_cyl, (ULONG)pi->high_cyl);
         if (pi->high_cyl > rdb->hi_cyl)
-            IC_ERRLINE("    WARN: high_cyl %lu > disk hi_cyl %lu",
+            IC_ERRLINE(GS(MSG_RDBC_WARN_HIGHCYL_GT_DISK),
                        (ULONG)pi->high_cyl, (ULONG)rdb->hi_cyl);
     }
 
@@ -1023,7 +1024,7 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
             for (bi = ai + 1; bi < rdb->num_parts; bi++) {
                 if (rdb->parts[ai].low_cyl  <= rdb->parts[bi].high_cyl &&
                     rdb->parts[ai].high_cyl >= rdb->parts[bi].low_cyl) {
-                    IC_ERRLINE("  OVERLAP: %s (%lu-%lu) and %s (%lu-%lu)",
+                    IC_ERRLINE(GS(MSG_RDBC_OVERLAP),
                                rdb->parts[ai].drive_name,
                                (ULONG)rdb->parts[ai].low_cyl,
                                (ULONG)rdb->parts[ai].high_cyl,
@@ -1035,12 +1036,12 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
             }
         }
         if (!any)
-            IC_OUT("  Overlap check: PASS");
+            IC_OUT(GS(MSG_RDBC_OVERLAP_PASS));
     }
 
     /* --- FSHD + LSEG blocks --- */
     IC_OUT("");
-    IC_LINE("Filesystems: %u", (unsigned)rdb->num_fs);
+    IC_LINE(GS(MSG_RDBC_FILESYSTEMS), (unsigned)rdb->num_fs);
     for (i = 0; i < rdb->num_fs; i++) {
         const struct FSInfo *fi = &rdb->filesystems[i];
         char  dtbuf[16];
@@ -1050,12 +1051,12 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
         UWORD lseg_seen_n = 0;
 
         FormatDosType(fi->dos_type, dtbuf);
-        IC_LINE("  [%u] %-8s  blk %lu", (unsigned)i, dtbuf, fi->block_num);
+        IC_LINE(GS(MSG_RDBC_FS_ENTRY), (unsigned)i, dtbuf, fi->block_num);
 
         if (!BlockDev_ReadBlock(bd, fi->block_num, buf)) {
-            IC_ERR("    READ FAILED");
+            IC_ERR(GS(MSG_RDBC_READ_FAILED_4));
         } else if (buf[0] != IDNAME_FSHEADER) {
-            IC_ERRLINE("    ID WRONG: 0x%08lX", buf[0]); errors++;
+            IC_ERRLINE(GS(MSG_RDBC_ID_WRONG_4), buf[0]); errors++;
         } else {
             IC_CHKSUM(buf[1], buf);
         }
@@ -1065,20 +1066,20 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG lseg_count = 0;
         while (lseg_blk != RDB_END_MARK) {
             if (lseg_count >= MAX_LSEG_BLOCKS) {
-                IC_ERRLINE("    LSEG chain exceeds %u blocks (truncated)",
+                IC_ERRLINE(GS(MSG_RDBC_LSEG_EXCEEDS),
                            (unsigned)MAX_LSEG_BLOCKS);
                 errors++; break;
             }
             if (chain_seen(lseg_seen, &lseg_seen_n, lseg_blk)) {
-                IC_ERRLINE("    LSEG LOOP at block %lu", lseg_blk);
+                IC_ERRLINE(GS(MSG_RDBC_LSEG_LOOP), lseg_blk);
                 errors++; break;
             }
             if (!BlockDev_ReadBlock(bd, lseg_blk, buf)) {
-                IC_ERRLINE("    LSEG blk %lu: READ FAILED", lseg_blk);
+                IC_ERRLINE(GS(MSG_RDBC_LSEG_READ_FAILED), lseg_blk);
                 errors++; break;
             }
             if (buf[0] != IDNAME_LOADSEG) {
-                IC_ERRLINE("    LSEG blk %lu: ID WRONG 0x%08lX",
+                IC_ERRLINE(GS(MSG_RDBC_LSEG_ID_WRONG),
                            lseg_blk, buf[0]);
                 lseg_bad++; errors++; break;
             }
@@ -1098,20 +1099,20 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
         }
         }
         if (lseg_bad > 0)
-            IC_LINE("    LSEG: %lu bad / %lu OK", lseg_bad, lseg_ok);
+            IC_LINE(GS(MSG_RDBC_LSEG_BAD_OK), lseg_bad, lseg_ok);
         else if (fi->seg_list_blk != RDB_END_MARK)
-            IC_LINE("    LSEG: %lu blocks  OK", lseg_ok);
+            IC_LINE(GS(MSG_RDBC_LSEG_BLOCKS_OK), lseg_ok);
         else
-            IC_OUT("    LSEG: (no code)");
+            IC_OUT(GS(MSG_RDBC_LSEG_NO_CODE));
     }
 
     /* Summary */
     IC_OUT("");
-    IC_OUT("----------------------------");
+    IC_OUT(GS(MSG_RDBC_SEPARATOR));
     if (errors == 0)
-        IC_OUT("Result: PASS  (no errors)");
+        IC_OUT(GS(MSG_RDBC_RESULT_PASS));
     else
-        IC_LINE("Result: FAIL  (%lu error(s))", errors);
+        IC_LINE(GS(MSG_RDBC_RESULT_FAIL), errors);
 
 #undef IC_OUT
 #undef IC_LINE

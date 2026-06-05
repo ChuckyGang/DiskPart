@@ -89,9 +89,42 @@ src_c   := $(wildcard src/*.c)
 src_obj := $(addprefix obj/,$(patsubst src/%.c,%.o,$(src_c)))
 objects := $(src_obj) $(TC_SUPPORT_OBJ)
 
-.PHONY: all clean icon FORCE
+# --- Localization (locale.library catalogs) ----------------------------------
+# catalogs/DiskPart.cd is the single source of truth for translatable strings.
+# It generates src/diskpart_strings.h (ids + built-in English defaults).
+CD_FILE   := catalogs/DiskPart.cd
+STRINGS_H := src/diskpart_strings.h
+GENCAT    := support/gencat.py
 
+.PHONY: all clean icon FORCE strings catalog-template catalog
+
+# Keep 'all' the default goal (rules below would otherwise grab it).
 all: $(program) $(program).info
+
+$(STRINGS_H): $(CD_FILE) $(GENCAT)
+	$(info Generating $@ from $<)
+	@python3 $(GENCAT) header $< $@
+
+# Every object depends on the generated header (most .c files pull it in via
+# locale_support.h).
+$(src_obj): $(STRINGS_H)
+
+# Regenerate the string header on demand.
+strings: $(STRINGS_H)
+
+# Emit a fresh translation template:  make catalog-template LANG=deutsch
+LANG ?= deutsch
+catalog-template: $(CD_FILE) $(GENCAT)
+	$(info Generating catalogs/$(LANG).ct)
+	@python3 $(GENCAT) ct $(CD_FILE) catalogs/$(LANG).ct $(LANG)
+
+# Compile a finished translation into a binary catalog:
+#   make catalog LANG=deutsch        (reads catalogs/deutsch.ct)
+# Install the result as LOCALE:Catalogs/deutsch/DiskPart.catalog
+catalog: $(CD_FILE) $(GENCAT)
+	$(info Compiling catalogs/$(LANG)/DiskPart.catalog)
+	@mkdir -p catalogs/$(LANG)
+	@python3 $(GENCAT) catalog $(CD_FILE) catalogs/$(LANG).ct catalogs/$(LANG)/DiskPart.catalog
 
 # build.o embeds __DATE__/__TIME__ via build.c - force-rebuild every
 # invocation so the stamp matches the current build.

@@ -35,6 +35,7 @@
 #include "partmove.h"
 #include "sfsresize.h"   /* SFS_IsSupportedType */
 #include "sfs_util.h"
+#include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
 /* Multi-block I/O                                                      */
@@ -127,7 +128,7 @@ BOOL PART_CanMove(const struct RDBInfo *rdb, const struct PartInfo *pi,
     UWORD i;
 
     if (pi->high_cyl < pi->low_cyl) {
-        sprintf(err_buf, "Partition has invalid cylinder range (%lu-%lu).",
+        sprintf(err_buf, GS(MSG_PM_INVALID_CYL_RANGE),
                 (unsigned long)pi->low_cyl, (unsigned long)pi->high_cyl);
         return FALSE;
     }
@@ -138,22 +139,21 @@ BOOL PART_CanMove(const struct RDBInfo *rdb, const struct PartInfo *pi,
     if (new_high_cyl_out) *new_high_cyl_out = new_high_cyl;
 
     if (new_low_cyl == pi->low_cyl) {
-        sprintf(err_buf, "Partition is already at cylinder %lu.",
+        sprintf(err_buf, GS(MSG_PM_ALREADY_AT_CYL),
                 (unsigned long)new_low_cyl);
         return FALSE;
     }
 
     if (new_low_cyl < rdb->lo_cyl) {
         sprintf(err_buf,
-                "New start cylinder %lu is below the lowest\n"
-                "allowed partition cylinder (%lu).",
+                GS(MSG_PM_START_BELOW_LOWEST),
                 (unsigned long)new_low_cyl, (unsigned long)rdb->lo_cyl);
         return FALSE;
     }
 
     if (new_high_cyl > rdb->hi_cyl) {
         sprintf(err_buf,
-                "New end cylinder %lu exceeds the disk limit (%lu).",
+                GS(MSG_PM_END_EXCEEDS_DISK),
                 (unsigned long)new_high_cyl, (unsigned long)rdb->hi_cyl);
         return FALSE;
     }
@@ -164,8 +164,7 @@ BOOL PART_CanMove(const struct RDBInfo *rdb, const struct PartInfo *pi,
         if (other == pi) continue;
         if (new_low_cyl <= other->high_cyl && new_high_cyl >= other->low_cyl) {
             sprintf(err_buf,
-                    "New position (cyl %lu-%lu) overlaps\n"
-                    "partition %s (cyl %lu-%lu).",
+                    GS(MSG_PM_POSITION_OVERLAPS),
                     (unsigned long)new_low_cyl, (unsigned long)new_high_cyl,
                     other->drive_name,
                     (unsigned long)other->low_cyl,
@@ -208,7 +207,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
     phys_per_lb = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
 
     if (heads == 0 || sectors == 0) {
-        sprintf(err_buf, "Invalid geometry (h=%lu s=%lu).",
+        sprintf(err_buf, GS(MSG_PM_INVALID_GEOMETRY),
                 (unsigned long)heads, (unsigned long)sectors);
         return FALSE;
     }
@@ -229,7 +228,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* Allocate copy buffer: MOVE_CHUNK sectors */
     buf = (UBYTE *)AllocVec((ULONG)MOVE_CHUNK * 512, MEMF_PUBLIC);
     if (!buf) {
-        sprintf(err_buf, "Out of memory (%lu bytes).",
+        sprintf(err_buf, GS(MSG_PM_OUT_OF_MEMORY_BYTES),
                 (unsigned long)MOVE_CHUNK * 512);
         return FALSE;
     }
@@ -238,7 +237,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
     /* Block copy - direction depends on relative positions              */
     /* ---------------------------------------------------------------- */
     done = 0;
-    MOVE_PROGRESS(0, phys_count, "Copying blocks...");
+    MOVE_PROGRESS(0, phys_count, GS(MSG_PM_COPYING_BLOCKS));
 
     if (phys_base_new < phys_base_old) {
         /* Moving to lower address: front-to-back */
@@ -248,20 +247,20 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
 
             if (!move_read_blocks(bd, phys_base_old + i, chunk, buf)) {
                 sprintf(err_buf,
-                        "Read error at phys block %lu (after %lu blocks copied).",
+                        GS(MSG_PM_READ_ERROR_AT_BLOCK),
                         (unsigned long)(phys_base_old + i),
                         (unsigned long)done);
                 goto done_label;
             }
             if (!move_write_blocks(bd, phys_base_new + i, chunk, buf)) {
                 sprintf(err_buf,
-                        "Write error at phys block %lu (after %lu blocks copied).",
+                        GS(MSG_PM_WRITE_ERROR_AT_BLOCK),
                         (unsigned long)(phys_base_new + i),
                         (unsigned long)done);
                 goto done_label;
             }
             done += chunk;
-            MOVE_PROGRESS(done, phys_count, "Copying blocks...");
+            MOVE_PROGRESS(done, phys_count, GS(MSG_PM_COPYING_BLOCKS));
         }
     } else {
         /* Moving to higher address: back-to-front */
@@ -272,24 +271,24 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
 
             if (!move_read_blocks(bd, phys_base_old + i, chunk, buf)) {
                 sprintf(err_buf,
-                        "Read error at phys block %lu (after %lu blocks copied).",
+                        GS(MSG_PM_READ_ERROR_AT_BLOCK),
                         (unsigned long)(phys_base_old + i),
                         (unsigned long)done);
                 goto done_label;
             }
             if (!move_write_blocks(bd, phys_base_new + i, chunk, buf)) {
                 sprintf(err_buf,
-                        "Write error at phys block %lu (after %lu blocks copied).",
+                        GS(MSG_PM_WRITE_ERROR_AT_BLOCK),
                         (unsigned long)(phys_base_new + i),
                         (unsigned long)done);
                 goto done_label;
             }
             done += chunk;
-            MOVE_PROGRESS(done, phys_count, "Copying blocks...");
+            MOVE_PROGRESS(done, phys_count, GS(MSG_PM_COPYING_BLOCKS));
         }
     }
 
-    MOVE_PROGRESS(phys_count, phys_count, "Copying blocks...");
+    MOVE_PROGRESS(phys_count, phys_count, GS(MSG_PM_COPYING_BLOCKS));
 
     /* ---------------------------------------------------------------- */
     /* SFS metadata update                                               */
@@ -305,18 +304,17 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG  root_blks[2];   /* SFS block numbers of both roots */
         UWORD  r;
 
-        MOVE_PROGRESS(phys_count, phys_count, "Updating SFS location...");
+        MOVE_PROGRESS(phys_count, phys_count, GS(MSG_PM_UPDATING_SFS));
 
         /* Read first physical sector of new location to get SFS blocksize */
         if (!BlockDev_ReadBlock(bd, phys_base_new, scratch)) {
-            sprintf(err_buf, "SFS: cannot read new root block 0.");
+            sprintf(err_buf, GS(MSG_PM_SFS_CANT_READ_ROOT0));
             goto done_label;
         }
         if (sfs_getl(scratch, SFS_RB_ID) != SFS_ROOT_ID) {
             /* Not SFS - copy succeeded but metadata update skipped.
                This shouldn't happen; warn but don't fail the move. */
-            sprintf(err_buf, "SFS: root id mismatch after copy - "
-                             "metadata not updated.\nRun SFScheck %s: after reboot.",
+            sprintf(err_buf, GS(MSG_PM_SFS_ROOT_ID_MISMATCH),
                     pi->drive_name);
             goto done_label;
         }
@@ -324,21 +322,21 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
         sfs_blocksize = sfs_getl(scratch, SFS_RB_BLOCKSIZE);
         if (sfs_blocksize < 512 || (sfs_blocksize & (sfs_blocksize - 1)) ||
             (sfs_blocksize % 512) != 0) {
-            sprintf(err_buf, "SFS: invalid blocksize %lu.", (unsigned long)sfs_blocksize);
+            sprintf(err_buf, GS(MSG_PM_SFS_INVALID_BLOCKSIZE), (unsigned long)sfs_blocksize);
             goto done_label;
         }
         sfs_phys = sfs_blocksize / 512;
 
         sfs_root_buf = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
         if (!sfs_root_buf) {
-            sprintf(err_buf, "Out of memory (SFS root buffer).");
+            sprintf(err_buf, GS(MSG_PM_OUT_OF_MEMORY_SFS));
             goto done_label;
         }
 
         /* Read full root block 0 */
         if (!sfs_read_root(bd, phys_base_new, 0, sfs_phys, sfs_root_buf) ||
             !sfs_verify_checksum(sfs_root_buf, sfs_blocksize)) {
-            sprintf(err_buf, "SFS: root block 0 read/checksum error after copy.");
+            sprintf(err_buf, GS(MSG_PM_SFS_ROOT0_CHECKSUM));
             goto done_label;
         }
         totalblocks = sfs_getl(sfs_root_buf, SFS_RB_TOTALBLOCKS);
@@ -374,17 +372,13 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
                 if (r == 0) {
                     /* Primary root write failed - volume will be unmountable. */
                     sprintf(err_buf,
-                            "SFS: failed to write primary root block after move.\n"
-                            "Data was copied but SFS location metadata not updated.\n"
-                            "Run SFScheck %s: after reboot.",
+                            GS(MSG_PM_SFS_PRIMARY_WRITE_FAIL),
                             pi->drive_name);
                     goto done_label;
                 } else {
                     /* Backup root write failed - primary is correct, warn only. */
                     sprintf(err_buf,
-                            "SFS: backup root write failed (block %lu).\n"
-                            "Primary root is correct; volume should mount.\n"
-                            "Run SFScheck %s: after reboot to repair backup.",
+                            GS(MSG_PM_SFS_BACKUP_WRITE_FAIL),
                             (unsigned long)root_blks[1],
                             pi->drive_name);
                     /* Continue - ok will be set to TRUE below. */
@@ -401,9 +395,7 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     if (err_buf[0] == '\0')
     sprintf(err_buf,
-            "Moved %lu cylinders of data.\n"
-            "cyl %lu-%lu -> %lu-%lu\n"
-            "phys blocks: %lu -> %lu (%lu blocks)",
+            GS(MSG_PM_MOVED_SUMMARY),
             (unsigned long)cyl_count,
             (unsigned long)old_low,  (unsigned long)old_high,
             (unsigned long)new_low_cyl, (unsigned long)new_high_cyl,

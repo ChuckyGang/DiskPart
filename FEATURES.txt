@@ -107,6 +107,19 @@ scripting interface.
 
 
 --------------------------------------------------------------------------------
+ LOCALIZATION
+--------------------------------------------------------------------------------
+ * Full locale.library catalog support: the entire GUI, CLI and script
+   interface (~1000 strings) can be translated.
+ * Translatable strings live in catalogs/DiskPart.cd (CatComp/FlexCat format);
+   see catalogs/README.txt for the translator workflow.
+ * Catalogs are searched in LOCALE:Catalogs/<lang>/ and PROGDIR:Catalogs/<lang>/.
+ * Graceful fallback: locale.library exists only on AmigaOS 2.1 (V38)+.  On
+   Kickstart 2.04 (V37) DiskPart runs unchanged with built-in English - no
+   catalog is loaded and nothing fails, so full 2.x compatibility is kept.
+
+
+--------------------------------------------------------------------------------
  MISCELLANEOUS
 --------------------------------------------------------------------------------
  * Write-back verification: blocks are read back after writing to detect errors.

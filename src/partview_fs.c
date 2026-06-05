@@ -22,6 +22,7 @@
 #include <proto/gadtools.h>
 
 #include "clib.h"
+#include "locale_support.h"
 #include "rdb.h"
 #include "partview_internal.h"
 
@@ -81,7 +82,7 @@ static void build_fs_list(const struct RDBInfo *rdb)
         if (fi->code && fi->code_size > 0)
             FormatSize((UQUAD)fi->code_size, codesz);
         else
-            sprintf(codesz, "NULL driver");
+            sprintf(codesz, GS(MSG_FS_NULL_DRIVER));
 
         sprintf(fs_strs[i], "%-12s  %-8s  %s", dt, ver, codesz);
 
@@ -164,9 +165,9 @@ static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi
     fh = Open((UBYTE *)path, MODE_OLDFILE);
     if (!fh) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Error";
-        es.es_TextFormat=(UBYTE*)"Cannot open file.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_FS_ERROR_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_FS_CANNOT_OPEN);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return FALSE;
     }
@@ -175,9 +176,9 @@ static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi
     if (fsize <= 0 || fsize >= (LONG)(1024L * 1024L)) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Error";
-        es.es_TextFormat=(UBYTE*)"File is empty or too large\n(limit: 1 MB).";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_FS_ERROR_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_FS_FILE_SIZE_BAD);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return FALSE;
     }
@@ -186,9 +187,9 @@ static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi
     if (Read(fh, code, fsize) != fsize) {
         Close(fh); FreeVec(code);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Error";
-        es.es_TextFormat=(UBYTE*)"File read error.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_FS_ERROR_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_FS_FILE_READ_ERR);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
         return FALSE;
     }
@@ -315,7 +316,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         /* DosType string - narrowed; accepts "DOS\1" or "0x444F5301" */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad);
         ng.ng_Width=dt_str_w; ng.ng_Height=row_h;
-        ng.ng_GadgetText="DosType"; ng.ng_GadgetID=AFSDLG_DOSTYPE;
+        ng.ng_GadgetText=GS(MSG_FS_DOSTYPE_LBL); ng.ng_GadgetID=AFSDLG_DOSTYPE;
         ng.ng_Flags=PLACETEXT_LEFT;
         { struct TagItem st[]={{GTST_String,(ULONG)dt_str},{GTST_MaxChars,18},{TAG_DONE,0}};
           dostype_gad=CreateGadgetA(STRING_KIND,gctx,&ng,st);
@@ -333,7 +334,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         /* File string (narrower to leave room for Browse button) */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad+row_h+pad);
         ng.ng_Width=file_w; ng.ng_Height=row_h;
-        ng.ng_GadgetText="File"; ng.ng_GadgetID=AFSDLG_FILE;
+        ng.ng_GadgetText=GS(MSG_FS_FILE_LBL); ng.ng_GadgetID=AFSDLG_FILE;
         ng.ng_Flags=PLACETEXT_LEFT;
         { struct TagItem st[]={{GTST_String,(ULONG)file_str},{GTST_MaxChars,255},{TAG_DONE,0}};
           file_gad=CreateGadgetA(STRING_KIND,prev,&ng,st);
@@ -342,7 +343,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         /* Browse button - right of File string */
         ng.ng_LeftEdge=gad_x+(WORD)file_w+pad; ng.ng_TopEdge=(WORD)(bor_t+pad+row_h+pad);
         ng.ng_Width=browse_w; ng.ng_Height=row_h;
-        ng.ng_GadgetText="Browse..."; ng.ng_GadgetID=AFSDLG_BROWSE;
+        ng.ng_GadgetText=GS(MSG_FS_BROWSE); ng.ng_GadgetID=AFSDLG_BROWSE;
         ng.ng_Flags=PLACETEXT_IN;
         { struct TagItem bt[]={{TAG_DONE,0}};
           browse_gad=CreateGadgetA(BUTTON_KIND,prev,&ng,bt);
@@ -351,7 +352,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
         /* NULL driver checkbox */
         ng.ng_LeftEdge=gad_x; ng.ng_TopEdge=(WORD)(bor_t+pad+row_h+pad+row_h+pad);
         ng.ng_Width=26; ng.ng_Height=row_h;
-        ng.ng_GadgetText="NULL driver (no code)"; ng.ng_GadgetID=AFSDLG_NULL;
+        ng.ng_GadgetText=GS(MSG_FS_NULL_DRIVER_CB); ng.ng_GadgetID=AFSDLG_NULL;
         ng.ng_Flags=PLACETEXT_RIGHT;
         { struct TagItem ct[]={{GTCB_Checked,(ULONG)is_null},{TAG_DONE,0}};
           null_gad=CreateGadgetA(CHECKBOX_KIND,prev,&ng,ct);
@@ -363,18 +364,18 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
           struct TagItem bt[]={{TAG_DONE,0}};
           ng.ng_TopEdge=btn_y; ng.ng_Height=row_h; ng.ng_Width=half;
           ng.ng_Flags=PLACETEXT_IN;
-          ng.ng_LeftEdge=bor_l+pad; ng.ng_GadgetText="OK";
+          ng.ng_LeftEdge=bor_l+pad; ng.ng_GadgetText=GS(MSG_OK);
           ng.ng_GadgetID=AFSDLG_OK;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_add_cleanup;
           ng.ng_LeftEdge=bor_l+pad+half+pad;
-          ng.ng_GadgetText="Cancel"; ng.ng_GadgetID=AFSDLG_CANCEL;
+          ng.ng_GadgetText=GS(MSG_CANCEL); ng.ng_GadgetID=AFSDLG_CANCEL;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_add_cleanup; }
 
         { struct TagItem wt[]={
               {WA_Left,(ULONG)((scr->Width-win_w)/2)},
               {WA_Top,(ULONG)((scr->Height-win_h)/2)},
               {WA_Width,win_w},{WA_Height,win_h},
-              {WA_Title,(ULONG)(is_edit ? "Edit FileSystem Driver" : "Add FileSystem Driver")},
+              {WA_Title,(ULONG)(is_edit ? GS(MSG_FS_EDIT_TITLE) : GS(MSG_FS_ADD_TITLE))},
               {WA_Gadgets,(ULONG)glist},{WA_PubScreen,(ULONG)scr},
               {WA_IDCMP,IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|IDCMP_REFRESHWINDOW},
               {WA_Flags,WFLG_DRAGBAR|WFLG_DEPTHGADGET|WFLG_CLOSEGADGET|
@@ -423,7 +424,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                             struct FileRequester *fr;
                             struct StringInfo *si = (struct StringInfo *)file_gad->SpecialInfo;
                             { struct TagItem asl_tags[] = {
-                                  { ASLFR_TitleText,    (ULONG)"Select FileSystem Driver" },
+                                  { ASLFR_TitleText,    (ULONG)GS(MSG_FS_SELECT_DRIVER) },
                                   { ASLFR_InitialDrawer,(ULONG)"L:" },
                                   { ASLFR_InitialFile,  (ULONG)si->Buffer },
                                   { TAG_DONE, 0 } };
@@ -594,19 +595,19 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
           struct TagItem bt[] = {{TAG_DONE,0}};
           ng.ng_TopEdge=btn_y; ng.ng_Height=btn_h;
           ng.ng_Width=fifth; ng.ng_Flags=PLACETEXT_IN;
-          ng.ng_LeftEdge=bor_l+pad; ng.ng_GadgetText="Add";
+          ng.ng_LeftEdge=bor_l+pad; ng.ng_GadgetText=GS(MSG_FS_ADD);
           ng.ng_GadgetID=FSDLG_ADD;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_mgr_cleanup;
-          ng.ng_LeftEdge=bor_l+pad+fifth+pad; ng.ng_GadgetText="Edit";
+          ng.ng_LeftEdge=bor_l+pad+fifth+pad; ng.ng_GadgetText=GS(MSG_FS_EDIT);
           ng.ng_GadgetID=FSDLG_EDIT;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_mgr_cleanup;
-          ng.ng_LeftEdge=bor_l+pad+(fifth+pad)*2; ng.ng_GadgetText="Delete";
+          ng.ng_LeftEdge=bor_l+pad+(fifth+pad)*2; ng.ng_GadgetText=GS(MSG_FS_DELETE);
           ng.ng_GadgetID=FSDLG_DELETE;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_mgr_cleanup;
-          ng.ng_LeftEdge=bor_l+pad+(fifth+pad)*3; ng.ng_GadgetText="Done";
+          ng.ng_LeftEdge=bor_l+pad+(fifth+pad)*3; ng.ng_GadgetText=GS(MSG_FS_DONE);
           ng.ng_GadgetID=FSDLG_DONE;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_mgr_cleanup;
-          ng.ng_LeftEdge=bor_l+pad+(fifth+pad)*4; ng.ng_GadgetText="Cancel";
+          ng.ng_LeftEdge=bor_l+pad+(fifth+pad)*4; ng.ng_GadgetText=GS(MSG_CANCEL);
           ng.ng_GadgetID=FSDLG_CANCEL;
           prev=CreateGadgetA(BUTTON_KIND,prev,&ng,bt); if(!prev) goto fs_mgr_cleanup; }
 
@@ -614,7 +615,7 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
               {WA_Left,(ULONG)((scr->Width-win_w)/2)},
               {WA_Top,(ULONG)((scr->Height-win_h)/2)},
               {WA_Width,win_w},{WA_Height,win_h},
-              {WA_Title,(ULONG)"FileSystem Drivers"},
+              {WA_Title,(ULONG)GS(MSG_FS_MGR_TITLE)},
               {WA_Gadgets,(ULONG)glist},{WA_PubScreen,(ULONG)scr},
               {WA_IDCMP,IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|
                         IDCMP_GADGETDOWN|IDCMP_REFRESHWINDOW},
@@ -626,7 +627,7 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
         /* Column header drawn just above listview */
         if (win) {
             struct RastPort *rp = win->RPort;
-            const char *hdr = "DosType       Version   Code";
+            const char *hdr = GS(MSG_FS_LIST_HEADER);
             WORD fb = rp->TxBaseline;
             SetAPen(rp, 2); SetDrMd(rp, JAM2);
             RectFill(rp, bor_l+pad, bor_t+pad,
@@ -772,21 +773,17 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
 
                             FriendlyDosType(del_dt, dt);
                             if (num_users > 0) {
-                                sprintf(msg,
-                                    "Filesystem %s is in use by:\n"
-                                    "%s\n\n"
-                                    "Affected partition(s) will be\n"
-                                    "changed to FFS. Delete anyway?",
+                                sprintf(msg, GS(MSG_FS_DELETE_INUSE_FMT),
                                     dt, users);
                             } else {
-                                sprintf(msg, "Delete filesystem driver %s?", dt);
+                                sprintf(msg, GS(MSG_FS_DELETE_CONFIRM_FMT), dt);
                             }
 
                             es.es_StructSize  = sizeof(es);
                             es.es_Flags       = 0;
-                            es.es_Title       = (UBYTE*)"Delete FS Driver";
+                            es.es_Title       = (UBYTE*)GS(MSG_FS_DELETE_TITLE);
                             es.es_TextFormat  = (UBYTE*)msg;
-                            es.es_GadgetFormat = (UBYTE*)"Yes|No";
+                            es.es_GadgetFormat = (UBYTE*)GS(MSG_YES_NO);
                             if (EasyRequest(win, &es, NULL) == 1) {
                                 UWORD j;
                                 /* Reset affected partitions to FFS */

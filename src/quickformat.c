@@ -22,6 +22,7 @@
 #include <proto/expansion.h>
 
 #include "clib.h"
+#include "locale_support.h"
 #include "rdb.h"
 #include "quickformat.h"
 
@@ -139,11 +140,11 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
     if (mounted_name) mounted_name[0] = '\0';
 
     if (!ExpansionBase) {
-        set_err(errbuf, errlen, "expansion.library not available");
+        set_err(errbuf, errlen, GS(MSG_QF_NO_EXPANSION));
         return FALSE;
     }
     if (!bd || bd->backend != BD_DEVICE) {
-        set_err(errbuf, errlen, "image files can't be mounted");
+        set_err(errbuf, errlen, GS(MSG_QF_IMAGE_NO_MOUNT));
         return FALSE;
     }
 
@@ -153,7 +154,7 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
     find_filesys(pi->dos_type, &fp);
     if (!fp.found) {
         char msg[96];
-        sprintf(msg, "no handler for type 0x%08lX", (unsigned long)pi->dos_type);
+        sprintf(msg, GS(MSG_QF_NO_HANDLER_FMT), (unsigned long)pi->dos_type);
         set_err(errbuf, errlen, msg);
         return FALSE;
     }
@@ -199,7 +200,7 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
 
     node = MakeDosNode(parmpkt);
     if (!node) {
-        set_err(errbuf, errlen, "MakeDosNode failed (out of memory)");
+        set_err(errbuf, errlen, GS(MSG_QF_MAKEDOSNODE_FAIL));
         return FALSE;
     }
 
@@ -213,7 +214,7 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
 
     /* AddDosNode consumes the node on success and starts the handler process. */
     if (!AddDosNode((LONG)pi->boot_pri, ADNF_STARTPROC, node)) {
-        set_err(errbuf, errlen, "AddDosNode failed");
+        set_err(errbuf, errlen, GS(MSG_QF_ADDDOSNODE_FAIL));
         return FALSE;
     }
 
@@ -252,7 +253,7 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
     if (!Format((CONST_STRPTR)withcolon, (CONST_STRPTR)pi->volume_name,
                 pi->dos_type)) {
         char msg[64];
-        sprintf(msg, "Format err %ld", (long)IoErr());
+        sprintf(msg, GS(MSG_QF_FORMAT_ERR_FMT), (long)IoErr());
         set_err(errbuf, errlen, msg);
         Inhibit((CONST_STRPTR)withcolon, DOSFALSE);
         return FALSE;   /* left mounted; user can format it manually */
@@ -289,7 +290,7 @@ BOOL UnmountDevice(const char *name, char *errbuf, ULONG errlen)
     struct MsgPort *task = NULL;
 
     if (!name || !name[0]) {
-        set_err(errbuf, errlen, "no name");
+        set_err(errbuf, errlen, GS(MSG_QF_NO_NAME));
         return FALSE;
     }
 
@@ -308,7 +309,7 @@ BOOL UnmountDevice(const char *name, char *errbuf, ULONG errlen)
        device out from under the user. */
     if (task) {
         if (!DoPkt(task, ACTION_DIE, 0, 0, 0, 0, 0)) {
-            set_err(errbuf, errlen, "volume in use - close its windows/files");
+            set_err(errbuf, errlen, GS(MSG_QF_VOLUME_IN_USE));
             return FALSE;
         }
     }

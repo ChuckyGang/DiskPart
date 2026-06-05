@@ -27,6 +27,7 @@
 #include "clib.h"
 #include "rdb.h"
 #include "imagecopy.h"
+#include "locale_support.h"
 #include "partview_internal.h"
 
 #define IMG_GID_CANCEL  100
@@ -98,7 +99,7 @@ static void prog_open(struct ImgProgress *p, const char *title)
             ng.ng_TopEdge    = btn_y;
             ng.ng_Width      = btn_w;
             ng.ng_Height     = btn_h;
-            ng.ng_GadgetText = "Cancel";
+            ng.ng_GadgetText = GS(MSG_CANCEL);
             ng.ng_GadgetID   = IMG_GID_CANCEL;
             p->cancel_gad = CreateGadgetA(BUTTON_KIND, gctx, &ng, bt);
             if (!p->cancel_gad) {
@@ -208,11 +209,11 @@ static BOOL prog_cb(void *ud, ULONG cur, ULONG total)
         ULONG pct = (cur * 100UL) / total;
         if (cur != total && pct == p->last_pct) return TRUE;
         p->last_pct = pct;
-        sprintf(line, "%lu / %lu blocks  (%lu%%)",
+        sprintf(line, GS(MSG_IMG_PROGRESS_PCT_FMT),
                 (unsigned long)cur, (unsigned long)total,
                 (unsigned long)pct);
     } else {
-        sprintf(line, "%lu blocks copied", (unsigned long)cur);
+        sprintf(line, GS(MSG_IMG_PROGRESS_COPIED_FMT), (unsigned long)cur);
     }
 
     /* Pad to 60 chars so any previous longer text is fully erased. */
@@ -240,9 +241,9 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Dump Disk to Image";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_IMG_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -255,27 +256,19 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
     if (disk_bytes > cap_bytes) {
         char body[400];
         FormatSize(disk_bytes, size_str);
-        sprintf(body,
-            "This disk is %s - larger than 2 GB.\n\n"
-            "The destination filesystem MUST support files\n"
-            "larger than 2 GB (SFS, PFS3, FFS-NSD or\n"
-            "FFS post-OS3.5).  On older FFS the dump will\n"
-            "stop with a write error near the 2 GB mark.\n\n"
-            "Continue?",
-            size_str);
+        sprintf(body, GS(MSG_IMG_DUMP_LARGE_WARN_FMT), size_str);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Dump Disk to Image - WARNING";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_WARN_TITLE);
         es.es_TextFormat=(UBYTE*)body;
-        es.es_GadgetFormat=(UBYTE*)"Continue|Cancel";
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_IMG_CONTINUE_CANCEL);
         if (EasyRequest(win, &es, NULL) != 1) return;
     }
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Dump Disk to Image";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\n"
-                                  "Cannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_IMG_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -283,7 +276,7 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
         struct FileRequester *fr;
         BOOL chosen = FALSE;
         struct TagItem at[] = {
-            { ASLFR_TitleText,    (ULONG)"Save Disk Image" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_IMG_SAVE_REQ_TITLE) },
             { ASLFR_DoSaveMode,   TRUE },
             { ASLFR_InitialDrawer,(ULONG)"RAM:" },
             { ASLFR_InitialFile,  (ULONG)"disk.hdf" },
@@ -310,7 +303,7 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
         BOOL  ok;
         char  done_msg[300];
 
-        sprintf(prog.title, "Dumping to %s", save_path);
+        sprintf(prog.title, GS(MSG_IMG_DUMP_PROGRESS_TITLE_FMT), save_path);
         prog_open(&prog, prog.title);
 
         errbuf[0] = '\0';
@@ -319,20 +312,17 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
         prog_close(&prog);
 
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Dump Disk to Image";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_TITLE);
         if (ok) {
-            sprintf(done_msg, "Image written to:\n%s", save_path);
+            sprintf(done_msg, GS(MSG_IMG_DUMP_OK_FMT), save_path);
         } else if (prog.cancelled) {
-            sprintf(done_msg,
-                    "Dump cancelled.\n\n"
-                    "The partial file at:\n%s\nhas been left on disk.",
-                    save_path);
+            sprintf(done_msg, GS(MSG_IMG_DUMP_CANCELLED_FMT), save_path);
         } else {
-            sprintf(done_msg, "Dump failed:\n%s",
-                    errbuf[0] ? errbuf : "(unknown error)");
+            sprintf(done_msg, GS(MSG_IMG_DUMP_FAILED_FMT),
+                    errbuf[0] ? errbuf : GS(MSG_IMG_UNKNOWN_ERROR));
         }
         es.es_TextFormat=(UBYTE*)done_msg;
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
     }
 }
@@ -348,31 +338,23 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
 
     if (!bd) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore Image to Disk";
-        es.es_TextFormat=(UBYTE*)"Device is not accessible.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_IMG_DEV_NOT_ACCESSIBLE);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
     es.es_StructSize=sizeof(es); es.es_Flags=0;
-    es.es_Title=(UBYTE*)"Restore Image to Disk - WARNING";
-    es.es_TextFormat=(UBYTE*)
-        "WARNING: This will OVERWRITE every block of the\n"
-        "destination starting at block 0 with the contents\n"
-        "of the chosen image file.\n\n"
-        "Existing partitions, filesystems and ALL DATA will\n"
-        "be destroyed.  Make sure the image is correct for\n"
-        "this disk.\n\n"
-        "Are you absolutely sure?";
-    es.es_GadgetFormat=(UBYTE*)"Yes, restore|Cancel";
+    es.es_Title=(UBYTE*)GS(MSG_IMG_RESTORE_WARN_TITLE);
+    es.es_TextFormat=(UBYTE*)GS(MSG_IMG_RESTORE_WARN_BODY);
+    es.es_GadgetFormat=(UBYTE*)GS(MSG_IMG_RESTORE_WARN_GADGETS);
     if (EasyRequest(win, &es, NULL) != 1) return;
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore Image to Disk";
-        es.es_TextFormat=(UBYTE*)"asl.library not available.\n"
-                                  "Cannot open file requester.";
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_RESTORE_TITLE);
+        es.es_TextFormat=(UBYTE*)GS(MSG_IMG_ASL_UNAVAIL);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL); return;
     }
 
@@ -380,7 +362,7 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
         struct FileRequester *fr;
         BOOL chosen = FALSE;
         struct TagItem at[] = {
-            { ASLFR_TitleText,    (ULONG)"Select Image File to Restore" },
+            { ASLFR_TitleText,    (ULONG)GS(MSG_IMG_LOAD_REQ_TITLE) },
             { ASLFR_InitialDrawer,(ULONG)"RAM:" },
             { ASLFR_InitialFile,  (ULONG)"" },
             { TAG_DONE, 0 }
@@ -406,7 +388,7 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
         BOOL  ok;
         char  done_msg[300];
 
-        sprintf(prog.title, "Restoring from %s", load_path);
+        sprintf(prog.title, GS(MSG_IMG_RESTORE_PROGRESS_TITLE_FMT), load_path);
         prog_open(&prog, prog.title);
 
         errbuf[0] = '\0';
@@ -415,24 +397,17 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
         prog_close(&prog);
 
         es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)"Restore Image to Disk";
+        es.es_Title=(UBYTE*)GS(MSG_IMG_RESTORE_TITLE);
         if (ok) {
-            sprintf(done_msg,
-                    "Image written to disk.\n\n"
-                    "Reboot may be required for the new\n"
-                    "partition layout to be picked up.");
+            es.es_TextFormat=(UBYTE*)GS(MSG_IMG_RESTORE_OK);
         } else if (prog.cancelled) {
-            sprintf(done_msg,
-                    "Restore cancelled.\n\n"
-                    "WARNING: the destination disk has been\n"
-                    "partially overwritten and is in an\n"
-                    "inconsistent state.");
+            es.es_TextFormat=(UBYTE*)GS(MSG_IMG_RESTORE_CANCELLED);
         } else {
-            sprintf(done_msg, "Restore failed:\n%s",
-                    errbuf[0] ? errbuf : "(unknown error)");
+            sprintf(done_msg, GS(MSG_IMG_RESTORE_FAILED_FMT),
+                    errbuf[0] ? errbuf : GS(MSG_IMG_UNKNOWN_ERROR));
+            es.es_TextFormat=(UBYTE*)done_msg;
         }
-        es.es_TextFormat=(UBYTE*)done_msg;
-        es.es_GadgetFormat=(UBYTE*)"OK";
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
     }
 }
