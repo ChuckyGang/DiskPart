@@ -41,6 +41,20 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
  * expansion.library needed, so it works in CLI/script mode too. */
 BOOL UnmountDevice(const char *name, char *errbuf, ULONG errlen);
 
+/* Progress callback for UnmountPartition (same shape as the grow callbacks). */
+typedef void (*UnmountProgressFn)(void *ud, const char *msg);
+
+/* Unmount *our* partition before an offline grow.  Matches the on-disk RDB
+ * name (name) but only among DOS entries backed by bd's device+unit, so a
+ * same-named partition on another drive is left untouched (the device+unit
+ * qualification disambiguates the name).  progress (may be NULL) is called
+ * once if it has to wait for a just-mounted volume to settle.
+ * Returns TRUE if our partition is offline (unmounted, or was never mounted on
+ * this device); FALSE only if our handler is genuinely busy (open files). */
+BOOL UnmountPartition(struct BlockDev *bd, const char *name,
+                      UnmountProgressFn progress, void *ud,
+                      char *errbuf, ULONG errlen);
+
 /* Bring a just-mounted volume online (Lock+UnLock its root) so that any lock
  * orphaned while it was briefly absent (e.g. during a resize) revalidates
  * against it silently, instead of popping an "insert volume" requester.

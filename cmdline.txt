@@ -198,11 +198,15 @@ RESTOREEXT <file>
   Example:  DiskPart DEV uaehf.device:3 RESTOREEXT ram:rdb_ext.bak
             DiskPart DEV uaehf.device:3 RESTOREEXT ram:rdb_ext.bak FORCE
 
-ADDPART NAME=<n> LOW=<cyl|START|NEXT> HIGH=<cyl|END|+size>
-         [TYPE=<dostype>] [BOOTPRI=<n>] [BOOTABLE]
+ADDPART NAME=<n> LOW=<cyl|START|NEXT|size> HIGH=<cyl|END|+size>
+         [TYPE=<dostype>] [BOOTPRI=<n>] [BOOTABLE] [ENFORCESIZE]
+         [BLOCKSIZE=<n>]
   Add a partition to the existing RDB, then ask Y/N before writing.
   FORCE skips the write question.  See SCRIPT COMMANDS for full
-  description of LOW/HIGH/TYPE syntax.
+  description of LOW/HIGH/TYPE/BLOCKSIZE syntax.
+  If HIGH would run into an existing partition, it is clamped to fill
+  the gap up to that partition.  ENFORCESIZE disables clamping: the
+  requested size must fit or the command fails.
 
   Examples:
     DiskPart DEV uaehf.device:3 ADDPART NAME=DH0 LOW=START HIGH=+100M TYPE=PFS3 BOOTABLE
@@ -302,8 +306,9 @@ INIT NEWGEO
   Keeps existing heads/sectors; only cylinder count and hi_cyl change.
   No-op if disk is the same size or smaller.
 
-ADDPART NAME=<n> LOW=<cyl|NEXT> HIGH=<cyl|END|+size>
-         [TYPE=<dostype>] [BOOTPRI=<n>] [BOOTABLE]
+ADDPART NAME=<n> LOW=<cyl|START|NEXT|size> HIGH=<cyl|END|+size>
+         [TYPE=<dostype>] [BOOTPRI=<n>] [BOOTABLE] [ENFORCESIZE]
+         [BLOCKSIZE=<n>]
   Add a partition entry to the in-memory RDB.
   TYPE defaults to DOS3 (0x444F5303) if not specified.
   TYPE can be a hex value (0x444F5303 or $444F5303) or a short
@@ -314,11 +319,25 @@ ADDPART NAME=<n> LOW=<cyl|NEXT> HIGH=<cyl|END|+size>
               Safe to use for every partition — each one finds the next gap.
   LOW=NEXT    Start immediately after the last defined partition
               (highest hi_cyl + 1).  Same as START for contiguous layouts.
+  LOW=300M    Start at the cylinder 300 MB into the disk.  A K/M/G suffix
+              means a byte offset; a bare number is still a cylinder number.
 
   HIGH=END    Fill to the last usable cylinder on the disk.
   HIGH=+100M  Set HIGH so the partition is exactly 100 MB.
               Suffix: K = kilobytes, M = megabytes, G = gigabytes.
               The size is rounded DOWN to a whole number of cylinders.
+
+  If the chosen HIGH (including END or a +size) would run into an
+  existing partition, HIGH is clamped to one cylinder before it, so the
+  new partition fills the gap exactly.  A warning reports the new HIGH.
+  ENFORCESIZE  Disable clamping: if the requested span overlaps an
+               existing partition the command fails instead of shrinking.
+               (A LOW that lands inside an existing partition always fails.)
+
+  BLOCKSIZE=<n>  Filesystem block size in bytes.  Defaults to 512 if
+                 omitted.  Must be a power of two from 512 up to 32768
+                 (512, 1024, 2048, 4096, ...).  Most setups use 512;
+                 only change it if your filesystem expects larger blocks.
 
   Requires WRITE to commit to disk.
 

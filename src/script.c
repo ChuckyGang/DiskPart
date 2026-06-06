@@ -8,7 +8,7 @@
  * Commands:
  *   OPEN <device> <unit>
  *   INIT NEW | NEWGEO
- *   ADDPART NAME=<n> LOW=<cyl> HIGH=<cyl> [TYPE=<t>] [BOOTPRI=<n>] [BOOTABLE]
+ *   ADDPART NAME=<n> LOW=<cyl|size> HIGH=<cyl> [TYPE=<t>] [BOOTPRI=<n>] [BOOTABLE]
  *           [VOLNAME=<label>]   ; VOLNAME quick-formats the partition after
  *                               ; WRITE (device only); omit/empty = no format
  *   DELPART NAME=<n>
@@ -226,11 +226,15 @@ static BOOL parse_dostype(const char *s, ULONG *out)
 
 /*
  * parse_low - parse LOW= value.
- *   NEXT  -> first free cylinder after the last existing partition
- *   <n>   -> literal cylinder number
+ *   NEXT      -> first free cylinder after the last existing partition
+ *   NNN[KMG]  -> byte offset converted to the cylinder containing it
+ *   <n>       -> literal cylinder number
  */
 static ULONG parse_low(const char *s, struct RDBInfo *rdb)
 {
+    const char *p;
+    ULONG val;
+
     if (ci_eq(s, "START")) {
         /* First free cylinder from lo_cyl, skipping any existing partitions */
         ULONG cyl = rdb->lo_cyl;
@@ -255,6 +259,23 @@ static ULONG parse_low(const char *s, struct RDBInfo *rdb)
             if (rdb->parts[i].high_cyl + 1 > next)
                 next = rdb->parts[i].high_cyl + 1;
         return next;
+    }
+
+    /* NNN[KMG] -> byte offset converted to the cylinder containing it.
+     * A bare number (no suffix) stays a literal cylinder, as before. */
+    p = s;
+    val = 0;
+    while (*p >= '0' && *p <= '9') val = val * 10 + (ULONG)(*p++ - '0');
+    if (*p == 'K' || *p == 'k' || *p == 'M' || *p == 'm' ||
+        *p == 'G' || *p == 'g') {
+        UQUAD bytes = (UQUAD)val;
+        ULONG cylsize;
+        if      (*p == 'K' || *p == 'k') bytes *= 1024UL;
+        else if (*p == 'M' || *p == 'm') bytes *= 1024UL * 1024UL;
+        else                             bytes *= 1024UL * 1024UL * 1024UL;
+        cylsize = (ULONG)rdb->heads * rdb->sectors * 512UL;
+        if (cylsize == 0) return strtoul(s, NULL, 10);
+        return (ULONG)(bytes / cylsize);
     }
     return strtoul(s, NULL, 10);
 }
@@ -305,6 +326,13 @@ static UQUAD parse_size_bytes(const char *s)
     else if (*s == 'M' || *s == 'm') val *= 1024UL * 1024UL;
     else if (*s == 'G' || *s == 'g') val *= 1024UL * 1024UL * 1024UL;
     return val;
+}
+
+/* valid_block_size - TRUE for a power of two in [512, 32768].
+ * RDB stores it as DE_SIZEBLOCK = block_size/4. */
+static BOOL valid_block_size(ULONG n)
+{
+    return (n >= 512 && n <= 32768 && (n & (n - 1)) == 0);
 }
 
 /* Shared post-open: print size + RDB summary, set s_st bookkeeping. */
@@ -525,8 +553,10 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     struct PartInfo *pi;
     ULONG  low, high;
     ULONG  dostype  = 0x444F5303UL;  /* DOS3 default */
+    ULONG  blocksize = 512;          /* default if BLOCKSIZE omitted */
     LONG   bootpri  = 0;
     BOOL   bootable = FALSE;
+    BOOL   enforcesize;
     char   name[32];
     UWORD  nlen, i;
 
@@ -574,6 +604,17 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     /* BOOTABLE flag (optional) - can also be set independently */
     if (has_flag(tok, ntok, "BOOTABLE")) bootable = TRUE;
 
+    /* ENFORCESIZE flag (optional) - error on overlap instead of clamping HIGH */
+    enforcesize = has_flag(tok, ntok, "ENFORCESIZE");
+
+    /* BLOCKSIZE (optional) - filesystem block size; defaults to 512 */
+    v = kwarg(tok, ntok, "BLOCKSIZE");
+    if (v) {
+        blocksize = strtoul(v, NULL, 10);
+        if (!valid_block_size(blocksize))
+            { sc_err(ln, GS(MSG_SCR_ADDPART_BAD_BLKSIZE)); return RETURN_ERROR; }
+    }
+
     /* Validate range */
     if (low > high)
         { sc_err(ln, GS(MSG_SCR_ADDPART_LOW_GT_HIGH)); return RETURN_ERROR; }
@@ -588,14 +629,37 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
 
-    /* Overlap check */
-    for (i = 0; i < s_st.rdb.num_parts; i++) {
-        struct PartInfo *ex = &s_st.rdb.parts[i];
-        if (low <= ex->high_cyl && high >= ex->low_cyl) {
-            sprintf(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
-                    low, high, ex->drive_name,
-                    (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
-            sc_err(ln, s_msg); return RETURN_ERROR;
+    /* Overlap check.  Start cylinder inside an existing partition is a hard
+     * error; a later partition starting within our span clamps HIGH to fill
+     * the gap, unless ENFORCESIZE was given (then the size must fit). */
+    {
+        struct PartInfo *clamp_ex = NULL;
+        ULONG clamp_to = 0;
+        for (i = 0; i < s_st.rdb.num_parts; i++) {
+            struct PartInfo *ex = &s_st.rdb.parts[i];
+            if (low >= ex->low_cyl && low <= ex->high_cyl) {
+                sprintf(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
+                        low, high, ex->drive_name,
+                        (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
+                sc_err(ln, s_msg); return RETURN_ERROR;
+            }
+            if (ex->low_cyl > low && ex->low_cyl <= high &&
+                (!clamp_ex || ex->low_cyl < clamp_to)) {
+                clamp_ex = ex;
+                clamp_to = ex->low_cyl;
+            }
+        }
+        if (clamp_ex) {
+            if (enforcesize) {
+                sprintf(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
+                        low, high, clamp_ex->drive_name,
+                        (ULONG)clamp_ex->low_cyl, (ULONG)clamp_ex->high_cyl);
+                sc_err(ln, s_msg); return RETURN_ERROR;
+            }
+            high = clamp_to - 1;
+            sprintf(s_msg, GS(MSG_SCR_ADDPART_HIGH_CLAMPED_FMT),
+                    high, clamp_ex->drive_name, (ULONG)clamp_to);
+            sc_warn(ln, s_msg);
         }
     }
 
@@ -611,7 +675,7 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     pi->max_transfer  = 0x7FFFFFFFUL;
     pi->mask          = 0x7FFFFFFCUL;
     pi->num_buffer    = 30;
-    pi->block_size    = 512;
+    pi->block_size    = blocksize;
     pi->sectors_per_block = 1;
     /* heads/sectors=0: RDB_Write falls back to RDB geometry */
 
@@ -1147,7 +1211,8 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
        run under a live handler. */
     sprintf(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
     script_grow_progress(NULL, step);
-    if (!UnmountDevice(pi->drive_name, umerr, sizeof(umerr))) {
+    if (!UnmountPartition(s_st.bd, pi->drive_name,
+                          script_grow_progress, NULL, umerr, sizeof(umerr))) {
         pi->high_cyl = old_hi;                 /* undo */
         sprintf(s_msg, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
                 pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));

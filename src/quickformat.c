@@ -324,3 +324,115 @@ BOOL UnmountDevice(const char *name, char *errbuf, ULONG errlen)
     set_err(errbuf, errlen, "");
     return TRUE;
 }
+
+/* ci_dev_eq - case-insensitive compare of a C string against an exec device
+ * name held in a DOS BSTR (byte 0 = length, bytes 1.. = chars). */
+static BOOL ci_dev_eq(const UBYTE *bstr, const char *cstr)
+{
+    UBYTE len, k;
+    if (!bstr || !cstr) return FALSE;
+    len = bstr[0];
+    for (k = 0; k < len; k++) {
+        char a = (char)bstr[1 + k], b = cstr[k];
+        if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+        if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+        if (a != b) return FALSE;
+        if (b == '\0') return FALSE;   /* cstr ended early */
+    }
+    return (cstr[len] == '\0');        /* exact length match */
+}
+
+/* match_partition - scan the (already locked) device list for the entry that is
+ * *our* partition: its DOS name matches the on-disk RDB name AND it is backed
+ * by our exec device + unit.  Matching by name alone is unsafe - a foreign
+ * device may share the name (e.g. a pre-existing DH2 on another drive), which
+ * we must NEVER unmount - so the device+unit qualification is what makes the
+ * on-disk name unambiguous. */
+static struct DosList *match_partition(struct DosList *head,
+                                       const char *devname, ULONG unit,
+                                       const char *partname)
+{
+    struct DosList *dl = head;
+    while ((dl = NextDosEntry(dl, LDF_DEVICES)) != NULL) {
+        struct FileSysStartupMsg *fssm;
+        const UBYTE *devb;
+        const UBYTE *nm;
+
+        if (dl->dol_misc.dol_handler.dol_Startup == 0) continue;
+        fssm = (struct FileSysStartupMsg *)
+               BADDR(dl->dol_misc.dol_handler.dol_Startup);
+        if (!fssm) continue;
+        if (fssm->fssm_Unit != unit) continue;
+
+        devb = (const UBYTE *)BADDR(fssm->fssm_Device);
+        if (!ci_dev_eq(devb, devname)) continue;
+
+        nm = (const UBYTE *)BADDR(dl->dol_Name);
+        if (!ci_dev_eq(nm, partname)) continue;
+
+        return dl;     /* our disk's partition, by its on-disk RDB name */
+    }
+    return NULL;
+}
+
+/* UnmountPartition - take *our* partition offline before an offline grow.
+ *
+ * Unlike UnmountDevice (name-only), this matches the on-disk RDB name *on our
+ * device+unit*, so it is immune to DOS-name collisions with other drives: a
+ * foreign partition that shares the name lives on a different device and is
+ * left untouched.
+ *
+ * Returns TRUE if our partition is now offline (whether it was mounted and we
+ * unmounted it, or it was never mounted on this device).  Returns FALSE only
+ * when our partition's handler is genuinely busy (open files/locks) after a
+ * short grace period.  progress (may be NULL) is called once if we have to
+ * wait for a just-mounted volume to settle. */
+BOOL UnmountPartition(struct BlockDev *bd, const char *name,
+                      UnmountProgressFn progress, void *ud,
+                      char *errbuf, ULONG errlen)
+{
+    struct DosList *dl, *de;
+    struct MsgPort *task = NULL;
+
+    if (!bd || !name || !name[0]) {
+        set_err(errbuf, errlen, GS(MSG_QF_NO_NAME));
+        return FALSE;
+    }
+
+    dl = LockDosList(LDF_DEVICES | LDF_READ);
+    de = match_partition(dl, bd->devname, bd->unit, name);
+    if (de) task = de->dol_Task;
+    UnLockDosList(LDF_DEVICES | LDF_READ);
+    if (!de) {
+        set_err(errbuf, errlen, "");
+        return TRUE;            /* our partition is not mounted - nothing to do */
+    }
+
+    /* Ask the handler to flush and quit.  A freshly mounted/formatted volume
+       (e.g. just created with ADDPART VOLNAME=) is briefly busy while the
+       handler settles and the FFS validator runs, so the first ACTION_DIE can
+       spuriously fail.  Retry a few times: a genuinely busy volume (real open
+       files/locks) still fails after the grace period. */
+    if (task) {
+        int  tries;
+        BOOL died = FALSE;
+        for (tries = 0; tries < 8; tries++) {
+            if (DoPkt(task, ACTION_DIE, 0, 0, 0, 0, 0)) { died = TRUE; break; }
+            if (tries == 0 && progress) progress(ud, GS(MSG_QF_WAIT_SETTLE));
+            Delay(25);          /* ~0.5s on PAL; up to ~4s total before giving up */
+        }
+        if (!died) {
+            set_err(errbuf, errlen, GS(MSG_QF_VOLUME_IN_USE));
+            return FALSE;
+        }
+    }
+
+    /* Re-find the same entry (our name on our device+unit) and remove it. */
+    dl = LockDosList(LDF_DEVICES | LDF_WRITE);
+    de = match_partition(dl, bd->devname, bd->unit, name);
+    if (de) RemDosEntry(de);
+    UnLockDosList(LDF_DEVICES | LDF_WRITE);
+
+    set_err(errbuf, errlen, "");
+    return TRUE;
+}

@@ -1036,8 +1036,15 @@
 #define MSG_SCR_GROW_FAIL_FMT        1030
 #define MSG_SCR_GROW_REMOUNTED_FMT   1031
 #define MSG_SCR_GROW_REBOOT_FMT      1032
+#define MSG_CLI_HIGH_CLAMPED         1033
+#define MSG_SCR_ADDPART_HIGH_CLAMPED_FMT 1034
+#define MSG_CLI_ADDPART_BAD_BLKSIZE  1035
+#define MSG_SCR_ADDPART_BAD_BLKSIZE  1036
+#define MSG_QF_WAIT_SETTLE           1037
+#define MSG_RDB_HEXDUMP_ASK_TITLE    1038
+#define MSG_RDB_HEXDUMP_START_BLK    1039
 
-#define MSG_COUNT 1033
+#define MSG_COUNT 1040
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2082,5 +2089,12 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1030 MSG_SCR_GROW_FAIL_FMT */ "GROW: failed - %s\n",
     /* 1031 MSG_SCR_GROW_REMOUNTED_FMT */ "GROW: %s grown and remounted - available now.\n",
     /* 1032 MSG_SCR_GROW_REBOOT_FMT */ "GROW: %s grown. Reboot to use the new space.\n",
+    /* 1033 MSG_CLI_HIGH_CLAMPED */ "HIGH clamped to %lu - fills the gap up to partition %s (starts at %lu).\n",
+    /* 1034 MSG_SCR_ADDPART_HIGH_CLAMPED_FMT */ "HIGH clamped to %lu - fills the gap up to partition %s (starts at %lu).",
+    /* 1035 MSG_CLI_ADDPART_BAD_BLKSIZE */ "ERROR: BLOCKSIZE must be a power of two >= 512 (512, 1024, 2048, ...).\n",
+    /* 1036 MSG_SCR_ADDPART_BAD_BLKSIZE */ "BLOCKSIZE must be a power of two >= 512 (512, 1024, 2048, ...).",
+    /* 1037 MSG_QF_WAIT_SETTLE */ "Volume busy (just mounted?) - waiting for it to settle...\n",
+    /* 1038 MSG_RDB_HEXDUMP_ASK_TITLE */ "Hex Dump - Start Block",
+    /* 1039 MSG_RDB_HEXDUMP_START_BLK */ "Start block:",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

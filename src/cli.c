@@ -49,7 +49,7 @@ extern struct DosLibrary *DOSBase;
     "BACKUP/K,RESTORE/K,BACKUPEXT/K,RESTOREEXT/K,"               \
     "VERIFY/K,VERIFYEXT/K,"                                       \
     "ADDPART/S,ADDFS/S,DELPART/S,CHECK/S,"                        \
-    "NAME/K,LOW/K,HIGH/K,TYPE/K,BOOTPRI/K,BOOTABLE/S,"           \
+    "NAME/K,LOW/K,HIGH/K,TYPE/K,BOOTPRI/K,BOOTABLE/S,ENFORCESIZE/S,BLOCKSIZE/K," \
     "FILE/K,VERSION/K,STACKSIZE/K,"                               \
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
     "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K,"               \
@@ -81,6 +81,8 @@ enum {
     ARG_TYPE,
     ARG_BOOTPRI,
     ARG_BOOTABLE,
+    ARG_ENFORCESIZE,
+    ARG_BLOCKSIZE,
     ARG_FILE,
     ARG_VERSION,
     ARG_STACKSIZE,
@@ -147,6 +149,14 @@ static UQUAD parse_size_bytes(const char *s)
     else if (*s == 'M' || *s == 'm') val *= 1024UL * 1024UL;
     else if (*s == 'G' || *s == 'g') val *= 1024UL * 1024UL * 1024UL;
     return val;
+}
+
+/* valid_block_size - TRUE for a power of two in [512, 32768].
+ * RDB stores it as DE_SIZEBLOCK = block_size/4, so it must be a whole
+ * number of longwords and a power of two (512, 1024, 2048, ...). */
+static BOOL valid_block_size(ULONG n)
+{
+    return (n >= 512 && n <= 32768 && (n & (n - 1)) == 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -280,12 +290,15 @@ static BOOL cli_parse_dostype(const char *s, ULONG *out)
 }
 
 /* ------------------------------------------------------------------ */
-/* cli_parse_low - NEXT / START / literal cylinder                    */
+/* cli_parse_low - NEXT / START / NNN[KMG] / literal cylinder          */
 /* cli_parse_high - END / +NNN[KMG] / literal cylinder               */
 /* ------------------------------------------------------------------ */
 
 static ULONG cli_parse_low(const char *s, struct RDBInfo *rdb)
 {
+    const char *p;
+    ULONG val;
+
     if (str_eq_ci(s, "START")) {
         ULONG cyl = rdb->lo_cyl;
         BOOL  hit;
@@ -309,6 +322,23 @@ static ULONG cli_parse_low(const char *s, struct RDBInfo *rdb)
             if (rdb->parts[i].high_cyl + 1 > next)
                 next = rdb->parts[i].high_cyl + 1;
         return next;
+    }
+
+    /* NNN[KMG] -> byte offset converted to the cylinder containing it.
+     * A bare number (no suffix) stays a literal cylinder, as before. */
+    p = s;
+    val = 0;
+    while (*p >= '0' && *p <= '9') val = val * 10 + (ULONG)(*p++ - '0');
+    if (*p == 'K' || *p == 'k' || *p == 'M' || *p == 'm' ||
+        *p == 'G' || *p == 'g') {
+        UQUAD bytes = (UQUAD)val;
+        ULONG cylsize;
+        if      (*p == 'K' || *p == 'k') bytes *= 1024UL;
+        else if (*p == 'M' || *p == 'm') bytes *= 1024UL * 1024UL;
+        else                             bytes *= 1024UL * 1024UL * 1024UL;
+        cylsize = (ULONG)rdb->heads * rdb->sectors * 512UL;
+        if (cylsize == 0) return strtoul(s, NULL, 10);
+        return (ULONG)(bytes / cylsize);
     }
     return strtoul(s, NULL, 10);
 }
@@ -999,12 +1029,14 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
                         const char *name_s,    const char *low_s,
                         const char *high_s,    const char *type_s,
                         const char *bootpri_s, BOOL bootable,
-                        const char *volname_s)
+                        const char *volname_s, BOOL enforcesize,
+                        const char *blocksize_s)
 {
     struct BlockDev *bd;
     struct PartInfo *pi;
     ULONG  low, high;
     ULONG  dostype  = 0x444F5303UL;   /* DOS3 default */
+    ULONG  blocksize = 512;           /* default if BLOCKSIZE omitted */
     LONG   bootpri  = 0;
     char   name[32];
     UWORD  nlen, i;
@@ -1023,6 +1055,11 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
     if (type_s && !cli_parse_dostype(type_s, &dostype))
         { cli_puts(GS(MSG_CLI_ADDPART_BAD_TYPE)); return RETURN_WARN; }
     if (bootpri_s) { bootpri = strtol(bootpri_s, NULL, 10); bootable = TRUE; }
+    if (blocksize_s) {
+        blocksize = strtoul(blocksize_s, NULL, 10);
+        if (!valid_block_size(blocksize))
+            { cli_puts(GS(MSG_CLI_ADDPART_BAD_BLKSIZE)); return RETURN_WARN; }
+    }
 
     sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
@@ -1061,13 +1098,39 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
                 high, (ULONG)s_rdb.hi_cyl);
         cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
-    for (i = 0; i < s_rdb.num_parts; i++) {
-        struct PartInfo *ex = &s_rdb.parts[i];
-        if (low <= ex->high_cyl && high >= ex->low_cyl) {
-            sprintf(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
-                    low, high, ex->drive_name,
-                    (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
-            cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    {
+        /* Overlap handling.  If our start cylinder is already inside an
+         * existing partition we can't help it (hard error).  Otherwise, if a
+         * later partition begins within our requested span, clamp HIGH to one
+         * cylinder before it ("fill up to the overlap") -- unless ENFORCESIZE
+         * was given, in which case the requested size must fit or we error. */
+        struct PartInfo *clamp_ex = NULL;
+        ULONG clamp_to = 0;
+        for (i = 0; i < s_rdb.num_parts; i++) {
+            struct PartInfo *ex = &s_rdb.parts[i];
+            if (low >= ex->low_cyl && low <= ex->high_cyl) {
+                sprintf(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
+                        low, high, ex->drive_name,
+                        (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
+                cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+            }
+            if (ex->low_cyl > low && ex->low_cyl <= high &&
+                (!clamp_ex || ex->low_cyl < clamp_to)) {
+                clamp_ex = ex;
+                clamp_to = ex->low_cyl;
+            }
+        }
+        if (clamp_ex) {
+            if (enforcesize) {
+                sprintf(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
+                        low, high, clamp_ex->drive_name,
+                        (ULONG)clamp_ex->low_cyl, (ULONG)clamp_ex->high_cyl);
+                cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+            }
+            high = clamp_to - 1;
+            sprintf(outbuf, GS(MSG_CLI_HIGH_CLAMPED),
+                    high, clamp_ex->drive_name, (ULONG)clamp_to);
+            cli_puts(outbuf);
         }
     }
 
@@ -1083,7 +1146,7 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
     pi->max_transfer  = 0x7FFFFFFFUL;
     pi->mask          = 0x7FFFFFFCUL;
     pi->num_buffer    = 30;
-    pi->block_size    = 512;
+    pi->block_size    = blocksize;
     pi->sectors_per_block = 1;
     s_rdb.num_parts++;
 
@@ -1268,7 +1331,8 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
 
     sprintf(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
     cli_grow_progress(NULL, step);
-    if (!UnmountDevice(pi->drive_name, umerr, sizeof(umerr))) {
+    if (!UnmountPartition(bd, pi->drive_name,
+                          cli_grow_progress, NULL, umerr, sizeof(umerr))) {
         pi->high_cyl = old_hi;
         sprintf(outbuf, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
                 pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
@@ -2164,7 +2228,9 @@ LONG cli_run(void)
                                  (const char *)args[ARG_TYPE],
                                  (const char *)args[ARG_BOOTPRI],
                                  (BOOL)args[ARG_BOOTABLE],
-                                 (const char *)args[ARG_VOLNAME]);
+                                 (const char *)args[ARG_VOLNAME],
+                                 (BOOL)args[ARG_ENFORCESIZE],
+                                 (const char *)args[ARG_BLOCKSIZE]);
 
             if (rc == RETURN_OK && args[ARG_GROW]) {
                 STRPTR *gv = (STRPTR *)args[ARG_GROW];

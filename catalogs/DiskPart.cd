@@ -3184,3 +3184,24 @@ GROW: %s grown and remounted - available now.\n
 MSG_SCR_GROW_REBOOT_FMT
 GROW: %s grown. Reboot to use the new space.\n
 ;
+MSG_CLI_HIGH_CLAMPED
+HIGH clamped to %lu - fills the gap up to partition %s (starts at %lu).\n
+;
+MSG_SCR_ADDPART_HIGH_CLAMPED_FMT
+HIGH clamped to %lu - fills the gap up to partition %s (starts at %lu).
+;
+MSG_CLI_ADDPART_BAD_BLKSIZE
+ERROR: BLOCKSIZE must be a power of two >= 512 (512, 1024, 2048, ...).\n
+;
+MSG_SCR_ADDPART_BAD_BLKSIZE
+BLOCKSIZE must be a power of two >= 512 (512, 1024, 2048, ...).
+;
+MSG_QF_WAIT_SETTLE
+Volume busy (just mounted?) - waiting for it to settle...\n
+;
+MSG_RDB_HEXDUMP_ASK_TITLE
+Hex Dump - Start Block
+;
+MSG_RDB_HEXDUMP_START_BLK
+Start block:
+;

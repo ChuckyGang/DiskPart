@@ -558,7 +558,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
 
 #define VRDB_LIST     1
 #define VRDB_DONE     2
-#define VRDB_MAXLINES 400
+#define VRDB_MAXLINES 600   /* holds a 16-block hex dump (16 * 34 = 544 lines) */
 
 static char        vrdb_strs[VRDB_MAXLINES][80];
 static struct Node vrdb_nodes[VRDB_MAXLINES];
@@ -605,8 +605,12 @@ static BOOL vrdb_make_gadgets(APTR vi, struct Screen *scr,
     UWORD pad     = 4;
     UWORD row_h   = (UWORD)scr->Font->ta_YSize + 2;
     UWORD btn_h   = (UWORD)scr->Font->ta_YSize + 6;
+    /* Extra clearance between the listview and the Close button: the listview's
+       scroll arrows sit at its bottom-right and a bare 'pad' lets them touch /
+       overlap the button.  Use a full text-row of separation instead. */
+    UWORD gap     = row_h;
     UWORD inner_w = win_w - bor_l - bor_r;
-    UWORD overhead = bor_t + pad*3 + btn_h + bor_b;
+    UWORD overhead = bor_t + pad*2 + gap + btn_h + bor_b;
     UWORD lv_h    = (win_h > overhead + row_h) ? (win_h - overhead) : row_h;
     struct NewGadget ng;
     struct Gadget *gctx, *glist = NULL, *prev;
@@ -629,7 +633,7 @@ static BOOL vrdb_make_gadgets(APTR vi, struct Screen *scr,
       if (!prev) { FreeGadgets(glist); return FALSE; } }
 
     { struct TagItem bt[] = { { TAG_DONE, 0 } };
-      ng.ng_TopEdge    = (WORD)(bor_t + pad + lv_h + pad);
+      ng.ng_TopEdge    = (WORD)(bor_t + pad + lv_h + gap);
       ng.ng_Height     = btn_h;
       ng.ng_Width      = inner_w - pad * 2;
       ng.ng_LeftEdge   = bor_l + pad;
@@ -2167,12 +2171,124 @@ static int diag_read_block(struct BlockDev *bd, ULONG blknum, UBYTE *chipbuf)
 /* Block header shows [SCSI] or [CMD] so you can see which path ran.  */
 /* ------------------------------------------------------------------ */
 
-#define DUMP_BLOCKS 8   /* number of blocks to dump */
+#define DUMP_BLOCKS 16  /* number of blocks to dump (16 * 34 lines < VRDB_MAXLINES) */
+
+/* vrdb_ask_block - tiny modal asking for the first block to dump.
+ * Returns TRUE with *out set if confirmed (OK or Enter); FALSE on Cancel/close.
+ * Accepts decimal or 0x-hex. */
+static BOOL vrdb_ask_block(ULONG deflt, ULONG *out)
+{
+    struct Screen *scr;
+    APTR   vi;
+    struct Gadget *gctx, *glist = NULL, *prev, *str_gad = NULL;
+    struct Window *dwin = NULL;
+    char   initbuf[12];
+    BOOL   ok = FALSE, running = TRUE;
+
+    scr = LockPubScreen(NULL);
+    if (!scr) return FALSE;
+    vi = GetVisualInfoA(scr, NULL);
+    if (!vi) { UnlockPubScreen(NULL, scr); return FALSE; }
+
+    {
+        UWORD font_h  = scr->Font->ta_YSize;
+        UWORD bor_l   = (UWORD)scr->WBorLeft;
+        UWORD bor_t   = (UWORD)scr->WBorTop + font_h + 1;
+        UWORD bor_r   = (UWORD)scr->WBorRight;
+        UWORD bor_b   = (UWORD)scr->WBorBottom;
+        UWORD pad     = 4;
+        UWORD row_h   = font_h + 6;
+        UWORD win_w   = 270;
+        UWORD inner_w = win_w - bor_l - bor_r;
+        UWORD lbl_w   = 96;
+        UWORD win_h   = bor_t + pad + row_h + pad + row_h + pad + bor_b;
+        struct NewGadget ng;
+
+        sprintf(initbuf, "%lu", (unsigned long)deflt);
+
+        gctx = CreateContext(&glist);
+        if (!gctx) { UnlockPubScreen(NULL, scr); FreeVisualInfo(vi); return FALSE; }
+
+        memset(&ng, 0, sizeof(ng));
+        ng.ng_VisualInfo = vi;
+        ng.ng_TextAttr   = scr->Font;
+        ng.ng_LeftEdge   = bor_l + lbl_w;
+        ng.ng_TopEdge    = (WORD)(bor_t + pad);
+        ng.ng_Width      = inner_w - lbl_w - pad;
+        ng.ng_Height     = row_h;
+        ng.ng_GadgetText = GS(MSG_RDB_HEXDUMP_START_BLK);
+        ng.ng_GadgetID   = 10;
+        ng.ng_Flags      = PLACETEXT_LEFT;
+        { struct TagItem st[] = { { GTST_String,(ULONG)initbuf },
+                                  { GTST_MaxChars, 11 }, { TAG_DONE, 0 } };
+          str_gad = CreateGadgetA(STRING_KIND, gctx, &ng, st);
+          if (!str_gad) { FreeGadgets(glist); UnlockPubScreen(NULL,scr); FreeVisualInfo(vi); return FALSE; }
+          prev = str_gad; }
+
+        { struct TagItem bt[] = { { TAG_DONE, 0 } };
+          UWORD btn_y = (UWORD)(bor_t + pad + row_h + pad);
+          UWORD half  = (UWORD)((inner_w - pad * 3) / 2);
+          ng.ng_TopEdge = (WORD)btn_y; ng.ng_Height = row_h; ng.ng_Width = half;
+          ng.ng_Flags = PLACETEXT_IN;
+          ng.ng_LeftEdge = bor_l + pad; ng.ng_GadgetText = GS(MSG_OK); ng.ng_GadgetID = 11;
+          prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
+          if (!prev) { FreeGadgets(glist); UnlockPubScreen(NULL,scr); FreeVisualInfo(vi); return FALSE; }
+          ng.ng_LeftEdge = bor_l + pad + half + pad;
+          ng.ng_GadgetText = GS(MSG_CANCEL); ng.ng_GadgetID = 12;
+          prev = CreateGadgetA(BUTTON_KIND, prev, &ng, bt);
+          if (!prev) { FreeGadgets(glist); UnlockPubScreen(NULL,scr); FreeVisualInfo(vi); return FALSE; } }
+
+        { struct TagItem wt[] = {
+              { WA_Left,   (ULONG)((scr->Width  - win_w) / 2) },
+              { WA_Top,    (ULONG)((scr->Height - win_h) / 2) },
+              { WA_Width,  win_w }, { WA_Height, win_h },
+              { WA_Title,  (ULONG)GS(MSG_RDB_HEXDUMP_ASK_TITLE) },
+              { WA_Gadgets,(ULONG)glist }, { WA_PubScreen, (ULONG)scr },
+              { WA_IDCMP,  IDCMP_CLOSEWINDOW|IDCMP_GADGETUP|IDCMP_REFRESHWINDOW },
+              { WA_Flags,  WFLG_DRAGBAR|WFLG_DEPTHGADGET|WFLG_CLOSEGADGET|
+                           WFLG_ACTIVATE|WFLG_SIMPLE_REFRESH },
+              { TAG_DONE, 0 } };
+          dwin = OpenWindowTagList(NULL, wt); }
+    }
+
+    UnlockPubScreen(NULL, scr);
+    if (!dwin) { FreeGadgets(glist); FreeVisualInfo(vi); return FALSE; }
+    GT_RefreshWindow(dwin, NULL);
+
+    while (running) {
+        struct IntuiMessage *imsg;
+        WaitPort(dwin->UserPort);
+        while ((imsg = GT_GetIMsg(dwin->UserPort)) != NULL) {
+            ULONG cls = imsg->Class;
+            struct Gadget *g = (struct Gadget *)imsg->IAddress;
+            GT_ReplyIMsg(imsg);
+            switch (cls) {
+            case IDCMP_CLOSEWINDOW:
+                running = FALSE;
+                break;
+            case IDCMP_GADGETUP:
+                if (g->GadgetID == 10 || g->GadgetID == 11) {   /* Enter or OK */
+                    struct StringInfo *si = (struct StringInfo *)str_gad->SpecialInfo;
+                    *out = strtoul((const char *)si->Buffer, NULL, 0);
+                    ok = TRUE; running = FALSE;
+                } else if (g->GadgetID == 12) {                 /* Cancel */
+                    running = FALSE;
+                }
+                break;
+            }
+        }
+    }
+
+    CloseWindow(dwin);
+    FreeGadgets(glist);
+    FreeVisualInfo(vi);
+    return ok;
+}
 
 void raw_hex_dump(struct Window *win, struct BlockDev *bd)
 {
     UBYTE *buf;
-    ULONG  blk, i;
+    ULONG  blk, i, start = 0;
     int    rcode;
     char   line[80];
     struct EasyStruct es;
@@ -2186,6 +2302,10 @@ void raw_hex_dump(struct Window *win, struct BlockDev *bd)
         return;
     }
 
+    /* Ask which block to start from (default 0); Cancel aborts. */
+    if (!vrdb_ask_block(0, &start))
+        return;
+
     buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
     if (!buf) return;
 
@@ -2194,7 +2314,7 @@ void raw_hex_dump(struct Window *win, struct BlockDev *bd)
     vrdb_list.lh_Tail     = NULL;
     vrdb_list.lh_TailPred = (struct Node *)&vrdb_list.lh_Head;
 
-    for (blk = 0; blk < DUMP_BLOCKS; blk++) {
+    for (blk = start; blk < start + DUMP_BLOCKS; blk++) {
         ULONG id;
         char  idtxt[5];
         UWORD k;
