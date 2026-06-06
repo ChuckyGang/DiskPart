@@ -3121,3 +3121,66 @@ RESULT: PASS  All %lu blocks match.
 MSG_RDB_VE_RESULT_FAIL_FMT
 RESULT: FAIL  %lu/%lu blocks have differences.
 ;
+;==========================================================================
+; Filesystem grow - progress log (GParted-style step narration)
+;==========================================================================
+MSG_GROW_PROG_UNMOUNTING_FMT
+Unmounting %s...
+;
+MSG_GROW_PROG_REMOUNTING_FMT
+Remounting %s...
+;
+MSG_GROW_PROG_ONLINE
+Bringing volume online...
+;
+MSG_GROW_PROG_WRITING_RDB
+Writing RDB to disk...
+;
+MSG_GROW_PROG_DONE
+Done.
+;
+;==========================================================================
+; Script engine - GROW command
+;==========================================================================
+MSG_SCR_GROW_USAGE
+GROW: usage: GROW <drive> <size[KMG]|END>\n
+;
+MSG_SCR_GROW_NOT_FOUND_FMT
+GROW: partition %s not found.\n
+;
+MSG_SCR_GROW_BAD_SIZE_FMT
+GROW: invalid size '%s'.\n
+;
+MSG_SCR_GROW_UNSUPPORTED_FMT
+GROW: %s is not FFS/SFS/PFS - cannot grow.\n
+;
+MSG_SCR_GROW_NO_SPACE_FMT
+GROW: no free space after %s.\n
+;
+MSG_SCR_GROW_CLAMP_FMT
+GROW: requested size exceeds free space - growing to maximum (%s).\n
+;
+MSG_SCR_GROW_PLAN_FMT
+GROW: %s cyl %lu -> %lu (+%s)\n
+;
+MSG_SCR_GROW_DRYRUN
+  (DRYRUN - no changes written)\n
+;
+MSG_SCR_GROW_ASK
+Grow %s now?
+;
+MSG_SCR_GROW_STEP_FMT
+    %s\n
+;
+MSG_SCR_GROW_UNMOUNT_FAIL_FMT
+GROW: cannot unmount %s (%s) - in use; aborted.\n
+;
+MSG_SCR_GROW_FAIL_FMT
+GROW: failed - %s\n
+;
+MSG_SCR_GROW_REMOUNTED_FMT
+GROW: %s grown and remounted - available now.\n
+;
+MSG_SCR_GROW_REBOOT_FMT
+GROW: %s grown. Reboot to use the new space.\n
+;

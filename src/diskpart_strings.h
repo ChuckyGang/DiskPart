@@ -1017,8 +1017,27 @@
 #define MSG_RDB_VE_MISMATCH_FMT      1011
 #define MSG_RDB_VE_RESULT_PASS_FMT   1012
 #define MSG_RDB_VE_RESULT_FAIL_FMT   1013
+#define MSG_GROW_PROG_UNMOUNTING_FMT 1014
+#define MSG_GROW_PROG_REMOUNTING_FMT 1015
+#define MSG_GROW_PROG_ONLINE         1016
+#define MSG_GROW_PROG_WRITING_RDB    1017
+#define MSG_GROW_PROG_DONE           1018
+#define MSG_SCR_GROW_USAGE           1019
+#define MSG_SCR_GROW_NOT_FOUND_FMT   1020
+#define MSG_SCR_GROW_BAD_SIZE_FMT    1021
+#define MSG_SCR_GROW_UNSUPPORTED_FMT 1022
+#define MSG_SCR_GROW_NO_SPACE_FMT    1023
+#define MSG_SCR_GROW_CLAMP_FMT       1024
+#define MSG_SCR_GROW_PLAN_FMT        1025
+#define MSG_SCR_GROW_DRYRUN          1026
+#define MSG_SCR_GROW_ASK             1027
+#define MSG_SCR_GROW_STEP_FMT        1028
+#define MSG_SCR_GROW_UNMOUNT_FAIL_FMT 1029
+#define MSG_SCR_GROW_FAIL_FMT        1030
+#define MSG_SCR_GROW_REMOUNTED_FMT   1031
+#define MSG_SCR_GROW_REBOOT_FMT      1032
 
-#define MSG_COUNT 1014
+#define MSG_COUNT 1033
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2044,5 +2063,24 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1011 MSG_RDB_VE_MISMATCH_FMT */ "Blk %lu: MISMATCH  %lu byte(s) differ, first @ 0x%04lX",
     /* 1012 MSG_RDB_VE_RESULT_PASS_FMT */ "RESULT: PASS  All %lu blocks match.",
     /* 1013 MSG_RDB_VE_RESULT_FAIL_FMT */ "RESULT: FAIL  %lu/%lu blocks have differences.",
+    /* 1014 MSG_GROW_PROG_UNMOUNTING_FMT */ "Unmounting %s...",
+    /* 1015 MSG_GROW_PROG_REMOUNTING_FMT */ "Remounting %s...",
+    /* 1016 MSG_GROW_PROG_ONLINE */ "Bringing volume online...",
+    /* 1017 MSG_GROW_PROG_WRITING_RDB */ "Writing RDB to disk...",
+    /* 1018 MSG_GROW_PROG_DONE */ "Done.",
+    /* 1019 MSG_SCR_GROW_USAGE */ "GROW: usage: GROW <drive> <size[KMG]|END>\n",
+    /* 1020 MSG_SCR_GROW_NOT_FOUND_FMT */ "GROW: partition %s not found.\n",
+    /* 1021 MSG_SCR_GROW_BAD_SIZE_FMT */ "GROW: invalid size '%s'.\n",
+    /* 1022 MSG_SCR_GROW_UNSUPPORTED_FMT */ "GROW: %s is not FFS/SFS/PFS - cannot grow.\n",
+    /* 1023 MSG_SCR_GROW_NO_SPACE_FMT */ "GROW: no free space after %s.\n",
+    /* 1024 MSG_SCR_GROW_CLAMP_FMT */ "GROW: requested size exceeds free space - growing to maximum (%s).\n",
+    /* 1025 MSG_SCR_GROW_PLAN_FMT */ "GROW: %s cyl %lu -> %lu (+%s)\n",
+    /* 1026 MSG_SCR_GROW_DRYRUN */ "  (DRYRUN - no changes written)\n",
+    /* 1027 MSG_SCR_GROW_ASK */ "Grow %s now?",
+    /* 1028 MSG_SCR_GROW_STEP_FMT */ "    %s\n",
+    /* 1029 MSG_SCR_GROW_UNMOUNT_FAIL_FMT */ "GROW: cannot unmount %s (%s) - in use; aborted.\n",
+    /* 1030 MSG_SCR_GROW_FAIL_FMT */ "GROW: failed - %s\n",
+    /* 1031 MSG_SCR_GROW_REMOUNTED_FMT */ "GROW: %s grown and remounted - available now.\n",
+    /* 1032 MSG_SCR_GROW_REBOOT_FMT */ "GROW: %s grown. Reboot to use the new space.\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

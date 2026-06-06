@@ -26,6 +26,9 @@
 #include "imagecopy.h"
 #include "script.h"
 #include "quickformat.h"
+#include "ffsresize.h"
+#include "sfsresize.h"
+#include "pfsresize.h"
 #include "locale_support.h"
 #include "cli.h"
 
@@ -49,7 +52,8 @@ extern struct DosLibrary *DOSBase;
     "NAME/K,LOW/K,HIGH/K,TYPE/K,BOOTPRI/K,BOOTABLE/S,"           \
     "FILE/K,VERSION/K,STACKSIZE/K,"                               \
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
-    "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K"
+    "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K,"               \
+    "GROW/M"
 
 enum {
     ARG_LISTDEV = 0,
@@ -87,6 +91,7 @@ enum {
     ARG_IMAGEIN,
     ARG_NOWARNING,
     ARG_VOLNAME,
+    ARG_GROW,
     ARG_COUNT
 };
 
@@ -1132,6 +1137,195 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
+/* GROW - extend a partition and grow its filesystem, in one step      */
+/*   GROW <drive> <size[KMG]|END>                                      */
+/* Mirrors the script GROW command (see do_grow in script.c).          */
+/* ------------------------------------------------------------------ */
+
+enum { CLI_GROW_FFS = 1, CLI_GROW_SFS, CLI_GROW_PFS };
+
+static void cli_grow_progress(void *ud, const char *msg)
+{
+    char buf[96];
+    (void)ud;
+    sprintf(buf, GS(MSG_SCR_GROW_STEP_FMT), msg);
+    cli_puts(buf);
+}
+
+static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
+                     const char *drive_s, const char *size_s)
+{
+    struct BlockDev *bd;
+    struct PartInfo *pi = NULL;
+    char   name[32], szbuf[20], step[80], umerr[80], rmerr[80], mnt[40];
+    UWORD  nlen, i;
+    ULONG  heads, sectors, blks_cyl, gap_max, old_hi, new_hi;
+    int    fskind;
+    BOOL   to_end, ok;
+
+    if (!drive_s || !drive_s[0] || !size_s || !size_s[0])
+        { cli_puts(GS(MSG_SCR_GROW_USAGE)); return RETURN_WARN; }
+
+    strncpy(name, drive_s, 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) { cli_puts(GS(MSG_SCR_GROW_USAGE)); return RETURN_WARN; }
+
+    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        cli_puts(outbuf); return RETURN_ERROR;
+    }
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    for (i = 0; i < s_rdb.num_parts; i++)
+        if (str_eq_ci(s_rdb.parts[i].drive_name, name)) { pi = &s_rdb.parts[i]; break; }
+    if (!pi) {
+        sprintf(outbuf, GS(MSG_SCR_GROW_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    if      (FFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_FFS;
+    else if (SFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_SFS;
+    else if (PFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_PFS;
+    else {
+        sprintf(outbuf, GS(MSG_SCR_GROW_UNSUPPORTED_FMT), pi->drive_name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    heads    = pi->heads   > 0 ? pi->heads   : s_rdb.heads;
+    sectors  = pi->sectors > 0 ? pi->sectors : s_rdb.sectors;
+    blks_cyl = heads * sectors;
+    if (blks_cyl == 0) {
+        sprintf(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    /* Max cylinder we may grow into: disk end, capped by the next partition. */
+    gap_max = s_rdb.hi_cyl;
+    for (i = 0; i < s_rdb.num_parts; i++) {
+        struct PartInfo *ex = &s_rdb.parts[i];
+        if (ex == pi) continue;
+        if (ex->low_cyl > pi->high_cyl && ex->low_cyl - 1 < gap_max)
+            gap_max = ex->low_cyl - 1;
+    }
+    if (gap_max <= pi->high_cyl) {
+        sprintf(outbuf, GS(MSG_SCR_GROW_NO_SPACE_FMT), pi->drive_name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    old_hi = pi->high_cyl;
+    to_end = (str_eq_ci(size_s, "END") || str_eq_ci(size_s, "MAX"));
+    if (to_end) {
+        new_hi = gap_max;
+    } else {
+        UQUAD bytes = parse_size_bytes(size_s);
+        ULONG add_cyls;
+        if (bytes == 0) {
+            sprintf(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+        add_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
+        if (add_cyls == 0) {
+            sprintf(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+        new_hi = old_hi + add_cyls;
+        if (new_hi > gap_max) {
+            new_hi = gap_max;
+            FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
+            sprintf(outbuf, GS(MSG_SCR_GROW_CLAMP_FMT), szbuf);
+            cli_puts(outbuf);
+        }
+    }
+
+    FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
+    sprintf(outbuf, GS(MSG_SCR_GROW_PLAN_FMT),
+            pi->drive_name, (ULONG)old_hi, (ULONG)new_hi, szbuf);
+    cli_puts(outbuf);
+
+    sprintf(outbuf, GS(MSG_SCR_GROW_ASK), pi->drive_name);
+    if (!ask_yn(outbuf, force)) {
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    }
+
+    umerr[0] = rmerr[0] = '\0';
+    pi->high_cyl = new_hi;
+
+    sprintf(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+    cli_grow_progress(NULL, step);
+    if (!UnmountDevice(pi->drive_name, umerr, sizeof(umerr))) {
+        pi->high_cyl = old_hi;
+        sprintf(outbuf, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
+                pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    switch (fskind) {
+        case CLI_GROW_SFS:
+            ok = SFS_GrowPartition(bd, &s_rdb, pi, old_hi,
+                                   outbuf, cli_grow_progress, NULL);
+            break;
+        case CLI_GROW_PFS:
+            ok = PFS_GrowPartition(bd, &s_rdb, pi, old_hi,
+                                   outbuf, cli_grow_progress, NULL);
+            break;
+        default:
+            ok = FFS_GrowPartition(bd, &s_rdb, pi, old_hi,
+                                   outbuf, cli_grow_progress, NULL);
+            break;
+    }
+
+    if (!ok) {
+        char diag[200];
+        strncpy(diag, outbuf, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
+        pi->high_cyl = old_hi;
+        MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+        sprintf(outbuf, GS(MSG_SCR_GROW_FAIL_FMT), diag);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    cli_grow_progress(NULL, GS(MSG_GROW_PROG_WRITING_RDB));
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
+    if (!RDB_Write(bd, &s_rdb)) {
+        cli_puts(GS(MSG_CLI_FAILED));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_OK));
+
+    if (fskind == CLI_GROW_FFS) {
+        sprintf(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+        cli_grow_progress(NULL, step);
+        if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
+            MaterializeVolume(mnt);
+            sprintf(outbuf, GS(MSG_SCR_GROW_REMOUNTED_FMT), pi->drive_name);
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+        }
+    }
+
+    sprintf(outbuf, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
+    cli_puts(outbuf);
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* ADDFS - add filesystem entry, then write RDB                       */
 /* ------------------------------------------------------------------ */
 
@@ -1885,7 +2079,7 @@ LONG cli_run(void)
         !args[ARG_VERIFY]  && !args[ARG_VERIFYEXT]    &&
         !args[ARG_ADDPART] && !args[ARG_ADDFS] && !args[ARG_DELPART] &&
         !args[ARG_CHECK]   && !args[ARG_CREATE]   &&
-        !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN]) {
+        !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -1923,7 +2117,7 @@ LONG cli_run(void)
          args[ARG_VERIFY]    || args[ARG_VERIFYEXT] ||
          args[ARG_ADDPART]   || args[ARG_ADDFS]   ||
          args[ARG_DELPART]   || args[ARG_CHECK]   ||
-         args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN])) {
+         args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW])) {
 
         char  devname[64];
         ULONG unit;
@@ -1971,6 +2165,16 @@ LONG cli_run(void)
                                  (const char *)args[ARG_BOOTPRI],
                                  (BOOL)args[ARG_BOOTABLE],
                                  (const char *)args[ARG_VOLNAME]);
+
+            if (rc == RETURN_OK && args[ARG_GROW]) {
+                STRPTR *gv = (STRPTR *)args[ARG_GROW];
+                const char *drive = gv && gv[0] ? (const char *)gv[0] : NULL;
+                const char *size  = gv && gv[0] && gv[1] ? (const char *)gv[1] : NULL;
+                if (!drive || !size)
+                    { cli_puts(GS(MSG_SCR_GROW_USAGE)); rc = RETURN_WARN; }
+                else
+                    rc = cmd_grow(devname, unit, force, drive, size);
+            }
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,

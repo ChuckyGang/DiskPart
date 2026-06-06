@@ -216,6 +216,18 @@ ADDFS TYPE=<dostype> [FILE=<path>] [VERSION=<hex>] [STACKSIZE=<n>]
     DiskPart DEV uaehf.device:3 ADDFS TYPE=PFS3 FILE=L:pfs3aio
     DiskPart DEV uaehf.device:3 ADDFS TYPE=PFS3 FILE=L:pfs3aio FORCE
 
+GROW <drive> <size[KMG]|END>
+  Extend a partition and grow its filesystem (FFS/SFS/PFS) to match, in
+  one step, then ask Y/N before committing.  FORCE skips the question.
+  <size> is the amount to ADD (e.g. 100M); if it exceeds the free space
+  after the partition it is clamped to the maximum.  END (or MAX) uses all
+  the free space.  The RDB is written immediately; FFS remounts live, SFS/PFS
+  need a reboot.  See SCRIPT COMMANDS for the full description.
+
+  Examples:
+    DiskPart DEV uaehf.device:3 GROW DH1 100M
+    DiskPart DEV uaehf.device:3 GROW DH1 END FORCE
+
 SCRIPT <file> [DRYRUN] [FORCE]
   Read and execute commands from a text file, one per line.
   Comments start with # or ;.  Blank lines are ignored.
@@ -315,6 +327,26 @@ ADDFS TYPE=<dostype> [VERSION=<hex>] [FILE=<path>] [STACKSIZE=<n>]
   FILE loads a filesystem binary (e.g. L:pfs3aio) as LSEG blocks.
   VERSION is a 32-bit hex version word (e.g. 0x00130000 for v19.0).
   Requires WRITE to commit to disk.
+
+GROW <drive> <size[KMG]|END>
+  Extend an existing partition and grow its filesystem to match, in one
+  step.  Works on FFS/OFS, SFS and PFS3/PFS2 partitions.
+  <size>      Amount to ADD, e.g. 100M.  If it exceeds the free space
+              after the partition, it is clamped to the maximum (the tool
+              prints how much it actually grew).
+  END (or MAX) Use all the free space up to the next partition / disk end.
+
+  The grow runs offline: the volume is unmounted, the filesystem is grown,
+  the RDB is written immediately (so on-disk geometry and the filesystem
+  never disagree), and FFS volumes are remounted live (no reboot).  SFS/PFS
+  leave the volume inhibited and need a reboot.  Each step is printed.
+  Unlike ADDPART/ADDFS, GROW commits on its own — no separate WRITE needed.
+  In DRYRUN mode it prints the plan and changes nothing.
+
+    OPEN uaehf.device 3
+    GROW DH1 100M       ; add 100 MB (clamped to free space if less)
+    GROW DH1 END        ; or: use all the free space after DH1
+    CLOSE
 
 WRITE
   Commit all pending in-memory changes to disk.

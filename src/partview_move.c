@@ -612,11 +612,34 @@ mv_cleanup:
 /* Offer to grow an FFS/OFS filesystem after a partition was extended.  */
 /* Called from all three "edit partition" code paths.                   */
 /* ------------------------------------------------------------------ */
+/* GParted-style grow progress: a top progress bar plus a retained,
+   scrolling list of every step performed.  Earlier steps stay visible
+   (prefixed "  "); the step in progress is marked "> ".  The full
+   operation is narrated - unmount, the filesystem internals, RDB write
+   and remount - so the user can always see what the tool is doing. */
+#define GROW_LOG_MAX   24   /* steps retained in the scroll-back buffer   */
+#define GROW_LOG_LINE  48   /* max chars stored per step line (incl NUL)  */
+#define GROW_LOG_VIS   12   /* step rows visible in the window at once     */
+
+/* Single shared line buffer - grows are strictly modal (one at a time),
+   so a file-static store keeps GrowProgUD small enough for the stack. */
+static char growlog_buf[GROW_LOG_MAX][GROW_LOG_LINE];
+
 struct GrowProgUD {
     struct Window *win;
-    UWORD step;
-    UWORD total;
+    UWORD step;     /* completed steps, drives the bar  */
+    UWORD total;    /* expected step count for the bar  */
+    UWORD count;    /* lines currently in growlog_buf   */
 };
+
+static void grow_str_copy(char *dst, const char *src, int max)
+{
+    int i = 0;
+    if (max <= 0) return;
+    if (!src) src = "";
+    while (src[i] && i < max - 1) { dst[i] = src[i]; i++; }
+    dst[i] = '\0';
+}
 
 static void ffs_grow_progress(void *ud, const char *msg)
 {
@@ -625,10 +648,21 @@ static void ffs_grow_progress(void *ud, const char *msg)
     struct RastPort *rp;
     WORD x1, y1, x2, y2;
     WORD bar_x, bar_y, bar_w, bar_h, filled_w;
-    UWORD len;
+    WORD line_h, list_y, row;
+    UWORD i, start, len;
 
     if (!pu || !pu->win) return;
     pw = pu->win;
+
+    /* Append this step to the retained log (scroll the buffer when full). */
+    if (pu->count < GROW_LOG_MAX) {
+        grow_str_copy(growlog_buf[pu->count], msg, GROW_LOG_LINE);
+        pu->count++;
+    } else {
+        for (i = 1; i < GROW_LOG_MAX; i++)
+            grow_str_copy(growlog_buf[i - 1], growlog_buf[i], GROW_LOG_LINE);
+        grow_str_copy(growlog_buf[GROW_LOG_MAX - 1], msg, GROW_LOG_LINE);
+    }
     if (pu->step < pu->total) pu->step++;
 
     rp = pw->RPort;
@@ -673,12 +707,76 @@ static void ffs_grow_progress(void *ud, const char *msg)
         Draw(rp, bar_x, bar_y);
     }
 
-    /* Message text below the bar */
+    /* Retained step list below the bar.  Show the last GROW_LOG_VIS lines;
+       the layer clips any text wider than the window so long lines are safe. */
+    line_h = (WORD)(rp->TxHeight > 0 ? rp->TxHeight : 8);
+    list_y = (WORD)(bar_y + bar_h + 4);
+    start  = (pu->count > GROW_LOG_VIS) ? (UWORD)(pu->count - GROW_LOG_VIS) : 0;
+    row    = 0;
     SetAPen(rp, 1);
-    Move(rp, (WORD)(x1 + 6),
-         (WORD)(bar_y + bar_h + 4 + rp->TxBaseline));
-    for (len = 0; msg[len]; len++) {}
-    Text(rp, (STRPTR)msg, (WORD)len);
+    for (i = start; i < pu->count; i++, row++) {
+        char rowbuf[GROW_LOG_LINE + 2];
+        int  p = 0, k = 0;
+        WORD ty = (WORD)(list_y + row * line_h + rp->TxBaseline);
+        /* "> " marks the current step, "  " marks completed ones. */
+        rowbuf[p++] = (i + 1 == pu->count) ? '>' : ' ';
+        rowbuf[p++] = ' ';
+        while (growlog_buf[i][k] && p < (int)sizeof(rowbuf) - 1)
+            rowbuf[p++] = growlog_buf[i][k++];
+        rowbuf[p] = '\0';
+        Move(rp, (WORD)(x1 + 6), ty);
+        for (len = 0; rowbuf[len]; len++) {}
+        Text(rp, (STRPTR)rowbuf, (WORD)len);
+    }
+}
+
+/* Open a grow-progress window sized to hold the bar + GROW_LOG_VIS step
+   rows, and initialise the progress state.  Returns NULL on failure (the
+   grow still runs; ffs_grow_progress simply becomes a no-op). */
+static struct Window *grow_open_progress(struct Window *win, CONST_STRPTR title,
+                                         struct GrowProgUD *pu, UWORD total)
+{
+    struct Screen *scr = win->WScreen;
+    UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
+    UWORD bor_t  = (UWORD)(scr->WBorTop + font_h + 1);
+    UWORD pw_w   = 420;
+    UWORD pw_h   = (UWORD)(bor_t + scr->WBorBottom
+                           + 4 + 6 + 4 + GROW_LOG_VIS * font_h + 4);
+    struct TagItem prog_tags[] = {
+        { WA_Left,      0 },
+        { WA_Top,       0 },
+        { WA_Width,     0 },
+        { WA_Height,    0 },
+        { WA_Title,     0 },
+        { WA_PubScreen, 0 },
+        { WA_Flags,     (ULONG)WFLG_DRAGBAR },
+        { WA_IDCMP,     0 },
+        { TAG_END,      0 }
+    };
+
+    if (pw_w > (UWORD)(scr->Width - 8)) pw_w = (UWORD)(scr->Width - 8);
+    prog_tags[0].ti_Data = (ULONG)((scr->Width  - pw_w) / 2);
+    prog_tags[1].ti_Data = (ULONG)((scr->Height - pw_h) / 2);
+    prog_tags[2].ti_Data = (ULONG)pw_w;
+    prog_tags[3].ti_Data = (ULONG)pw_h;
+    prog_tags[4].ti_Data = (ULONG)title;
+    prog_tags[5].ti_Data = (ULONG)scr;
+
+    pu->win   = OpenWindowTagList(NULL, prog_tags);
+    pu->step  = 0;
+    pu->total = total;
+    pu->count = 0;
+    return pu->win;
+}
+
+/* Narrate one bracket step (unmount/remount/RDB/etc.) into the progress
+   log.  fmt may contain a single %s for the drive/volume name. */
+static void grow_say(struct GrowProgUD *pu, CONST_STRPTR fmt, const char *arg)
+{
+    char buf[GROW_LOG_LINE];
+    if (arg) sprintf(buf, fmt, arg);
+    else     grow_str_copy(buf, fmt, sizeof(buf));
+    ffs_grow_progress(pu, buf);
 }
 
 int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
@@ -706,76 +804,71 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
 
     if (EasyRequest(win, &es, NULL, pi->drive_name) != 1) return GROW_NONE;
 
-    /* The grow writes filesystem blocks directly, so it MUST run offline: we
-       unmount the volume first, grow it, then remount with the new geometry
-       (no reboot).  We never grow a live volume - if it's in use we can't
-       unmount, so we refuse and leave everything untouched (growing under a
-       live handler corrupts the volume and triggers "insert volume"). */
-    can_remount = UnmountDevice(pi->drive_name, umerr, sizeof(umerr));
-    if (!can_remount) {
-        struct EasyStruct busy_es;
-        static char busy_msg[256];
-        pi->high_cyl = old_hi;                 /* undo the size change */
-        sprintf(busy_msg,
-                GS(MSG_MOVE_BUSY_FMT),
-                pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
-        busy_es.es_StructSize   = sizeof(busy_es);
-        busy_es.es_Flags        = 0;
-        busy_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
-        busy_es.es_TextFormat   = (UBYTE *)busy_msg;
-        busy_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
-        EasyRequest(win, &busy_es, NULL);
-        return GROW_ABORTED;
-    }
-
     {
-        struct Screen *scr = win->WScreen;
-        UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
-        UWORD bor_t  = (UWORD)(scr->WBorTop + font_h + 1);
-        UWORD pw_w   = 360;
-        UWORD pw_h   = (UWORD)(bor_t + scr->WBorBottom + font_h + 26);
-        struct TagItem prog_tags[] = {
-            { WA_Left,      (ULONG)((scr->Width  - pw_w) / 2) },
-            { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
-            { WA_Width,     (ULONG)pw_w  },
-            { WA_Height,    (ULONG)pw_h  },
-            { WA_Title,     (ULONG)GS(MSG_MOVE_GROW_FFS_PROG_TITLE) },
-            { WA_PubScreen, (ULONG)scr   },
-            { WA_Flags,     (ULONG)WFLG_DRAGBAR },
-            { WA_IDCMP,     0             },
-            { TAG_END,      0             }
-        };
-        struct Window *prog_win = OpenWindowTagList(NULL, prog_tags);
         struct GrowProgUD prog_ud;
+        struct Window *prog_win;
         char mnt[40];
-        prog_ud.win   = prog_win;
-        prog_ud.step  = 0;
-        prog_ud.total = 13;  /* FFS_PROGRESS call count */
+        BOOL result;
 
-        BOOL result = FFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
-                                        ffs_grow_progress, &prog_ud);
-        if (prog_win) CloseWindow(prog_win);
+        /* Open the step-log window up front so the unmount - which may itself
+           pop an OS "insert volume" requester - is narrated and never looks
+           like an unexplained prompt.  Total counts: unmount + 13 FFS steps
+           + remount + online + done. */
+        prog_win = grow_open_progress(win, GS(MSG_MOVE_GROW_FFS_PROG_TITLE),
+                                      &prog_ud, 17);
+
+        /* The grow writes filesystem blocks directly, so it MUST run offline:
+           we unmount the volume first, grow it, then remount with the new
+           geometry (no reboot).  We never grow a live volume - if it's in use
+           we can't unmount, so we refuse and leave everything untouched
+           (growing under a live handler corrupts the volume). */
+        grow_say(&prog_ud, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+        can_remount = UnmountDevice(pi->drive_name, umerr, sizeof(umerr));
+        if (!can_remount) {
+            struct EasyStruct busy_es;
+            static char busy_msg[256];
+            if (prog_win) CloseWindow(prog_win);
+            pi->high_cyl = old_hi;                 /* undo the size change */
+            sprintf(busy_msg,
+                    GS(MSG_MOVE_BUSY_FMT),
+                    pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+            busy_es.es_StructSize   = sizeof(busy_es);
+            busy_es.es_Flags        = 0;
+            busy_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
+            busy_es.es_TextFormat   = (UBYTE *)busy_msg;
+            busy_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+            EasyRequest(win, &busy_es, NULL);
+            return GROW_ABORTED;
+        }
+
+        result = FFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
+                                   ffs_grow_progress, &prog_ud);
         if (result) {
             struct EasyStruct ok_es;
             static char ok_msg[512];
 
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
             if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
                 /* Grown and remounted with the new geometry - no reboot. */
                 /* Bring the volume online now so a lock orphaned during the
                    grow (e.g. Workbench's icon lock) revalidates silently
                    rather than popping an "insert volume" requester. */
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_ONLINE), NULL);
                 MaterializeVolume(mnt);
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
                 rc = GROW_REMOUNTED;
                 sprintf(ok_msg,
                         GS(MSG_MOVE_FFS_REMOUNTED_FMT),
                         pi->drive_name, mnt, errbuf);
             } else {
                 /* Grow worked but the volume couldn't be remounted live. */
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
                 rc = GROW_NEED_REBOOT;
                 sprintf(ok_msg,
                         GS(MSG_MOVE_FFS_REMOUNT_FAIL_FMT),
                         pi->drive_name, rmerr[0] ? rmerr : GS(MSG_MOVE_QMARK), errbuf);
             }
+            if (prog_win) CloseWindow(prog_win);
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
             ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROWN_TITLE);
@@ -788,7 +881,9 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             /* Grow failed - restore the original size and remount so the user
                keeps a working volume. */
             pi->high_cyl = old_hi;
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
             MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+            if (prog_win) CloseWindow(prog_win);
             rc = GROW_ABORTED;
             sprintf(full_msg,
                     GS(MSG_MOVE_FFS_FAIL_RESTORED_FMT),
@@ -824,27 +919,10 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
     es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_GROW_GADGETS);
 
     if (EasyRequest(win, &es, NULL, pi->drive_name) == 1) {
-        struct Screen *scr = win->WScreen;
-        UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
-        UWORD bor_t  = (UWORD)(scr->WBorTop + font_h + 1);
-        UWORD pw_w   = 360;
-        UWORD pw_h   = (UWORD)(bor_t + scr->WBorBottom + font_h + 26);
-        struct TagItem prog_tags[] = {
-            { WA_Left,      (ULONG)((scr->Width  - pw_w) / 2) },
-            { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
-            { WA_Width,     (ULONG)pw_w  },
-            { WA_Height,    (ULONG)pw_h  },
-            { WA_Title,     (ULONG)GS(MSG_MOVE_GROW_PFS_PROG_TITLE) },
-            { WA_PubScreen, (ULONG)scr   },
-            { WA_Flags,     (ULONG)WFLG_DRAGBAR },
-            { WA_IDCMP,     0             },
-            { TAG_END,      0             }
-        };
-        struct Window *prog_win = OpenWindowTagList(NULL, prog_tags);
         struct GrowProgUD prog_ud;
-        prog_ud.win   = prog_win;
-        prog_ud.step  = 0;
-        prog_ud.total = 6;   /* PFS_PROGRESS call count */
+        struct Window *prog_win =
+            grow_open_progress(win, GS(MSG_MOVE_GROW_PFS_PROG_TITLE),
+                               &prog_ud, 6);  /* PFS_PROGRESS call count */
 
         BOOL result = PFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
                                         ffs_grow_progress, &prog_ud);
@@ -896,35 +974,22 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
     es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_GROW_GADGETS);
 
     if (EasyRequest(win, &es, NULL, pi->drive_name) == 1) {
-        struct Screen *scr = win->WScreen;
-        UWORD font_h = scr->Font ? scr->Font->ta_YSize : 8;
-        UWORD bor_t  = (UWORD)(scr->WBorTop + font_h + 1);
-        UWORD pw_w   = 360;
-        UWORD pw_h   = (UWORD)(bor_t + scr->WBorBottom + font_h + 26);
-        struct TagItem prog_tags[] = {
-            { WA_Left,      (ULONG)((scr->Width  - pw_w) / 2) },
-            { WA_Top,       (ULONG)((scr->Height - pw_h) / 2) },
-            { WA_Width,     (ULONG)pw_w  },
-            { WA_Height,    (ULONG)pw_h  },
-            { WA_Title,     (ULONG)GS(MSG_MOVE_GROW_SFS_PROG_TITLE) },
-            { WA_PubScreen, (ULONG)scr   },
-            { WA_Flags,     (ULONG)WFLG_DRAGBAR },
-            { WA_IDCMP,     0             },
-            { TAG_END,      0             }
-        };
-        struct Window *prog_win = OpenWindowTagList(NULL, prog_tags);
         struct GrowProgUD prog_ud;
-        prog_ud.win   = prog_win;
-        prog_ud.step  = 0;
-        prog_ud.total = 14;  /* SFS_PROGRESS call count */
+        /* Total: 14 SFS steps + RDB write + done. */
+        struct Window *prog_win =
+            grow_open_progress(win, GS(MSG_MOVE_GROW_SFS_PROG_TITLE),
+                               &prog_ud, 16);
 
         BOOL result = SFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
                                         ffs_grow_progress, &prog_ud);
-        if (prog_win) CloseWindow(prog_win);
         if (result) {
-            BOOL wrote_rdb = RDB_Write(bd, rdb);
+            BOOL wrote_rdb;
             struct EasyStruct ok_es;
             static char ok_msg[512];
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_WRITING_RDB), NULL);
+            wrote_rdb = RDB_Write(bd, rdb);
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
+            if (prog_win) CloseWindow(prog_win);
             if (wrote_rdb) {
                 sprintf(ok_msg,
                         GS(MSG_MOVE_SFS_OK_RDB_WRITTEN_FMT),
@@ -943,6 +1008,7 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
+            if (prog_win) CloseWindow(prog_win);
             sprintf(full_msg, GS(MSG_MOVE_SFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;

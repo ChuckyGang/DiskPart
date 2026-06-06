@@ -35,6 +35,9 @@
 #include "rdb.h"
 #include "imagecopy.h"
 #include "quickformat.h"
+#include "ffsresize.h"
+#include "sfsresize.h"
+#include "pfsresize.h"
 #include "script.h"
 
 extern struct ExecBase   *SysBase;
@@ -999,6 +1002,214 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
+/* GROW                                                                */
+/*                                                                     */
+/*   GROW <drive> <size[KMG]|END>                                      */
+/*                                                                     */
+/* Extend an existing FFS/SFS/PFS partition and grow its filesystem to */
+/* match - all in one step.  <size> is the amount to ADD (e.g. 100M);  */
+/* if it exceeds the free space after the partition it is clamped to    */
+/* the maximum.  END uses all the free space.  Each step is narrated    */
+/* so a script run shows exactly what the tool is doing, and the RDB is */
+/* written immediately after a successful grow so the on-disk geometry  */
+/* and the filesystem never disagree.                                   */
+/* ------------------------------------------------------------------ */
+
+enum { GROW_FS_NONE, GROW_FS_FFS, GROW_FS_SFS, GROW_FS_PFS };
+
+/* Progress callback: indent and print each step the grow reports. */
+static void script_grow_progress(void *ud, const char *msg)
+{
+    char buf[96];
+    (void)ud;
+    sprintf(buf, GS(MSG_SCR_GROW_STEP_FMT), msg);
+    sc_puts(buf);
+}
+
+static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
+{
+    struct PartInfo *pi = NULL;
+    const char *sizestr;
+    char  name[32];
+    char  szbuf[20], step[80], umerr[80], rmerr[80], mnt[40];
+    UWORD nlen, i;
+    ULONG heads, sectors, blks_cyl;
+    ULONG gap_max, old_hi, new_hi;
+    int   fskind;
+    BOOL  to_end, ok;
+
+    if (!s_st.bd)
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
+
+    /* Positional: tok[1] = drive, tok[2] = size. */
+    if (ntok < 3) { sc_puts(GS(MSG_SCR_GROW_USAGE)); return RETURN_ERROR; }
+
+    strncpy(name, tok[1], 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) { sc_puts(GS(MSG_SCR_GROW_USAGE)); return RETURN_ERROR; }
+    sizestr = tok[2];
+
+    /* Find the partition. */
+    for (i = 0; i < s_st.rdb.num_parts; i++) {
+        if (ci_eq(s_st.rdb.parts[i].drive_name, name)) { pi = &s_st.rdb.parts[i]; break; }
+    }
+    if (!pi) {
+        sprintf(s_msg, GS(MSG_SCR_GROW_NOT_FOUND_FMT), name);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    /* Filesystem must be one we can grow. */
+    if      (FFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_FFS;
+    else if (SFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_SFS;
+    else if (PFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_PFS;
+    else {
+        sprintf(s_msg, GS(MSG_SCR_GROW_UNSUPPORTED_FMT), pi->drive_name);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    /* Geometry (fall back to RDB geometry when the part fields are 0). */
+    heads    = pi->heads   > 0 ? pi->heads   : s_st.rdb.heads;
+    sectors  = pi->sectors > 0 ? pi->sectors : s_st.rdb.sectors;
+    blks_cyl = heads * sectors;
+    if (blks_cyl == 0) {
+        sprintf(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    /* Highest cylinder we may grow into: the disk end, capped by the start
+       of any partition that begins after this one. */
+    gap_max = s_st.rdb.hi_cyl;
+    for (i = 0; i < s_st.rdb.num_parts; i++) {
+        struct PartInfo *ex = &s_st.rdb.parts[i];
+        if (ex == pi) continue;
+        if (ex->low_cyl > pi->high_cyl && ex->low_cyl - 1 < gap_max)
+            gap_max = ex->low_cyl - 1;
+    }
+    if (gap_max <= pi->high_cyl) {
+        sprintf(s_msg, GS(MSG_SCR_GROW_NO_SPACE_FMT), pi->drive_name);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    old_hi = pi->high_cyl;
+    to_end = (ci_eq(sizestr, "END") || ci_eq(sizestr, "MAX"));
+    if (to_end) {
+        new_hi = gap_max;
+    } else {
+        UQUAD bytes = parse_size_bytes(sizestr);
+        ULONG add_cyls;
+        if (bytes == 0) {
+            sprintf(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
+            sc_puts(s_msg);
+            return RETURN_ERROR;
+        }
+        add_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
+        if (add_cyls == 0) {
+            sprintf(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
+            sc_puts(s_msg);
+            return RETURN_ERROR;
+        }
+        new_hi = old_hi + add_cyls;
+        if (new_hi > gap_max) {
+            /* Requested more than there is - clamp to the maximum. */
+            new_hi = gap_max;
+            FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
+            sprintf(s_msg, GS(MSG_SCR_GROW_CLAMP_FMT), szbuf);
+            sc_puts(s_msg);
+        }
+    }
+
+    /* Announce the plan: drive, old -> new cylinder, amount added. */
+    FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
+    sprintf(s_msg, GS(MSG_SCR_GROW_PLAN_FMT),
+            pi->drive_name, (ULONG)old_hi, (ULONG)new_hi, szbuf);
+    sc_puts(s_msg);
+
+    if (s_st.dryrun) {
+        sc_puts(GS(MSG_SCR_GROW_DRYRUN));
+        return RETURN_OK;
+    }
+
+    sprintf(s_msg, GS(MSG_SCR_GROW_ASK), pi->drive_name);
+    if (!sc_ask_yn(s_msg)) { sc_puts(GS(MSG_SCR_ABORTED)); return RETURN_ERROR; }
+
+    /* Commit the new size in memory, then run the grow offline. */
+    umerr[0] = rmerr[0] = '\0';
+    pi->high_cyl = new_hi;
+
+    /* Unmount first - the grow writes filesystem blocks directly and must not
+       run under a live handler. */
+    sprintf(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+    script_grow_progress(NULL, step);
+    if (!UnmountDevice(pi->drive_name, umerr, sizeof(umerr))) {
+        pi->high_cyl = old_hi;                 /* undo */
+        sprintf(s_msg, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
+                pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    switch (fskind) {
+        case GROW_FS_SFS:
+            ok = SFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                                   s_msg, script_grow_progress, NULL);
+            break;
+        case GROW_FS_PFS:
+            ok = PFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                                   s_msg, script_grow_progress, NULL);
+            break;
+        default:
+            ok = FFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                                   s_msg, script_grow_progress, NULL);
+            break;
+    }
+
+    if (!ok) {
+        /* Grow failed - restore the size and remount so the user keeps a
+           working volume.  s_msg holds the diagnostic from the grow. */
+        char diag[200];
+        strncpy(diag, s_msg, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
+        pi->high_cyl = old_hi;
+        MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr));
+        sprintf(s_msg, GS(MSG_SCR_GROW_FAIL_FMT), diag);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    /* Write the RDB now so the on-disk geometry matches the grown FS. */
+    script_grow_progress(NULL, GS(MSG_GROW_PROG_WRITING_RDB));
+    sc_puts(GS(MSG_SCR_WRITING_RDB));
+    if (!RDB_Write(s_st.bd, &s_st.rdb)) {
+        sc_puts(GS(MSG_SCR_FAILED));
+        return RETURN_ERROR;
+    }
+    sc_puts(GS(MSG_SCR_OK_DOT));
+    s_st.dirty = FALSE;
+
+    /* FFS can remount live (no reboot); SFS/PFS leave the volume inhibited. */
+    if (fskind == GROW_FS_FFS) {
+        sprintf(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+        script_grow_progress(NULL, step);
+        if (MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr))) {
+            MaterializeVolume(mnt);
+            sprintf(s_msg, GS(MSG_SCR_GROW_REMOUNTED_FMT), pi->drive_name);
+            sc_puts(s_msg);
+            return RETURN_OK;
+        }
+    }
+
+    sprintf(s_msg, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
+    sc_puts(s_msg);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* WRITE                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -1338,6 +1549,7 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "VERIFYRDB")) return do_verifyrdb(ln, tok, ntok);
     if (ci_eq(tok[0], "VERIFYEXT")) return do_verifyext(ln, tok, ntok);
     if (ci_eq(tok[0], "ADDFS"))    return do_addfs(ln, tok, ntok);
+    if (ci_eq(tok[0], "GROW"))    return do_grow(ln, tok, ntok);
     if (ci_eq(tok[0], "WRITE"))   return do_write(ln);
     if (ci_eq(tok[0], "INFO"))    return do_info(ln);
     if (ci_eq(tok[0], "IMAGEOUT"))return do_imageout(ln, tok, ntok);
