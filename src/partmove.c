@@ -197,6 +197,8 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG phys_base_old, phys_base_new, phys_count;
     ULONG done, chunk, i;
 
+    err_buf[0] = '\0';   /* success path reads this to decide on the summary */
+
     old_low     = pi->low_cyl;
     old_high    = pi->high_cyl;
     cyl_count   = old_high - old_low + 1;

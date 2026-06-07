@@ -600,11 +600,13 @@ void FormatSize(UQUAD bytes, char *buf)
 /* ------------------------------------------------------------------ */
 #define CHAIN_SEEN_MAX 128
 
-/* Hard cap on LSEG chain length.  Beyond chain_seen's 128-entry window the
-   cycle detector saturates and stops recording new entries, so a non-cyclic
-   chain longer than this would walk forever on a corrupt disk.  128 LSEG
-   blocks is ~60 KB of fs binary - well beyond anything realistic. */
-#define MAX_LSEG_BLOCKS 128
+/* Hard cap on LSEG chain length.  Sized to round-trip a MAX_FS_CODE_SIZE
+   handler (492 data bytes per block) so a large FS read back is never silently
+   truncated.  Beyond chain_seen's CHAIN_SEEN_MAX-entry window the cycle
+   detector saturates, so each LSEG walk is ALSO bounded by a block count
+   (this cap, or the first-pass num_lseg for the copy pass) to stay safe on a
+   corrupt disk regardless of CHAIN_SEEN_MAX. */
+#define MAX_LSEG_BLOCKS  (((MAX_FS_CODE_SIZE) + 491UL) / 492UL + 4UL)
 
 static BOOL chain_seen(ULONG *seen, UWORD *count, ULONG blk)
 {
@@ -871,10 +873,15 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
             if (fi->code) {
                 ULONG lseg_seen2[CHAIN_SEEN_MAX]; UWORD lseg_seen2_n = 0;
                 ULONG offset = 0;
+                ULONG count2 = 0;
                 BOOL  ok     = TRUE;
                 memset(lseg_seen2, 0, sizeof(lseg_seen2));
                 lseg_blk = fi->seg_list_blk;
-                while (lseg_blk != RDB_END_MARK && offset < alloc_sz) {
+                /* Bound by num_lseg (the exact first-pass count), not
+                   alloc_sz alone: that guarantees we never write past the
+                   num_lseg*492 buffer even if cycle detection saturates. */
+                while (lseg_blk != RDB_END_MARK && offset < alloc_sz &&
+                       count2 < num_lseg) {
                     struct LoadSegBlock *lsb;
                     const ULONG *lp;
                     ULONG data_bytes, sum, sl, ci;
@@ -898,6 +905,7 @@ BOOL RDB_Read(struct BlockDev *bd, struct RDBInfo *rdb)
                     if (data_bytes > 492UL) data_bytes = 492UL;
                     memcpy(fi->code + offset, lsb->lsb_LoadData, data_bytes);
                     offset += data_bytes;
+                    count2++;
                     lseg_blk = lsb->lsb_Next;
                 }
                 if (ok) {
@@ -1094,7 +1102,7 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
                     lseg_ok++;
                 }
             }
-            lseg_blk = buf[127];
+            lseg_blk = buf[4];   /* lsb_Next is longword index 4, not 127 */
             lseg_count++;
         }
         }
@@ -1147,6 +1155,11 @@ void RDB_InitFresh(struct RDBInfo *rdb,
     if (cylinders == 0) cylinders = 1;
     if (heads     == 0) heads     = 1;
     if (sectors   == 0) sectors   = 1;
+
+    /* Free any filesystem driver code from a previously read RDB before we
+       zero the struct, otherwise those AllocVec'd buffers leak.  Safe on a
+       freshly MEMF_CLEAR'd struct (num_fs == 0, all code pointers NULL). */
+    RDB_FreeCode(rdb);
 
     memset(rdb, 0, sizeof(*rdb));
     rdb->valid        = TRUE;
@@ -1249,6 +1262,12 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
       for (_i = 0; _i < rdb->num_parts; _i++) {
           const struct PartInfo *pi = &rdb->parts[_i];
           if (pi->low_cyl > pi->high_cyl) return FALSE;
+          /* Reject partitions that start inside the RDB reserved area or run
+             past the last usable cylinder.  The CLI/script/GUI front-ends
+             check this too, but enforce it here so the write path is a
+             self-contained safety net. */
+          if (rdb->lo_cyl > 0 && pi->low_cyl < rdb->lo_cyl) return FALSE;
+          if (rdb->hi_cyl > 0 && pi->high_cyl > rdb->hi_cyl) return FALSE;
       }
       /* Overlap check: O(n²) but n <= MAX_PARTITIONS (64) so it is fine */
       for (_i = 0; _i < rdb->num_parts; _i++) {

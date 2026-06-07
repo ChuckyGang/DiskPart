@@ -369,7 +369,8 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
         sprintf(boot, "%s%ld", (pi->flags & 1) ? "*" : "", (long)pi->boot_pri);
 
         /* ">" marker for selected row, space otherwise */
-        sprintf(part_strs[i], "%c %-7s %9lu %9lu  %-12s  %9s   %4s",
+        snprintf(part_strs[i], sizeof(part_strs[i]),
+                "%c %-7s %9lu %9lu  %-12s  %9s   %4s",
                 ((WORD)i == sel) ? '>' : ' ',
                 nm,
                 (unsigned long)pi->low_cyl,
@@ -684,7 +685,7 @@ static void draw_drag_info(struct Window *win, const struct RDBInfo *rdb,
     char  sz[16];
 
     FormatSize(bytes, sz);
-    sprintf(info, GS(MSG_PV_DRAG_INFO_FMT),
+    snprintf(info, sizeof(info), GS(MSG_PV_DRAG_INFO_FMT),
             pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE),
             (unsigned long)pi->low_cyl,
             (unsigned long)pi->high_cyl,
@@ -778,7 +779,7 @@ static void draw_new_part_overlay(struct Window *win,
     }
 
     /* Info strip below map */
-    sprintf(info, GS(MSG_PV_NEW_INFO_FMT),
+    snprintf(info, sizeof(info), GS(MSG_PV_NEW_INFO_FMT),
             (unsigned long)lo, (unsigned long)hi, sz);
     SetAPen(rp, 0);
     SetDrMd(rp, JAM2);

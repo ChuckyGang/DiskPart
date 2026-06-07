@@ -132,7 +132,17 @@ static BOOL parse_dev(const char *str, char *devname, ULONG *unit)
 
     memcpy(devname, str, len);
     devname[len] = '\0';
-    *unit = (*p == ':') ? strtoul(p + 1, NULL, 10) : 0;
+    /* A mistyped unit (e.g. "scsi.device:foo") must not silently become unit 0,
+       which is usually the boot disk - reject non-numeric/empty unit fields. */
+    if (*p == ':') {
+        const char *u = p + 1, *q;
+        if (*u < '0' || *u > '9') return FALSE;
+        for (q = u; *q >= '0' && *q <= '9'; q++) ;
+        if (*q != '\0') return FALSE;
+        *unit = strtoul(u, NULL, 10);
+    } else {
+        *unit = 0;
+    }
     return TRUE;
 }
 
@@ -294,10 +304,25 @@ static BOOL cli_parse_dostype(const char *s, ULONG *out)
 /* cli_parse_high - END / +NNN[KMG] / literal cylinder               */
 /* ------------------------------------------------------------------ */
 
-static ULONG cli_parse_low(const char *s, struct RDBInfo *rdb)
+/* Strict decimal parse: the whole token must be 1+ digits with no trailing
+   junk, and the value must fit in 32 bits.  Returns FALSE otherwise.  This
+   stops a typo like "1O24" (letter O) silently parsing as 1. */
+static BOOL parse_dec_strict(const char *s, ULONG *out)
+{
+    UQUAD v = 0;
+    const char *p = s;
+    if (!p || *p < '0' || *p > '9') return FALSE;
+    while (*p >= '0' && *p <= '9') v = v * 10 + (UQUAD)(*p++ - '0');
+    if (*p != '\0') return FALSE;
+    if (v > 0xFFFFFFFFULL) return FALSE;
+    *out = (ULONG)v;
+    return TRUE;
+}
+
+static BOOL cli_parse_low(const char *s, struct RDBInfo *rdb, ULONG *out)
 {
     const char *p;
-    ULONG val;
+    UQUAD val;
 
     if (str_eq_ci(s, "START")) {
         ULONG cyl = rdb->lo_cyl;
@@ -313,7 +338,8 @@ static ULONG cli_parse_low(const char *s, struct RDBInfo *rdb)
                 }
             }
         } while (hit);
-        return cyl;
+        *out = cyl;
+        return TRUE;
     }
     if (str_eq_ci(s, "NEXT")) {
         ULONG next = rdb->lo_cyl;
@@ -321,26 +347,34 @@ static ULONG cli_parse_low(const char *s, struct RDBInfo *rdb)
         for (i = 0; i < rdb->num_parts; i++)
             if (rdb->parts[i].high_cyl + 1 > next)
                 next = rdb->parts[i].high_cyl + 1;
-        return next;
+        *out = next;
+        return TRUE;
     }
 
     /* NNN[KMG] -> byte offset converted to the cylinder containing it.
      * A bare number (no suffix) stays a literal cylinder, as before. */
     p = s;
     val = 0;
-    while (*p >= '0' && *p <= '9') val = val * 10 + (ULONG)(*p++ - '0');
+    if (*p < '0' || *p > '9') return FALSE;
+    while (*p >= '0' && *p <= '9') val = val * 10 + (UQUAD)(*p++ - '0');
     if (*p == 'K' || *p == 'k' || *p == 'M' || *p == 'm' ||
         *p == 'G' || *p == 'g') {
-        UQUAD bytes = (UQUAD)val;
+        UQUAD bytes = val;
         ULONG cylsize;
         if      (*p == 'K' || *p == 'k') bytes *= 1024UL;
         else if (*p == 'M' || *p == 'm') bytes *= 1024UL * 1024UL;
         else                             bytes *= 1024UL * 1024UL * 1024UL;
+        p++;
+        if (*p != '\0') return FALSE;        /* trailing junk after suffix */
         cylsize = (ULONG)rdb->heads * rdb->sectors * 512UL;
-        if (cylsize == 0) return strtoul(s, NULL, 10);
-        return (ULONG)(bytes / cylsize);
+        if (cylsize == 0) return FALSE;
+        *out = (ULONG)(bytes / cylsize);
+        return TRUE;
     }
-    return strtoul(s, NULL, 10);
+    if (*p != '\0') return FALSE;            /* trailing junk after digits */
+    if (val > 0xFFFFFFFFULL) return FALSE;
+    *out = (ULONG)val;
+    return TRUE;
 }
 
 static BOOL cli_parse_high(const char *s, ULONG low, ULONG hi_cyl,
@@ -349,22 +383,23 @@ static BOOL cli_parse_high(const char *s, ULONG low, ULONG hi_cyl,
     if (str_eq_ci(s, "END")) { *out = hi_cyl; return TRUE; }
     if (s[0] == '+') {
         const char *p = s + 1;
-        ULONG val = 0;
+        UQUAD val = 0;
         UQUAD bytes;
         ULONG cyls;
-        while (*p >= '0' && *p <= '9') val = val * 10 + (ULONG)(*p++ - '0');
-        bytes = (UQUAD)val;
-        if      (*p == 'K' || *p == 'k') bytes *= 1024UL;
-        else if (*p == 'M' || *p == 'm') bytes *= 1024UL * 1024UL;
-        else if (*p == 'G' || *p == 'g') bytes *= 1024UL * 1024UL * 1024UL;
+        if (*p < '0' || *p > '9') return FALSE;
+        while (*p >= '0' && *p <= '9') val = val * 10 + (UQUAD)(*p++ - '0');
+        bytes = val;
+        if      (*p == 'K' || *p == 'k') { bytes *= 1024UL; p++; }
+        else if (*p == 'M' || *p == 'm') { bytes *= 1024UL * 1024UL; p++; }
+        else if (*p == 'G' || *p == 'g') { bytes *= 1024UL * 1024UL * 1024UL; p++; }
+        if (*p != '\0') return FALSE;        /* trailing junk */
         if (heads == 0 || sectors == 0) return FALSE;
         cyls = (ULONG)(bytes / ((UQUAD)heads * sectors * 512UL));
         if (cyls == 0) return FALSE;
         *out = low + cyls - 1;
         return TRUE;
     }
-    *out = strtoul(s, NULL, 10);
-    return TRUE;
+    return parse_dec_strict(s, out);
 }
 
 /* ------------------------------------------------------------------ */
@@ -984,6 +1019,13 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
     if (block_size != bd->block_size) {
         cli_puts(GS(MSG_CLI_BLOCKSIZE_MISMATCH_ABORT)); goto restoreext_done;
     }
+    /* Sanity-cap before the size check below: num_blocks * block_size is a
+       32-bit product and a crafted huge count could wrap to match a small
+       fsize, bypassing the corruption check.  Mirror VERIFYEXT's cap. */
+    if (num_blocks == 0 || num_blocks > 1024) {
+        cli_puts(GS(MSG_CLI_UNREASONABLE_BLOCK_COUNT));
+        goto restoreext_done;
+    }
     if (fsize != (LONG)(ERDB_HDR_SZ + num_blocks * block_size)) {
         cli_puts(GS(MSG_CLI_FILESIZE_MISMATCH_CORRUPT));
         goto restoreext_done;
@@ -1079,7 +1121,10 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
-    low = cli_parse_low(low_s, &s_rdb);
+    if (!cli_parse_low(low_s, &s_rdb, &low)) {
+        cli_puts(GS(MSG_CLI_LOW_INVALID));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
     if (!cli_parse_high(high_s, low, s_rdb.hi_cyl,
                         s_rdb.heads, s_rdb.sectors, &high)) {
         cli_puts(GS(MSG_CLI_HIGH_INVALID));
@@ -1414,7 +1459,12 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
         else
             version = strtoul(version_s, NULL, 10);
     }
-    if (stacksize_s) stack_size = strtoul(stacksize_s, NULL, 10);
+    if (stacksize_s) {
+        ULONG ss;
+        /* Ignore a non-numeric or zero STACKSIZE: a 0 stack would stop the
+           filesystem handler from starting.  Keep the safe 4096 default. */
+        if (parse_dec_strict(stacksize_s, &ss) && ss > 0) stack_size = ss;
+    }
 
     sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
@@ -1460,6 +1510,10 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
         fsize = Seek(fh, 0, OFFSET_BEGINNING);
         if (fsize <= 0) {
             cli_puts(GS(MSG_CLI_FAILED_EMPTY_SEEK));
+            Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+        if (fsize > (LONG)MAX_FS_CODE_SIZE) {
+            cli_puts(GS(MSG_CLI_ADDFS_TOO_BIG));
             Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
         buf = (UBYTE *)AllocVec((ULONG)fsize, MEMF_PUBLIC | MEMF_CLEAR);
@@ -1511,7 +1565,7 @@ static void check_cli_cb(void *ud, const char *line)
 {
     char buf[82];
     (void)ud;
-    sprintf(buf, "%s\n", line);
+    snprintf(buf, sizeof(buf), "%s\n", line);
     PutStr((CONST_STRPTR)buf);
 }
 

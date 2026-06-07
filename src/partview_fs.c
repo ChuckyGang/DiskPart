@@ -173,7 +173,7 @@ static BOOL fs_load_file(struct Window *win, const char *path, struct FSInfo *fi
     }
     Seek(fh, 0, OFFSET_END);
     fsize = Seek(fh, 0, OFFSET_BEGINNING);
-    if (fsize <= 0 || fsize >= (LONG)(1024L * 1024L)) {
+    if (fsize <= 0 || fsize > (LONG)MAX_FS_CODE_SIZE) {
         Close(fh);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)GS(MSG_FS_ERROR_TITLE);

@@ -230,10 +230,24 @@ static BOOL parse_dostype(const char *s, ULONG *out)
  *   NNN[KMG]  -> byte offset converted to the cylinder containing it
  *   <n>       -> literal cylinder number
  */
-static ULONG parse_low(const char *s, struct RDBInfo *rdb)
+/* Strict decimal parse: the whole token must be 1+ digits with no trailing
+   junk, and fit in 32 bits.  Stops a typo like "1O24" parsing silently as 1. */
+static BOOL parse_dec_strict(const char *s, ULONG *out)
+{
+    UQUAD v = 0;
+    const char *p = s;
+    if (!p || *p < '0' || *p > '9') return FALSE;
+    while (*p >= '0' && *p <= '9') v = v * 10 + (UQUAD)(*p++ - '0');
+    if (*p != '\0') return FALSE;
+    if (v > 0xFFFFFFFFULL) return FALSE;
+    *out = (ULONG)v;
+    return TRUE;
+}
+
+static BOOL parse_low(const char *s, struct RDBInfo *rdb, ULONG *out)
 {
     const char *p;
-    ULONG val;
+    UQUAD val;
 
     if (ci_eq(s, "START")) {
         /* First free cylinder from lo_cyl, skipping any existing partitions */
@@ -250,7 +264,8 @@ static ULONG parse_low(const char *s, struct RDBInfo *rdb)
                 }
             }
         } while (hit);
-        return cyl;
+        *out = cyl;
+        return TRUE;
     }
     if (ci_eq(s, "NEXT")) {
         ULONG next = rdb->lo_cyl;
@@ -258,26 +273,34 @@ static ULONG parse_low(const char *s, struct RDBInfo *rdb)
         for (i = 0; i < rdb->num_parts; i++)
             if (rdb->parts[i].high_cyl + 1 > next)
                 next = rdb->parts[i].high_cyl + 1;
-        return next;
+        *out = next;
+        return TRUE;
     }
 
     /* NNN[KMG] -> byte offset converted to the cylinder containing it.
      * A bare number (no suffix) stays a literal cylinder, as before. */
     p = s;
     val = 0;
-    while (*p >= '0' && *p <= '9') val = val * 10 + (ULONG)(*p++ - '0');
+    if (*p < '0' || *p > '9') return FALSE;
+    while (*p >= '0' && *p <= '9') val = val * 10 + (UQUAD)(*p++ - '0');
     if (*p == 'K' || *p == 'k' || *p == 'M' || *p == 'm' ||
         *p == 'G' || *p == 'g') {
-        UQUAD bytes = (UQUAD)val;
+        UQUAD bytes = val;
         ULONG cylsize;
         if      (*p == 'K' || *p == 'k') bytes *= 1024UL;
         else if (*p == 'M' || *p == 'm') bytes *= 1024UL * 1024UL;
         else                             bytes *= 1024UL * 1024UL * 1024UL;
+        p++;
+        if (*p != '\0') return FALSE;        /* trailing junk after suffix */
         cylsize = (ULONG)rdb->heads * rdb->sectors * 512UL;
-        if (cylsize == 0) return strtoul(s, NULL, 10);
-        return (ULONG)(bytes / cylsize);
+        if (cylsize == 0) return FALSE;
+        *out = (ULONG)(bytes / cylsize);
+        return TRUE;
     }
-    return strtoul(s, NULL, 10);
+    if (*p != '\0') return FALSE;            /* trailing junk after digits */
+    if (val > 0xFFFFFFFFULL) return FALSE;
+    *out = (ULONG)val;
+    return TRUE;
 }
 
 /*
@@ -297,22 +320,23 @@ static BOOL parse_high(const char *s, ULONG low, ULONG hi_cyl,
     }
     if (s[0] == '+') {
         const char *p = s + 1;
-        ULONG val = 0;
+        UQUAD val = 0;
         UQUAD bytes;
         ULONG cyls;
-        while (*p >= '0' && *p <= '9') val = val * 10 + (ULONG)(*p++ - '0');
-        bytes = (UQUAD)val;
-        if      (*p == 'K' || *p == 'k') bytes *= 1024UL;
-        else if (*p == 'M' || *p == 'm') bytes *= 1024UL * 1024UL;
-        else if (*p == 'G' || *p == 'g') bytes *= 1024UL * 1024UL * 1024UL;
+        if (*p < '0' || *p > '9') return FALSE;
+        while (*p >= '0' && *p <= '9') val = val * 10 + (UQUAD)(*p++ - '0');
+        bytes = val;
+        if      (*p == 'K' || *p == 'k') { bytes *= 1024UL; p++; }
+        else if (*p == 'M' || *p == 'm') { bytes *= 1024UL * 1024UL; p++; }
+        else if (*p == 'G' || *p == 'g') { bytes *= 1024UL * 1024UL * 1024UL; p++; }
+        if (*p != '\0') return FALSE;        /* trailing junk */
         if (heads == 0 || sectors == 0) return FALSE;
         cyls = (ULONG)(bytes / ((UQUAD)heads * sectors * 512UL));
         if (cyls == 0) return FALSE;
         *out = low + cyls - 1;
         return TRUE;
     }
-    *out = strtoul(s, NULL, 10);
-    return TRUE;
+    return parse_dec_strict(s, out);
 }
 
 /* parse_size_bytes - accept a bare number or n[KMG] suffix as a byte count.
@@ -403,7 +427,14 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
 
     {
         const char *devname = tok[1];
-        ULONG unit = strtoul(tok[2], NULL, 10);
+        ULONG unit;
+
+        /* A mistyped unit (e.g. "foo") must not silently become unit 0,
+           which is usually the boot disk. */
+        if (!parse_dec_strict(tok[2], &unit)) {
+            sc_err(ln, GS(MSG_SCR_OPEN_USAGE));
+            return RETURN_ERROR;
+        }
 
         open_close_existing(ln);
 
@@ -581,7 +612,10 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     /* LOW (required) - literal cyl or NEXT */
     v = kwarg(tok, ntok, "LOW");
     if (!v) { sc_err(ln, GS(MSG_SCR_ADDPART_NEED_LOW)); return RETURN_ERROR; }
-    low = parse_low(v, &s_st.rdb);
+    if (!parse_low(v, &s_st.rdb, &low)) {
+        sc_err(ln, GS(MSG_SCR_ADDPART_LOW_INVALID));
+        return RETURN_ERROR;
+    }
 
     /* HIGH (required) - literal cyl, END, or +NNN[KMG] */
     v = kwarg(tok, ntok, "HIGH");
@@ -766,7 +800,7 @@ static void checkrdb_cb(void *ud, const char *line)
 {
     char buf[82];
     (void)ud;
-    sprintf(buf, "%s\n", line);
+    snprintf(buf, sizeof(buf), "%s\n", line);
     sc_puts(buf);
 }
 
@@ -990,7 +1024,12 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
 
     /* STACKSIZE (optional) */
     v = kwarg(tok, ntok, "STACKSIZE");
-    if (v) stack_size = strtoul(v, NULL, 10);
+    if (v) {
+        ULONG ss;
+        /* Ignore a non-numeric or zero STACKSIZE: a 0 stack would stop the
+           filesystem handler from starting.  Keep the safe 4096 default. */
+        if (parse_dec_strict(v, &ss) && ss > 0) stack_size = ss;
+    }
 
     fi = &s_st.rdb.filesystems[s_st.rdb.num_fs];
     memset(fi, 0, sizeof(*fi));
@@ -1023,6 +1062,11 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
         if (fsize <= 0) {
             Close(fh);
             sc_err(ln, GS(MSG_SCR_ADDFS_EMPTY));
+            return RETURN_ERROR;
+        }
+        if (fsize > (LONG)MAX_FS_CODE_SIZE) {
+            Close(fh);
+            sc_err(ln, GS(MSG_SCR_ADDFS_TOO_BIG));
             return RETURN_ERROR;
         }
 

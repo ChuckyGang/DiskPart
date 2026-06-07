@@ -303,7 +303,7 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
         BOOL  ok;
         char  done_msg[300];
 
-        sprintf(prog.title, GS(MSG_IMG_DUMP_PROGRESS_TITLE_FMT), save_path);
+        snprintf(prog.title, sizeof(prog.title), GS(MSG_IMG_DUMP_PROGRESS_TITLE_FMT), save_path);
         prog_open(&prog, prog.title);
 
         errbuf[0] = '\0';
@@ -314,11 +314,11 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_TITLE);
         if (ok) {
-            sprintf(done_msg, GS(MSG_IMG_DUMP_OK_FMT), save_path);
+            snprintf(done_msg, sizeof(done_msg), GS(MSG_IMG_DUMP_OK_FMT), save_path);
         } else if (prog.cancelled) {
-            sprintf(done_msg, GS(MSG_IMG_DUMP_CANCELLED_FMT), save_path);
+            snprintf(done_msg, sizeof(done_msg), GS(MSG_IMG_DUMP_CANCELLED_FMT), save_path);
         } else {
-            sprintf(done_msg, GS(MSG_IMG_DUMP_FAILED_FMT),
+            snprintf(done_msg, sizeof(done_msg), GS(MSG_IMG_DUMP_FAILED_FMT),
                     errbuf[0] ? errbuf : GS(MSG_IMG_UNKNOWN_ERROR));
         }
         es.es_TextFormat=(UBYTE*)done_msg;
@@ -388,7 +388,7 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
         BOOL  ok;
         char  done_msg[300];
 
-        sprintf(prog.title, GS(MSG_IMG_RESTORE_PROGRESS_TITLE_FMT), load_path);
+        snprintf(prog.title, sizeof(prog.title), GS(MSG_IMG_RESTORE_PROGRESS_TITLE_FMT), load_path);
         prog_open(&prog, prog.title);
 
         errbuf[0] = '\0';
@@ -403,7 +403,7 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
         } else if (prog.cancelled) {
             es.es_TextFormat=(UBYTE*)GS(MSG_IMG_RESTORE_CANCELLED);
         } else {
-            sprintf(done_msg, GS(MSG_IMG_RESTORE_FAILED_FMT),
+            snprintf(done_msg, sizeof(done_msg), GS(MSG_IMG_RESTORE_FAILED_FMT),
                     errbuf[0] ? errbuf : GS(MSG_IMG_UNKNOWN_ERROR));
             es.es_TextFormat=(UBYTE*)done_msg;
         }

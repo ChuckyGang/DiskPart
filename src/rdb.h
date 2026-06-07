@@ -37,6 +37,12 @@ typedef unsigned long long UQUAD;
 #define MAX_PARTITIONS   64
 #define MAX_FILESYSTEMS  32
 
+/* Maximum size of a filesystem handler binary (LSEG code) that DiskPart will
+   accept when adding an FS and can read back without truncation.  All add
+   paths (GUI/CLI/script) enforce this, and MAX_LSEG_BLOCKS in rdb.c is sized
+   to round-trip it. */
+#define MAX_FS_CODE_SIZE (1024UL * 1024UL)
+
 /* Extended RDB backup file format (used by backup/restore/verify) */
 #define ERDB_MAGIC   0x45524442UL   /* 'ERDB' */
 #define ERDB_VERSION 1UL

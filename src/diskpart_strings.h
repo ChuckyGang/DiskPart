@@ -1043,8 +1043,12 @@
 #define MSG_QF_WAIT_SETTLE           1037
 #define MSG_RDB_HEXDUMP_ASK_TITLE    1038
 #define MSG_RDB_HEXDUMP_START_BLK    1039
+#define MSG_CLI_LOW_INVALID          1040
+#define MSG_SCR_ADDPART_LOW_INVALID  1041
+#define MSG_CLI_ADDFS_TOO_BIG        1042
+#define MSG_SCR_ADDFS_TOO_BIG        1043
 
-#define MSG_COUNT 1040
+#define MSG_COUNT 1044
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2096,5 +2100,9 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1037 MSG_QF_WAIT_SETTLE */ "Volume busy (just mounted?) - waiting for it to settle...\n",
     /* 1038 MSG_RDB_HEXDUMP_ASK_TITLE */ "Hex Dump - Start Block",
     /* 1039 MSG_RDB_HEXDUMP_START_BLK */ "Start block:",
+    /* 1040 MSG_CLI_LOW_INVALID */ "ERROR: LOW value invalid (not a number or out of range).\n",
+    /* 1041 MSG_SCR_ADDPART_LOW_INVALID */ "ADDPART: LOW value invalid (not a number or out of range).",
+    /* 1042 MSG_CLI_ADDFS_TOO_BIG */ "ERROR: filesystem driver file too large (limit 1 MB).\n",
+    /* 1043 MSG_SCR_ADDFS_TOO_BIG */ "ADDFS: filesystem driver file too large (limit 1 MB).",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */
