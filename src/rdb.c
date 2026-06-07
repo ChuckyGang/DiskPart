@@ -159,7 +159,7 @@ struct BlockDev *BlockDev_OpenFile(const char *path)
     strncpy(bd->filepath, path, sizeof(bd->filepath) - 1);
     /* Mirror full FILE:<path> form into devname so callers that look at
      * bd->devname (titles, error messages) see something sensible. */
-    sprintf(bd->devname, "FILE:%.58s", path);
+    DP_SNPRINTF(bd->devname, "FILE:%.58s", path);
     bd->unit = 0;
     strncpy(bd->disk_brand, "Image File", sizeof(bd->disk_brand) - 1);
 
@@ -304,7 +304,7 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
                     product[last] = '\0';
 
                 if (vendor[0] && product[0])
-                    sprintf(bd->disk_brand, "%s %s", vendor, product);
+                    DP_SNPRINTF(bd->disk_brand, "%s %s", vendor, product);
                 else if (product[0])
                     strncpy(bd->disk_brand, product, 35);
                 else if (vendor[0])
@@ -957,9 +957,9 @@ ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
     UWORD  i;
 
 #define IC_OUT(s)       do { if (fn) fn(ud, (s)); } while(0)
-#define IC_LINE(...)    do { sprintf(line, __VA_ARGS__); IC_OUT(line); } while(0)
+#define IC_LINE(...)    do { DP_SNPRINTF(line, __VA_ARGS__); IC_OUT(line); } while(0)
 #define IC_ERR(s)       do { errors++; IC_OUT(s); } while(0)
-#define IC_ERRLINE(...) do { errors++; sprintf(line, __VA_ARGS__); IC_OUT(line); } while(0)
+#define IC_ERRLINE(...) do { errors++; DP_SNPRINTF(line, __VA_ARGS__); IC_OUT(line); } while(0)
 #define IC_CHKSUM(sl_, buf_) do { \
     ULONG _sl = (sl_); \
     if (_sl >= 2 && _sl <= 128) { \

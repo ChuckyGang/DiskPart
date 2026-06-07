@@ -20,6 +20,18 @@ extern int    memcmp (const void *a, const void *b, size_t n);
 
 int   sprintf (char *buf,             const char *fmt, ...);
 int   snprintf(char *buf, size_t size, const char *fmt, ...);
+
+/* DP_SNPRINTF(arr, fmt, ...) - snprintf bounded by sizeof(arr).
+ * Compile-time guard: if 'arr' is a pointer (not a real array) sizeof would
+ * silently be the pointer size and truncate, so DP_IS_ARRAY forces a build
+ * error instead.  Use only with in-scope fixed char arrays; for caller-owned
+ * pointer buffers keep plain snprintf with the explicit size. */
+#define DP_IS_ARRAY(a) \
+    (!__builtin_types_compatible_p(__typeof__(a), __typeof__(&(a)[0])))
+#define DP_BUILD_BUG_IF(e) \
+    ((int)(sizeof(struct { int _dpchk : (1 - 2 * !!(e)); })) * 0)
+#define DP_SNPRINTF(arr, ...) \
+    snprintf((arr), sizeof(arr) + DP_BUILD_BUG_IF(!DP_IS_ARRAY(arr)), __VA_ARGS__)
 int   strcmp(const char *a, const char *b);
 char *strncpy(char *dst, const char *src, size_t n);
 

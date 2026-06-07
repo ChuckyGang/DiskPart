@@ -270,7 +270,7 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
        FFS writes racing against us.
        If the partition isn't mounted, Inhibit() returns FALSE and we
        continue anyway - direct access to an unmounted partition is safe. */
-    sprintf(inh_name, "%s:", pi->drive_name);
+    DP_SNPRINTF(inh_name, "%s:", pi->drive_name);
     FFS_PROGRESS(GS(MSG_FFS_PROG_INHIBITING));
     did_inhibit = Inhibit((STRPTR)inh_name, DOSTRUE);
 

@@ -73,18 +73,18 @@ static void build_fs_list(const struct RDBInfo *rdb)
         FormatDosType(fi->dos_type, dt);
 
         if (fi->version)
-            sprintf(ver, "%lu.%lu",
+            DP_SNPRINTF(ver, "%lu.%lu",
                     (unsigned long)(fi->version >> 16),
                     (unsigned long)(fi->version & 0xFFFFUL));
         else
-            sprintf(ver, "----");
+            DP_SNPRINTF(ver, "----");
 
         if (fi->code && fi->code_size > 0)
             FormatSize((UQUAD)fi->code_size, codesz);
         else
-            sprintf(codesz, GS(MSG_FS_NULL_DRIVER));
+            DP_SNPRINTF(codesz, GS(MSG_FS_NULL_DRIVER));
 
-        sprintf(fs_strs[i], "%-12s  %-8s  %s", dt, ver, codesz);
+        DP_SNPRINTF(fs_strs[i], "%-12s  %-8s  %s", dt, ver, codesz);
 
         fs_nodes[i].ln_Name = fs_strs[i];
         fs_nodes[i].ln_Type = NT_USER;
@@ -272,7 +272,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
     static char    file_str[256];   /* static so ASL path update persists */
 
     FormatDosType(fi->dos_type, dt_str);
-    sprintf(hex_str, "0x%08lX", fi->dos_type);
+    DP_SNPRINTF(hex_str, "0x%08lX", fi->dos_type);
     if (is_edit) {
         file_str[0] = '\0';   /* empty = keep existing code */
     } else {
@@ -413,7 +413,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                         /* Update hex readout when user presses Return in DosType field */
                         struct StringInfo *si = (struct StringInfo *)dostype_gad->SpecialInfo;
                         ULONG dt = parse_dostype((char *)si->Buffer);
-                        sprintf(hex_str, "0x%08lX", dt);
+                        DP_SNPRINTF(hex_str, "0x%08lX", dt);
                         { struct TagItem tt[]={{GTTX_Text,(ULONG)hex_str},{TAG_DONE,0}};
                           GT_SetGadgetAttrsA(hex_gad, win, NULL, tt); }
                         break;
@@ -445,7 +445,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                                     guessed = guess_dostype_from_path(file_str);
                                     if (guessed != 0) {
                                         FormatDosType(guessed, dt_str);
-                                        sprintf(hex_str, "0x%08lX", guessed);
+                                        DP_SNPRINTF(hex_str, "0x%08lX", guessed);
                                         { struct TagItem dtt[]={{GTST_String,(ULONG)dt_str},{TAG_DONE,0}};
                                           GT_SetGadgetAttrsA(dostype_gad, win, NULL, dtt); }
                                         { struct TagItem htt[]={{GTTX_Text,(ULONG)hex_str},{TAG_DONE,0}};
@@ -463,7 +463,7 @@ static BOOL fs_addedit_dialog(struct FSInfo *fi, BOOL is_edit)
                         ULONG guessed = guess_dostype_from_path((char *)si->Buffer);
                         if (guessed != 0) {
                             FormatDosType(guessed, dt_str);
-                            sprintf(hex_str, "0x%08lX", guessed);
+                            DP_SNPRINTF(hex_str, "0x%08lX", guessed);
                             { struct TagItem dtt[]={{GTST_String,(ULONG)dt_str},{TAG_DONE,0}};
                               GT_SetGadgetAttrsA(dostype_gad, win, NULL, dtt); }
                             { struct TagItem htt[]={{GTTX_Text,(ULONG)hex_str},{TAG_DONE,0}};
@@ -773,10 +773,10 @@ BOOL filesystem_manager_dialog(struct RDBInfo *rdb)
 
                             FriendlyDosType(del_dt, dt);
                             if (num_users > 0) {
-                                sprintf(msg, GS(MSG_FS_DELETE_INUSE_FMT),
+                                DP_SNPRINTF(msg, GS(MSG_FS_DELETE_INUSE_FMT),
                                     dt, users);
                             } else {
-                                sprintf(msg, GS(MSG_FS_DELETE_CONFIRM_FMT), dt);
+                                DP_SNPRINTF(msg, GS(MSG_FS_DELETE_CONFIRM_FMT), dt);
                             }
 
                             es.es_StructSize  = sizeof(es);

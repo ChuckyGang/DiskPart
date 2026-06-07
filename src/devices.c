@@ -316,7 +316,7 @@ void DevNameList_FormatDisplay(struct DevNameList *nl, UWORD col_chars)
             UWORD vlen, name_col, nlen, j;
             char *p = nl->display[i];
 
-            sprintf(ver, GS(MSG_DEV_VERSION_FMT), (unsigned)nl->vers[i], (unsigned)nl->revs[i]);
+            DP_SNPRINTF(ver, GS(MSG_DEV_VERSION_FMT), (unsigned)nl->vers[i], (unsigned)nl->revs[i]);
             vlen     = (UWORD)strlen(ver);
             name_col = (col_chars > vlen + 1) ? (col_chars - vlen - 1) : 1;
 
@@ -476,25 +476,25 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
 
         if (have_brand && have_size) {
             if (vendor[0] && product[0])
-                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND2_SIZE_FMT),
+                DP_SNPRINTF(ue->display, GS(MSG_DEV_UNIT_BRAND2_SIZE_FMT),
                         (unsigned long)unit, vendor, product, sz);
             else
-                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND1_SIZE_FMT),
+                DP_SNPRINTF(ue->display, GS(MSG_DEV_UNIT_BRAND1_SIZE_FMT),
                         (unsigned long)unit,
                         vendor[0] ? vendor : product, sz);
         } else if (have_brand) {
             if (vendor[0] && product[0])
-                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND2_FMT),
+                DP_SNPRINTF(ue->display, GS(MSG_DEV_UNIT_BRAND2_FMT),
                         (unsigned long)unit, vendor, product);
             else
-                sprintf(ue->display, GS(MSG_DEV_UNIT_BRAND1_FMT),
+                DP_SNPRINTF(ue->display, GS(MSG_DEV_UNIT_BRAND1_FMT),
                         (unsigned long)unit,
                         vendor[0] ? vendor : product);
         } else if (have_size) {
-            sprintf(ue->display, GS(MSG_DEV_UNIT_SIZE_FMT),
+            DP_SNPRINTF(ue->display, GS(MSG_DEV_UNIT_SIZE_FMT),
                     (unsigned long)unit, sz);
         } else {
-            sprintf(ue->display, GS(MSG_DEV_UNIT_FMT), (unsigned long)unit);
+            DP_SNPRINTF(ue->display, GS(MSG_DEV_UNIT_FMT), (unsigned long)unit);
         }
 
         {

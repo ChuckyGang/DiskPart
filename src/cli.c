@@ -241,7 +241,7 @@ static LONG maybe_create_image(LONG *args)
     }
 
     FormatSize(size_bytes, szbuf);
-    sprintf(outbuf, GS(MSG_CLI_CREATING_IMAGE), path, szbuf);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_CREATING_IMAGE), path, szbuf);
     cli_puts(outbuf);
 
     bd = BlockDev_CreateFile(path, size_bytes);
@@ -416,12 +416,12 @@ static BOOL ask_yn(const char *question, BOOL force)
     LONG got;
 
     if (force) {
-        sprintf(outbuf, GS(MSG_CLI_PROMPT_YN_FORCED), question);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_PROMPT_YN_FORCED), question);
         cli_puts(outbuf);
         return TRUE;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_PROMPT_YN), question);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_PROMPT_YN), question);
     cli_puts(outbuf);
     Flush(Output());   /* ensure prompt appears before Read() blocks */
 
@@ -440,10 +440,10 @@ static void print_dev_info(struct BlockDev *bd)
     char szbuf[20];
     FormatSize(bd->total_bytes, szbuf);
     if (bd->disk_brand[0])
-        sprintf(outbuf, GS(MSG_CLI_DEVICE_LINE_BRAND),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_DEVICE_LINE_BRAND),
                 bd->devname, (ULONG)bd->unit, bd->disk_brand, szbuf);
     else
-        sprintf(outbuf, GS(MSG_CLI_DEVICE_LINE),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_DEVICE_LINE),
                 bd->devname, (ULONG)bd->unit, szbuf);
     cli_puts(outbuf);
 }
@@ -465,25 +465,25 @@ static LONG cmd_listdev(BOOL probe_units)
         return RETURN_OK;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_BLOCK_DEVS_COUNT), (unsigned)s_devnames.count);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_BLOCK_DEVS_COUNT), (unsigned)s_devnames.count);
     cli_puts(outbuf);
 
     for (i = 0; i < s_devnames.count; i++) {
 
         if (s_devnames.vers[i] > 0)
-            sprintf(outbuf, "%-32s v%u.%u\n",
+            DP_SNPRINTF(outbuf, "%-32s v%u.%u\n",
                     s_devnames.names[i],
                     (unsigned)s_devnames.vers[i],
                     (unsigned)s_devnames.revs[i]);
         else
-            sprintf(outbuf, "%s\n", s_devnames.names[i]);
+            DP_SNPRINTF(outbuf, "%s\n", s_devnames.names[i]);
         cli_puts(outbuf);
 
         if (probe_units) {
             static struct UnitList ul;
             UWORD j;
 
-            sprintf(outbuf, GS(MSG_CLI_PROBING_UNITS),
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_PROBING_UNITS),
                     s_devnames.names[i]);
             cli_puts(outbuf);
 
@@ -493,7 +493,7 @@ static LONG cmd_listdev(BOOL probe_units)
                 cli_puts(GS(MSG_CLI_NO_UNITS_FOUND));
             } else {
                 for (j = 0; j < ul.count; j++) {
-                    sprintf(outbuf, "  %s\n", ul.entries[j].display);
+                    DP_SNPRINTF(outbuf, "  %s\n", ul.entries[j].display);
                     cli_puts(outbuf);
                 }
             }
@@ -560,12 +560,12 @@ static LONG cmd_smart(const char *devname, ULONG unit)
     BYTE   err;
     UWORD  revision, i;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -621,7 +621,7 @@ static LONG cmd_smart(const char *devname, ULONG unit)
         return RETURN_ERROR;
     }
     if (err != 0 || scmd.scsi_Status != 0) {
-        sprintf(outbuf, GS(MSG_CLI_SMART_CMD_FAILED),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_SMART_CMD_FAILED),
                 (int)err, (unsigned)scmd.scsi_Status);
         cli_puts(outbuf);
         FreeVec(buf); BlockDev_Close(bd);
@@ -630,9 +630,9 @@ static LONG cmd_smart(const char *devname, ULONG unit)
 
     revision = (UWORD)buf[0] | ((UWORD)buf[1] << 8);
     if (bd->disk_brand[0])
-        sprintf(outbuf, GS(MSG_CLI_SMART_HDR_BRAND), bd->disk_brand, (unsigned)revision);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_SMART_HDR_BRAND), bd->disk_brand, (unsigned)revision);
     else
-        sprintf(outbuf, GS(MSG_CLI_SMART_HDR),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_SMART_HDR),
                 devname, unit, (unsigned)revision);
     cli_puts(outbuf);
 
@@ -656,13 +656,13 @@ static LONG cmd_smart(const char *devname, ULONG unit)
         raw_hi = (ULONG)a[9] | ((ULONG)a[10] << 8);
 
         if (raw_hi)
-            sprintf(outbuf, "%3u %-25s %3u %3u %04lx%08lx%s\n",
+            DP_SNPRINTF(outbuf, "%3u %-25s %3u %3u %04lx%08lx%s\n",
                     (unsigned)id, smart_name(id),
                     (unsigned)val, (unsigned)worst,
                     raw_hi, raw_lo,
                     (flags & 0x01) ? GS(MSG_CLI_SMART_PREFAIL) : "");
         else
-            sprintf(outbuf, "%3u %-25s %3u %3u %10lu%s\n",
+            DP_SNPRINTF(outbuf, "%3u %-25s %3u %3u %10lu%s\n",
                     (unsigned)id, smart_name(id),
                     (unsigned)val, (unsigned)worst,
                     raw_lo,
@@ -685,12 +685,12 @@ static LONG cmd_info(const char *devname, ULONG unit)
     UWORD i;
     char dtbuf[16], szbuf[20];
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -705,16 +705,16 @@ static LONG cmd_info(const char *devname, ULONG unit)
     }
 
     FormatSize((UQUAD)s_rdb.cylinders * s_rdb.heads * s_rdb.sectors * 512UL, szbuf);
-    sprintf(outbuf, GS(MSG_CLI_INFO_GEOMETRY),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_GEOMETRY),
             (ULONG)s_rdb.cylinders, (ULONG)s_rdb.heads,
             (ULONG)s_rdb.sectors, szbuf);
     cli_puts(outbuf);
-    sprintf(outbuf, GS(MSG_CLI_INFO_RDB_BLOCKS),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_RDB_BLOCKS),
             s_rdb.rdb_block_lo, s_rdb.rdb_block_hi,
             (ULONG)s_rdb.lo_cyl, (ULONG)s_rdb.hi_cyl);
     cli_puts(outbuf);
 
-    sprintf(outbuf, GS(MSG_CLI_INFO_PARTITIONS), (unsigned)s_rdb.num_parts);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_PARTITIONS), (unsigned)s_rdb.num_parts);
     cli_puts(outbuf);
     for (i = 0; i < s_rdb.num_parts; i++) {
         struct PartInfo *pi = &s_rdb.parts[i];
@@ -723,14 +723,14 @@ static LONG cmd_info(const char *devname, ULONG unit)
                      : s_rdb.heads * s_rdb.sectors;
         FormatDosType(pi->dos_type, dtbuf);
         FormatSize((UQUAD)(pi->high_cyl - pi->low_cyl + 1) * blks * 512UL, szbuf);
-        sprintf(outbuf, GS(MSG_CLI_INFO_PART_ROW),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_PART_ROW),
                 (unsigned)i, pi->drive_name,
                 (ULONG)pi->low_cyl, (ULONG)pi->high_cyl,
                 dtbuf, (long)pi->boot_pri, szbuf);
         cli_puts(outbuf);
     }
 
-    sprintf(outbuf, GS(MSG_CLI_INFO_FILESYSTEMS), (unsigned)s_rdb.num_fs);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_FILESYSTEMS), (unsigned)s_rdb.num_fs);
     cli_puts(outbuf);
     for (i = 0; i < s_rdb.num_fs; i++) {
         struct FSInfo *fi = &s_rdb.filesystems[i];
@@ -738,20 +738,20 @@ static LONG cmd_info(const char *devname, ULONG unit)
         if (fi->code_size > 0) {
             FormatSize((UQUAD)fi->code_size, szbuf);
             if (fi->version)
-                sprintf(outbuf, "  %2u: %-8s  v%lu.%lu  %s\n",
+                DP_SNPRINTF(outbuf, "  %2u: %-8s  v%lu.%lu  %s\n",
                         (unsigned)i, dtbuf,
                         (ULONG)(fi->version >> 16),
                         (ULONG)(fi->version & 0xFFFF), szbuf);
             else
-                sprintf(outbuf, "  %2u: %-8s  %s\n", (unsigned)i, dtbuf, szbuf);
+                DP_SNPRINTF(outbuf, "  %2u: %-8s  %s\n", (unsigned)i, dtbuf, szbuf);
         } else {
             if (fi->version)
-                sprintf(outbuf, "  %2u: %-8s  v%lu.%lu\n",
+                DP_SNPRINTF(outbuf, "  %2u: %-8s  v%lu.%lu\n",
                         (unsigned)i, dtbuf,
                         (ULONG)(fi->version >> 16),
                         (ULONG)(fi->version & 0xFFFF));
             else
-                sprintf(outbuf, "  %2u: %-8s\n", (unsigned)i, dtbuf);
+                DP_SNPRINTF(outbuf, "  %2u: %-8s\n", (unsigned)i, dtbuf);
         }
         cli_puts(outbuf);
     }
@@ -772,12 +772,12 @@ static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
     BPTR   fh;
     LONG   rc = RETURN_ERROR;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -792,7 +792,7 @@ static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
     if (!buf) { cli_puts(GS(MSG_CLI_OUT_OF_MEMORY)); BlockDev_Close(bd); return RETURN_ERROR; }
 
-    sprintf(outbuf, GS(MSG_CLI_READING_RDB_BLOCK), s_rdb.block_num);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_READING_RDB_BLOCK), s_rdb.block_num);
     cli_puts(outbuf);
     if (!BlockDev_ReadBlock(bd, s_rdb.block_num, buf)) {
         cli_puts(GS(MSG_CLI_FAILED));
@@ -800,7 +800,7 @@ static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
     }
     cli_puts(GS(MSG_CLI_OK));
 
-    sprintf(outbuf, GS(MSG_CLI_SAVING_TO), path);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_SAVING_TO), path);
     cli_puts(outbuf);
     fh = Open((STRPTR)path, MODE_NEWFILE);
     if (!fh) { cli_puts(GS(MSG_CLI_FAILED_CREATE_FILE)); goto backup_done; }
@@ -834,18 +834,18 @@ static LONG cmd_restore(const char *devname, ULONG unit,
     if (!ask_yn(GS(MSG_CLI_ASK_RESTORE), force))
         return RETURN_OK;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (!fh) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN_FILE), path);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN_FILE), path);
         cli_puts(outbuf);
         BlockDev_Close(bd);
         return RETURN_ERROR;
@@ -853,7 +853,7 @@ static LONG cmd_restore(const char *devname, ULONG unit,
     Seek(fh, 0, OFFSET_END);
     fsize = Seek(fh, 0, OFFSET_BEGINNING);
     if (fsize != (LONG)bd->block_size) {
-        sprintf(outbuf, GS(MSG_CLI_FILESIZE_NE_BLOCKSIZE),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_FILESIZE_NE_BLOCKSIZE),
                 (long)fsize, bd->block_size);
         cli_puts(outbuf);
         Close(fh); BlockDev_Close(bd);
@@ -869,7 +869,7 @@ static LONG cmd_restore(const char *devname, ULONG unit,
     }
     Close(fh); fh = 0;
 
-    sprintf(outbuf, GS(MSG_CLI_LAST_CHANCE_BLOCK0),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_LAST_CHANCE_BLOCK0),
             devname, unit);
     if (!ask_yn(outbuf, force)) { cli_puts(GS(MSG_CLI_ABORTED)); rc = RETURN_OK; goto restore_done; }
 
@@ -903,11 +903,11 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
     BPTR   fh;
     LONG   rc = RETURN_ERROR;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -931,7 +931,7 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
     if (block_hi == RDB_END_MARK || block_hi < block_lo) block_hi = block_lo;
     num_blocks = block_hi - block_lo + 1;
 
-    sprintf(outbuf, GS(MSG_CLI_BACKING_UP_BLOCKS),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_BACKING_UP_BLOCKS),
             num_blocks, block_lo, block_hi, path);
     cli_puts(outbuf);
 
@@ -950,14 +950,14 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
         if (!BlockDev_ReadBlock(bd, blk, buf))
             for (k = 0; k < bd->block_size; k++) buf[k] = 0;
         if (Write(fh, buf, (LONG)bd->block_size) != (LONG)bd->block_size) {
-            sprintf(outbuf, GS(MSG_CLI_WRITE_ERROR_AT_BLOCK), blk);
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_WRITE_ERROR_AT_BLOCK), blk);
             cli_puts(outbuf);
             Close(fh); goto backupext_done;
         }
     }
     Close(fh);
 
-    sprintf(outbuf, GS(MSG_CLI_EXT_BACKUP_SAVED),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_EXT_BACKUP_SAVED),
             num_blocks, block_lo, block_hi);
     cli_puts(outbuf);
     rc = RETURN_OK;
@@ -988,18 +988,18 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
     if (!ask_yn(GS(MSG_CLI_ASK_RESTORE), force))
         return RETURN_OK;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (!fh) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN_FILE), path);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN_FILE), path);
         cli_puts(outbuf);
         BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1031,7 +1031,7 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
         goto restoreext_done;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_LAST_CHANCE_BLOCKS),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_LAST_CHANCE_BLOCKS),
             num_blocks, block_lo, block_lo + num_blocks - 1, devname, unit);
     if (!ask_yn(outbuf, force)) { cli_puts(GS(MSG_CLI_ABORTED)); rc = RETURN_OK; goto restoreext_done; }
 
@@ -1040,19 +1040,19 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
 
     for (blk = 0; blk < num_blocks; blk++) {
         if (Read(fh, buf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(outbuf, GS(MSG_CLI_READ_ERROR_AT_OFFSET), blk);
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_READ_ERROR_AT_OFFSET), blk);
             cli_puts(outbuf);
             FreeVec(buf); goto restoreext_done;
         }
         if (!BlockDev_WriteBlock(bd, block_lo + blk, buf)) {
-            sprintf(outbuf, GS(MSG_CLI_WRITE_FAILED_AT_BLOCK), block_lo + blk);
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_WRITE_FAILED_AT_BLOCK), block_lo + blk);
             cli_puts(outbuf);
             FreeVec(buf); goto restoreext_done;
         }
     }
     FreeVec(buf);
 
-    sprintf(outbuf, GS(MSG_CLI_EXT_RESTORE_COMPLETE), num_blocks);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_EXT_RESTORE_COMPLETE), num_blocks);
     cli_puts(outbuf);
     cli_puts(GS(MSG_CLI_REBOOT_TO_TAKE_EFFECT));
     rc = RETURN_OK;
@@ -1103,11 +1103,11 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
             { cli_puts(GS(MSG_CLI_ADDPART_BAD_BLKSIZE)); return RETURN_WARN; }
     }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1134,12 +1134,12 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
     if (low > high)
         { cli_puts(GS(MSG_CLI_LOW_GT_HIGH)); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
     if (low < s_rdb.lo_cyl) {
-        sprintf(outbuf, GS(MSG_CLI_LOW_BELOW_RESERVED),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_LOW_BELOW_RESERVED),
                 low, (ULONG)s_rdb.lo_cyl);
         cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
     if (high > s_rdb.hi_cyl) {
-        sprintf(outbuf, GS(MSG_CLI_HIGH_EXCEEDS_DISK),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_HIGH_EXCEEDS_DISK),
                 high, (ULONG)s_rdb.hi_cyl);
         cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1154,7 +1154,7 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
         for (i = 0; i < s_rdb.num_parts; i++) {
             struct PartInfo *ex = &s_rdb.parts[i];
             if (low >= ex->low_cyl && low <= ex->high_cyl) {
-                sprintf(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
+                DP_SNPRINTF(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
                         low, high, ex->drive_name,
                         (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
                 cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1167,13 +1167,13 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
         }
         if (clamp_ex) {
             if (enforcesize) {
-                sprintf(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
+                DP_SNPRINTF(outbuf, GS(MSG_CLI_CYLS_OVERLAP),
                         low, high, clamp_ex->drive_name,
                         (ULONG)clamp_ex->low_cyl, (ULONG)clamp_ex->high_cyl);
                 cli_puts(outbuf); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
             }
             high = clamp_to - 1;
-            sprintf(outbuf, GS(MSG_CLI_HIGH_CLAMPED),
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_HIGH_CLAMPED),
                     high, clamp_ex->drive_name, (ULONG)clamp_to);
             cli_puts(outbuf);
         }
@@ -1201,12 +1201,12 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
                          ? s_rdb.heads * s_rdb.sectors : 1;
         FormatDosType(dostype, dtbuf);
         FormatSize((UQUAD)(high - low + 1) * blks_cyl * 512UL, szbuf);
-        sprintf(outbuf, GS(MSG_CLI_ADDING_PART),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_ADDING_PART),
                 name, low, high, dtbuf, szbuf);
         cli_puts(outbuf);
     }
 
-    sprintf(outbuf, GS(MSG_CLI_WRITE_RDB_PROMPT),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_WRITE_RDB_PROMPT),
             (unsigned)s_rdb.num_parts, (unsigned)s_rdb.num_fs);
     if (!ask_yn(outbuf, force)) {
         cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
@@ -1230,10 +1230,10 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
             if (!pi->heads)   pi->heads   = s_rdb.heads;
             if (!pi->sectors) pi->sectors = s_rdb.sectors;
             if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
-                sprintf(outbuf, GS(MSG_CLI_FORMATTED_AS),
+                DP_SNPRINTF(outbuf, GS(MSG_CLI_FORMATTED_AS),
                         mounted[0] ? mounted : pi->drive_name, pi->volume_name);
             } else {
-                sprintf(outbuf, GS(MSG_CLI_FORMAT_FAILED), err);
+                DP_SNPRINTF(outbuf, GS(MSG_CLI_FORMAT_FAILED), err);
             }
             cli_puts(outbuf);
         }
@@ -1256,7 +1256,7 @@ static void cli_grow_progress(void *ud, const char *msg)
 {
     char buf[96];
     (void)ud;
-    sprintf(buf, GS(MSG_SCR_GROW_STEP_FMT), msg);
+    DP_SNPRINTF(buf, GS(MSG_SCR_GROW_STEP_FMT), msg);
     cli_puts(buf);
 }
 
@@ -1279,11 +1279,11 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
     if (nlen == 0) { cli_puts(GS(MSG_SCR_GROW_USAGE)); return RETURN_WARN; }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1296,7 +1296,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     for (i = 0; i < s_rdb.num_parts; i++)
         if (str_eq_ci(s_rdb.parts[i].drive_name, name)) { pi = &s_rdb.parts[i]; break; }
     if (!pi) {
-        sprintf(outbuf, GS(MSG_SCR_GROW_NOT_FOUND_FMT), name);
+        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_NOT_FOUND_FMT), name);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1305,7 +1305,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     else if (SFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_SFS;
     else if (PFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_PFS;
     else {
-        sprintf(outbuf, GS(MSG_SCR_GROW_UNSUPPORTED_FMT), pi->drive_name);
+        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_UNSUPPORTED_FMT), pi->drive_name);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1314,7 +1314,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     sectors  = pi->sectors > 0 ? pi->sectors : s_rdb.sectors;
     blks_cyl = heads * sectors;
     if (blks_cyl == 0) {
-        sprintf(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
+        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1328,7 +1328,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
             gap_max = ex->low_cyl - 1;
     }
     if (gap_max <= pi->high_cyl) {
-        sprintf(outbuf, GS(MSG_SCR_GROW_NO_SPACE_FMT), pi->drive_name);
+        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_NO_SPACE_FMT), pi->drive_name);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1341,13 +1341,13 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
         UQUAD bytes = parse_size_bytes(size_s);
         ULONG add_cyls;
         if (bytes == 0) {
-            sprintf(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
+            DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
             cli_puts(outbuf);
             RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
         add_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
         if (add_cyls == 0) {
-            sprintf(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
+            DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_BAD_SIZE_FMT), size_s);
             cli_puts(outbuf);
             RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
@@ -1355,17 +1355,17 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
         if (new_hi > gap_max) {
             new_hi = gap_max;
             FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
-            sprintf(outbuf, GS(MSG_SCR_GROW_CLAMP_FMT), szbuf);
+            DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_CLAMP_FMT), szbuf);
             cli_puts(outbuf);
         }
     }
 
     FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
-    sprintf(outbuf, GS(MSG_SCR_GROW_PLAN_FMT),
+    DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_PLAN_FMT),
             pi->drive_name, (ULONG)old_hi, (ULONG)new_hi, szbuf);
     cli_puts(outbuf);
 
-    sprintf(outbuf, GS(MSG_SCR_GROW_ASK), pi->drive_name);
+    DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_ASK), pi->drive_name);
     if (!ask_yn(outbuf, force)) {
         cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
@@ -1374,12 +1374,12 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     umerr[0] = rmerr[0] = '\0';
     pi->high_cyl = new_hi;
 
-    sprintf(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+    DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
     cli_grow_progress(NULL, step);
     if (!UnmountPartition(bd, pi->drive_name,
                           cli_grow_progress, NULL, umerr, sizeof(umerr))) {
         pi->high_cyl = old_hi;
-        sprintf(outbuf, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
+        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
                 pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1405,7 +1405,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
         strncpy(diag, outbuf, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
         pi->high_cyl = old_hi;
         MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
-        sprintf(outbuf, GS(MSG_SCR_GROW_FAIL_FMT), diag);
+        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_FAIL_FMT), diag);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
@@ -1419,17 +1419,17 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     cli_puts(GS(MSG_CLI_OK));
 
     if (fskind == CLI_GROW_FFS) {
-        sprintf(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
         cli_grow_progress(NULL, step);
         if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
             MaterializeVolume(mnt);
-            sprintf(outbuf, GS(MSG_SCR_GROW_REMOUNTED_FMT), pi->drive_name);
+            DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_REMOUNTED_FMT), pi->drive_name);
             cli_puts(outbuf);
             RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
         }
     }
 
-    sprintf(outbuf, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
+    DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
     cli_puts(outbuf);
     RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
 }
@@ -1466,11 +1466,11 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
         if (parse_dec_strict(stacksize_s, &ss) && ss > 0) stack_size = ss;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1499,7 +1499,7 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
         LONG   fsize;
         UBYTE *buf;
 
-        sprintf(outbuf, GS(MSG_CLI_LOADING), file_s);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_LOADING), file_s);
         cli_puts(outbuf);
         fh = Open((STRPTR)file_s, MODE_OLDFILE);
         if (!fh) {
@@ -1529,19 +1529,19 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
         fi->code      = buf;
         fi->code_size = (ULONG)fsize;
         { char szbuf[20]; FormatSize((UQUAD)fsize, szbuf);
-          sprintf(outbuf, GS(MSG_CLI_OK_SIZE), szbuf); cli_puts(outbuf); }
+          DP_SNPRINTF(outbuf, GS(MSG_CLI_OK_SIZE), szbuf); cli_puts(outbuf); }
     }
     s_rdb.num_fs++;
 
     FormatDosType(dostype, dtbuf);
     if (version)
-        sprintf(outbuf, GS(MSG_CLI_ADDING_FS_VER), dtbuf,
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_ADDING_FS_VER), dtbuf,
                 (ULONG)(version >> 16), (ULONG)(version & 0xFFFF));
     else
-        sprintf(outbuf, GS(MSG_CLI_ADDING_FS), dtbuf);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_ADDING_FS), dtbuf);
     cli_puts(outbuf);
 
-    sprintf(outbuf, GS(MSG_CLI_WRITE_RDB_PROMPT),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_WRITE_RDB_PROMPT),
             (unsigned)s_rdb.num_parts, (unsigned)s_rdb.num_fs);
     if (!ask_yn(outbuf, force)) {
         cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
@@ -1574,11 +1574,11 @@ static LONG cmd_check(const char *devname, ULONG unit)
     struct BlockDev *bd;
     ULONG errs;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1611,11 +1611,11 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
         cli_puts(GS(MSG_CLI_VERIFY_NEED_FILE)); return RETURN_WARN;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1634,7 +1634,7 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
     fsize = Seek(fh, 0, OFFSET_BEGINNING);
 
     if (fsize != (LONG)bd->block_size) {
-        sprintf(outbuf, GS(MSG_CLI_FILESIZE_NE_BLOCKSIZE2),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_FILESIZE_NE_BLOCKSIZE2),
                 (long)fsize, (unsigned long)bd->block_size);
         cli_puts(outbuf);
         Close(fh); RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1675,7 +1675,7 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
         cli_puts(GS(MSG_CLI_VERIFY_MATCH));
         return RETURN_OK;
     } else {
-        sprintf(outbuf, GS(MSG_CLI_VERIFY_MISMATCH),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_VERIFY_MISMATCH),
                 (unsigned long)diff_count, (unsigned long)first_diff);
         cli_puts(outbuf);
         return RETURN_WARN;
@@ -1695,11 +1695,11 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
         cli_puts(GS(MSG_CLI_VERIFYEXT_NEED_FILE)); return RETURN_WARN;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1721,7 +1721,7 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
     num_blocks = hdr[4];
 
     if (block_size != bd->block_size) {
-        sprintf(outbuf, GS(MSG_CLI_BLOCKSIZE_MISMATCH_DETAIL),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_BLOCKSIZE_MISMATCH_DETAIL),
                 (unsigned long)block_size, (unsigned long)bd->block_size);
         cli_puts(outbuf);
         Close(fh); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1739,7 +1739,7 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
         BlockDev_Close(bd); return RETURN_ERROR;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_VERIFYING_BLOCKS),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_VERIFYING_BLOCKS),
             (unsigned long)num_blocks, (unsigned long)block_lo);
     cli_puts(outbuf);
 
@@ -1748,23 +1748,23 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
         ULONG i, diff = 0;
 
         if (Read(fh, fbuf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(outbuf, GS(MSG_CLI_BLK_FILE_READ_ERROR), (unsigned long)disk_blk);
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_BLK_FILE_READ_ERROR), (unsigned long)disk_blk);
             cli_puts(outbuf); bad_blocks++; break;
         }
         if (!BlockDev_ReadBlock(bd, disk_blk, dbuf)) {
-            sprintf(outbuf, GS(MSG_CLI_BLK_DISK_READ_ERROR), (unsigned long)disk_blk);
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_BLK_DISK_READ_ERROR), (unsigned long)disk_blk);
             cli_puts(outbuf); bad_blocks++; continue;
         }
         for (i = 0; i < block_size; i++)
             if (fbuf[i] != dbuf[i]) diff++;
 
         if (diff == 0) {
-            sprintf(outbuf, GS(MSG_CLI_BLK_MATCH), (unsigned long)disk_blk);
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_BLK_MATCH), (unsigned long)disk_blk);
         } else {
             ULONG first = 0;
             for (first = 0; first < block_size; first++)
                 if (fbuf[first] != dbuf[first]) break;
-            sprintf(outbuf, GS(MSG_CLI_BLK_MISMATCH),
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_BLK_MISMATCH),
                     (unsigned long)disk_blk,
                     (unsigned long)diff,
                     (unsigned long)first);
@@ -1777,12 +1777,12 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
     BlockDev_Close(bd);
 
     if (bad_blocks == 0) {
-        sprintf(outbuf, GS(MSG_CLI_VERIFY_PASS),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_VERIFY_PASS),
                 (unsigned long)num_blocks);
         cli_puts(outbuf);
         return RETURN_OK;
     } else {
-        sprintf(outbuf, GS(MSG_CLI_VERIFY_FAIL),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_VERIFY_FAIL),
                 (unsigned long)bad_blocks, (unsigned long)num_blocks);
         cli_puts(outbuf);
         return RETURN_WARN;
@@ -1808,11 +1808,11 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
     if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
     if (nlen == 0) { cli_puts(GS(MSG_CLI_DELPART_NAME_EMPTY)); return RETURN_WARN; }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf); return RETURN_ERROR;
     }
 
@@ -1824,7 +1824,7 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
 
     for (i = 0; i < s_rdb.num_parts; i++) {
         if (str_eq_ci(s_rdb.parts[i].drive_name, name)) {
-            sprintf(outbuf, GS(MSG_CLI_DELETE_CONFIRM),
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_DELETE_CONFIRM),
                     s_rdb.parts[i].drive_name,
                     (ULONG)s_rdb.parts[i].low_cyl,
                     (ULONG)s_rdb.parts[i].high_cyl);
@@ -1846,9 +1846,9 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
                 char err[80];
                 err[0] = '\0';
                 if (UnmountDevice(name, err, sizeof(err)))
-                    sprintf(outbuf, GS(MSG_CLI_UNMOUNTED), name);
+                    DP_SNPRINTF(outbuf, GS(MSG_CLI_UNMOUNTED), name);
                 else
-                    sprintf(outbuf, GS(MSG_CLI_STILL_MOUNTED),
+                    DP_SNPRINTF(outbuf, GS(MSG_CLI_STILL_MOUNTED),
                             name, err);
                 cli_puts(outbuf);
             }
@@ -1859,7 +1859,7 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
         }
     }
 
-    sprintf(outbuf, GS(MSG_CLI_PART_NOT_FOUND), name);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_PART_NOT_FOUND), name);
     cli_puts(outbuf);
     RDB_FreeCode(&s_rdb);
     BlockDev_Close(bd);
@@ -1881,7 +1881,7 @@ static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
     /* Check for existing RDB - affects question wording only */
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (RDB_Read(bd, &s_rdb) && s_rdb.valid) {
-        sprintf(outbuf, GS(MSG_CLI_INIT_EXISTING_RDB),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_INIT_EXISTING_RDB),
                 (ULONG)s_rdb.cylinders, (unsigned)s_rdb.num_parts);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb);
@@ -1899,7 +1899,7 @@ static LONG cmd_init_new(struct BlockDev *bd, BOOL force)
     {
         UQUAD total = (UQUAD)cyls * heads * sects * 512UL;
         FormatSize(total, szbuf);
-        sprintf(outbuf, GS(MSG_CLI_GEOMETRY_LINE),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_GEOMETRY_LINE),
                 cyls, heads, sects, szbuf);
         cli_puts(outbuf);
     }
@@ -1960,7 +1960,7 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
         FormatSize(bd->total_bytes, szbuf_new);
     }
 
-    sprintf(outbuf, GS(MSG_CLI_NEWGEO_COMPARE),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_NEWGEO_COMPARE),
             (ULONG)s_rdb.cylinders, szbuf_old,
             new_cyls,               szbuf_new);
     cli_puts(outbuf);
@@ -1971,7 +1971,7 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
         return RETURN_OK;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_NEWGEO_CHANGE),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_NEWGEO_CHANGE),
             (ULONG)s_rdb.cylinders, new_cyls);
     cli_puts(outbuf);
 
@@ -1992,7 +1992,7 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
     }
     cli_puts(GS(MSG_CLI_OK));
 
-    sprintf(outbuf, GS(MSG_CLI_RDB_UPDATED_CYLS),
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_RDB_UPDATED_CYLS),
             new_cyls, szbuf_new);
     cli_puts(outbuf);
 
@@ -2011,17 +2011,17 @@ static LONG cmd_init(const char *devname, ULONG unit,
     LONG rc;
 
     if (!str_eq_ci(mode, "NEW") && !str_eq_ci(mode, "NEWGEO")) {
-        sprintf(outbuf, GS(MSG_CLI_INIT_UNKNOWN_MODE), mode);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_INIT_UNKNOWN_MODE), mode);
         cli_puts(outbuf);
         return RETURN_WARN;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
@@ -2063,13 +2063,13 @@ static BOOL cli_prog_cb(void *ud, ULONG cur, ULONG total)
         ULONG pct = (cur * 100UL) / total;
         if (cur != total && pct < p->last_pct + 5) return TRUE;
         p->last_pct = pct;
-        sprintf(outbuf, GS(MSG_CLI_PROGRESS_PCT),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_PROGRESS_PCT),
                 (unsigned long)pct,
                 (unsigned long)cur, (unsigned long)total);
     } else {
         if (cur < p->last_blocks + 102400) return TRUE;   /* every 50 MB */
         p->last_blocks = cur;
-        sprintf(outbuf, GS(MSG_CLI_PROGRESS_BLOCKS), (unsigned long)cur);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_PROGRESS_BLOCKS), (unsigned long)cur);
     }
     cli_puts(outbuf);
     Flush(Output());
@@ -2084,26 +2084,26 @@ static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
     BOOL  ok;
     struct CliProg prog;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
     if (bd->total_bytes > IMAGE_LARGE_THRESHOLD) {
         FormatSize(bd->total_bytes, szbuf);
-        sprintf(outbuf, GS(MSG_CLI_IMAGEOUT_LARGE_WARN), szbuf);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_IMAGEOUT_LARGE_WARN), szbuf);
         cli_puts(outbuf);
     }
 
     FormatSize(bd->total_bytes, szbuf);
-    sprintf(outbuf, GS(MSG_CLI_SOURCE_SIZE), szbuf);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_SOURCE_SIZE), szbuf);
     cli_puts(outbuf);
-    sprintf(outbuf, GS(MSG_CLI_WRITING_IMAGE_TO), path);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_WRITING_IMAGE_TO), path);
     cli_puts(outbuf);
 
     prog.last_pct = 0;
@@ -2116,7 +2116,7 @@ static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
     BlockDev_Close(bd);
 
     if (!ok) {
-        sprintf(outbuf, GS(MSG_CLI_DUMP_FAILED),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_DUMP_FAILED),
                 errbuf[0] ? errbuf : GS(MSG_CLI_UNKNOWN));
         cli_puts(outbuf);
         return RETURN_ERROR;
@@ -2137,16 +2137,16 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
     if (!ask_yn(GS(MSG_CLI_ASK_RESTORE), force))
         return RETURN_OK;
 
-    sprintf(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
     bd = BlockDev_Open(devname, unit);
     if (!bd) {
-        sprintf(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
         cli_puts(outbuf);
         return RETURN_ERROR;
     }
 
-    sprintf(outbuf, GS(MSG_CLI_READING_IMAGE_FROM), path);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_READING_IMAGE_FROM), path);
     cli_puts(outbuf);
 
     prog.last_pct = 0;
@@ -2159,7 +2159,7 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
     BlockDev_Close(bd);
 
     if (!ok) {
-        sprintf(outbuf, GS(MSG_CLI_RESTORE_FAILED),
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_RESTORE_FAILED),
                 errbuf[0] ? errbuf : GS(MSG_CLI_UNKNOWN));
         cli_puts(outbuf);
         return RETURN_ERROR;

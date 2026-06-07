@@ -302,14 +302,14 @@ void partition_advanced_dialog(struct PartInfo *pi)
         bufmem_labels[bl_i] = GS(bufmem_label_ids[bl_i]);
     bufmem_labels[NUM_BUFMEM_TYPES] = NULL;
 
-    sprintf(buffers_str,    "%lu",     (unsigned long)(pi->num_buffer  > 0 ? pi->num_buffer  : 30));
-    sprintf(bootblks_str,   "%lu",     (unsigned long)(pi->boot_blocks > 0 ? pi->boot_blocks :  2));
-    sprintf(maxtrans_str,   "0x%08lX", (unsigned long)pi->max_transfer);
-    sprintf(mask_str,       "0x%08lX", (unsigned long)pi->mask);
-    sprintf(reserved_str,   "%lu",     (unsigned long)(pi->reserved_blks > 0 ? pi->reserved_blks : 2));
-    sprintf(interleave_str, "%lu",     (unsigned long)pi->interleave);
-    sprintf(control_str,    "0x%08lX", (unsigned long)pi->control);
-    sprintf(devflags_str,   "0x%08lX", (unsigned long)pi->dev_flags);
+    DP_SNPRINTF(buffers_str,    "%lu",     (unsigned long)(pi->num_buffer  > 0 ? pi->num_buffer  : 30));
+    DP_SNPRINTF(bootblks_str,   "%lu",     (unsigned long)(pi->boot_blocks > 0 ? pi->boot_blocks :  2));
+    DP_SNPRINTF(maxtrans_str,   "0x%08lX", (unsigned long)pi->max_transfer);
+    DP_SNPRINTF(mask_str,       "0x%08lX", (unsigned long)pi->mask);
+    DP_SNPRINTF(reserved_str,   "%lu",     (unsigned long)(pi->reserved_blks > 0 ? pi->reserved_blks : 2));
+    DP_SNPRINTF(interleave_str, "%lu",     (unsigned long)pi->interleave);
+    DP_SNPRINTF(control_str,    "0x%08lX", (unsigned long)pi->control);
+    DP_SNPRINTF(devflags_str,   "0x%08lX", (unsigned long)pi->dev_flags);
 
     scr = LockPubScreen(NULL);
     if (!scr) goto cleanup;
@@ -554,10 +554,10 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                               ? (UQUAD)cyl_count * bytes_per_cyl : 0;
         ULONG size_mb       = (ULONG)(total_bytes / (1024ULL * 1024ULL));
         if (size_mb == 0 && total_bytes > 0) size_mb = 1;
-        sprintf(sizemb_str, "%lu", (unsigned long)size_mb);
+        DP_SNPRINTF(sizemb_str, "%lu", (unsigned long)size_mb);
     }
-    sprintf(locyl_str,   GS(MSG_DLG_LOCYL_FMT), (unsigned long)pi->low_cyl);
-    sprintf(bootpri_str, "%ld", (long)pi->boot_pri);
+    DP_SNPRINTF(locyl_str,   GS(MSG_DLG_LOCYL_FMT), (unsigned long)pi->low_cyl);
+    DP_SNPRINTF(bootpri_str, "%ld", (long)pi->boot_pri);
     /* Default volume label for a new partition.  Empty means "do not format";
        prefilling makes quick-format the default (the "Do not format" checkbox
        and clearing this field are the opt-outs). */
@@ -805,7 +805,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                         if (destructive) {
                             static char warn_title[80]; /* Intuition keeps ptr */
                             struct EasyStruct es;
-                            sprintf(warn_title, "%s%s", DISKPART_VERTITLE,
+                            DP_SNPRINTF(warn_title, "%s%s", DISKPART_VERTITLE,
                                     GS(MSG_DLG_WARN_SUFFIX));
                             es.es_StructSize   = sizeof(es);
                             es.es_Flags        = 0;
@@ -915,9 +915,9 @@ void show_about(struct Window *win)
     struct EasyStruct es;
     char body[512];
     static char about_title[80];   /* Intuition keeps the pointer */
-    sprintf(body, GS(MSG_DLG_ABOUT_BODY),
+    DP_SNPRINTF(body, GS(MSG_DLG_ABOUT_BODY),
         DISKPART_VERSION, DiskPart_BuildStamp);
-    sprintf(about_title, "%s%s", GS(MSG_DLG_ABOUT_PREFIX), DISKPART_VERTITLE);
+    DP_SNPRINTF(about_title, "%s%s", GS(MSG_DLG_ABOUT_PREFIX), DISKPART_VERTITLE);
 
     es.es_StructSize   = sizeof(es);
     es.es_Flags        = 0;
@@ -964,9 +964,9 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
     if (def_heads == 0) def_heads = 1;
     if (def_secs  == 0) def_secs  = 1;
 
-    sprintf(cyls_str,  "%lu", (unsigned long)def_cyls);
-    sprintf(heads_str, "%lu", (unsigned long)def_heads);
-    sprintf(secs_str,  "%lu", (unsigned long)def_secs);
+    DP_SNPRINTF(cyls_str,  "%lu", (unsigned long)def_cyls);
+    DP_SNPRINTF(heads_str, "%lu", (unsigned long)def_heads);
+    DP_SNPRINTF(secs_str,  "%lu", (unsigned long)def_secs);
     size_str[0] = '\0';
 
     scr = LockPubScreen(NULL);
@@ -1162,13 +1162,13 @@ BOOL geometry_dialog(ULONG def_cyls, ULONG def_heads, ULONG def_secs,
                         if (new_cyls > 0) {
                             struct TagItem st[2];
                             st[1].ti_Tag = TAG_DONE; st[1].ti_Data = 0;
-                            sprintf(cyls_str,  "%lu", new_cyls);
+                            DP_SNPRINTF(cyls_str,  "%lu", new_cyls);
                             st[0].ti_Tag = GTST_String; st[0].ti_Data = (ULONG)cyls_str;
                             GT_SetGadgetAttrsA(cyls_gad,  win, NULL, st);
-                            sprintf(heads_str, "16");
+                            DP_SNPRINTF(heads_str, "16");
                             st[0].ti_Data = (ULONG)heads_str;
                             GT_SetGadgetAttrsA(heads_gad, win, NULL, st);
-                            sprintf(secs_str,  "63");
+                            DP_SNPRINTF(secs_str,  "63");
                             st[0].ti_Data = (ULONG)secs_str;
                             GT_SetGadgetAttrsA(secs_gad,  win, NULL, st);
                         }

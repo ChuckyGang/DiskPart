@@ -249,11 +249,11 @@ static ULONG lv_render(void)
     }
 
     /* Lo Cyl */
-    sprintf(tmp, "%lu", (unsigned long)pi->low_cyl);
+    DP_SNPRINTF(tmp, "%lu", (unsigned long)pi->low_cyl);
     LV_RIGHT(LVCOL_LOCYL, tmp, strlen(tmp));
 
     /* Hi Cyl */
-    sprintf(tmp, "%lu", (unsigned long)pi->high_cyl);
+    DP_SNPRINTF(tmp, "%lu", (unsigned long)pi->high_cyl);
     LV_RIGHT(LVCOL_HICYL, tmp, strlen(tmp));
 
     /* Filesystem */
@@ -277,7 +277,7 @@ static ULONG lv_render(void)
     }
 
     /* Boot priority - prefix "* " when the partition is bootable. */
-    sprintf(tmp, "%s%ld", (pi->flags & 1) ? "* " : "", (long)pi->boot_pri);
+    DP_SNPRINTF(tmp, "%s%ld", (pi->flags & 1) ? "* " : "", (long)pi->boot_pri);
     LV_TEXT(LVCOL_BOOT, tmp, strlen(tmp));
 
 #undef LV_TEXT
@@ -366,7 +366,7 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
         FormatSize(bytes, sz);
 
         /* Boot column: "*" before the priority when the partition is bootable. */
-        sprintf(boot, "%s%ld", (pi->flags & 1) ? "*" : "", (long)pi->boot_pri);
+        DP_SNPRINTF(boot, "%s%ld", (pi->flags & 1) ? "*" : "", (long)pi->boot_pri);
 
         /* ">" marker for selected row, space otherwise */
         snprintf(part_strs[i], sizeof(part_strs[i]),
@@ -620,8 +620,8 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
             char lo_str[24], hi_str[24];
             WORD label_y = by + (WORD)bh + 2 + fb;
 
-            sprintf(lo_str, GS(MSG_PV_CYL_FMT), (unsigned long)lo);
-            sprintf(hi_str, GS(MSG_PV_CYL_FMT), (unsigned long)hi);
+            DP_SNPRINTF(lo_str, GS(MSG_PV_CYL_FMT), (unsigned long)lo);
+            DP_SNPRINTF(hi_str, GS(MSG_PV_CYL_FMT), (unsigned long)hi);
 
             /* Erase the label strip before redrawing - prevents ghost text
                when the map is redrawn at a different position after resize. */
@@ -851,7 +851,7 @@ static void draw_info(struct Window *win, const char *devname, ULONG unit,
 
     /* Line 2: full geometry so large cylinder counts never clip */
     if (rdb && rdb->cylinders > 0)
-        sprintf(line2, GS(MSG_PV_INFO_GEOMETRY_FMT),
+        DP_SNPRINTF(line2, GS(MSG_PV_INFO_GEOMETRY_FMT),
                 (unsigned long)rdb->cylinders,
                 (unsigned long)rdb->heads,
                 (unsigned long)rdb->sectors);
@@ -870,7 +870,7 @@ static void draw_info(struct Window *win, const char *devname, ULONG unit,
         }
         { ULONG bsz = (rdb->blk_size > 0) ? rdb->blk_size : 512;
           FormatSize((UQUAD)free_cyls * rdb->heads * rdb->sectors * bsz, fsz); }
-        sprintf(line3, GS(MSG_PV_INFO_RDB_FMT),
+        DP_SNPRINTF(line3, GS(MSG_PV_INFO_RDB_FMT),
                 (unsigned)rdb->num_parts,
                 rdb->num_parts == 1 ? "" : "s", fsz);
     } else {
@@ -1002,7 +1002,7 @@ static void next_drive_name(const struct RDBInfo *rdb, char *buf)
         UWORD k;
         BOOL  taken = FALSE;
         char  cand[8];
-        sprintf(cand, "DH%lu", n);
+        DP_SNPRINTF(cand, "DH%lu", n);
 
         /* Check partitions already in this RDB */
         for (k = 0; k < rdb->num_parts && !taken; k++)
@@ -1461,16 +1461,16 @@ static BOOL format_pending_partitions(struct Window *win, struct BlockDev *bd,
         any = 1;
 
         if (!bd || bd->backend == BD_FILE) {
-            sprintf(line, GS(MSG_PV_FMT_SKIPPED_IMAGE), pi->drive_name);
+            DP_SNPRINTF(line, GS(MSG_PV_FMT_SKIPPED_IMAGE), pi->drive_name);
             need_reboot = TRUE;   /* exists in RDB but not mounted */
         } else {
             char err[80], mounted[40];
             err[0] = '\0';
             if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
-                sprintf(line, GS(MSG_PV_FMT_FORMATTED),
+                DP_SNPRINTF(line, GS(MSG_PV_FMT_FORMATTED),
                         mounted[0] ? mounted : pi->drive_name, pi->volume_name);
             } else {
-                sprintf(line, GS(MSG_PV_FMT_FAILED), pi->drive_name, err);
+                DP_SNPRINTF(line, GS(MSG_PV_FMT_FAILED), pi->drive_name, err);
                 need_reboot = TRUE;   /* not mounted - reboot to pick it up */
             }
         }
@@ -1506,7 +1506,7 @@ static void set_title_dirty(struct Window *win, const char *devname, ULONG unit,
                             BOOL dirty)
 {
     static char t[96];
-    int n = sprintf(t, "%s", DISKPART_VERTITLE);
+    int n = DP_SNPRINTF(t, "%s", DISKPART_VERTITLE);
     sprintf(t + n, GS(MSG_PV_TITLE_UNIT_FMT),
             devname, (unsigned long)unit,
             dirty ? GS(MSG_PV_TITLE_UNSAVED) : "");
@@ -1553,9 +1553,9 @@ static BOOL unmount_deleted_partitions(struct Window *win, struct RDBInfo *rdb)
         any = 1;
         err[0] = '\0';
         if (UnmountDevice(nm, err, sizeof(err))) {
-            sprintf(line, GS(MSG_PV_UNMOUNTED), nm);
+            DP_SNPRINTF(line, GS(MSG_PV_UNMOUNTED), nm);
         } else {
-            sprintf(line, GS(MSG_PV_STILL_MOUNTED), nm, err);
+            DP_SNPRINTF(line, GS(MSG_PV_STILL_MOUNTED), nm, err);
             need_reboot = TRUE;
         }
         if (rlen + strlen(line) < sizeof(report) - 1)
@@ -1707,7 +1707,7 @@ BOOL partview_run(const char *devname, ULONG unit)
         UWORD min_h   = fixed_est + row_h * 2;
 
         {
-            int n = sprintf(win_title, "%s", DISKPART_VERTITLE);
+            int n = DP_SNPRINTF(win_title, "%s", DISKPART_VERTITLE);
             sprintf(win_title + n, GS(MSG_PV_TITLE_UNIT_FMT),
                     devname, (unsigned long)unit, "");
         }
@@ -1889,7 +1889,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     needs_reboot = FALSE;
                                 }
                             } else {
-                                sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
+                                DP_SNPRINTF(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
                                         (int)bd->last_io_err);
                                 es.es_TextFormat   = (UBYTE *)wfmt;
                                 es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
@@ -2123,14 +2123,14 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                                 LONG r;
                                 if (is_grow) {
-                                    sprintf(msg, GS(MSG_PV_RESIZE_GROWN_BODY),
+                                    DP_SNPRINTF(msg, GS(MSG_PV_RESIZE_GROWN_BODY),
                                         rdb->parts[confirmed_part].drive_name);
                                     /* Button slots: 1=Resize, 2=Cancel, 0=Grow w/o resize.
                                        Extra spaces around the destructive option push it
                                        to the right edge and make accidental clicks harder. */
                                     es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_RESIZE_GROW_GADGETS);
                                 } else {
-                                    sprintf(msg, GS(MSG_PV_RESIZE_SHRUNK_BODY),
+                                    DP_SNPRINTF(msg, GS(MSG_PV_RESIZE_SHRUNK_BODY),
                                         rdb->parts[confirmed_part].drive_name);
                                     es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_RESIZE_SHRUNK_GADGETS);
                                 }
@@ -2417,7 +2417,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     char td_sz[16], rc_sz[16];
                                     FormatSize(bd->td_total_bytes, td_sz);
                                     FormatSize(rc_bytes, rc_sz);
-                                    sprintf(driver_warn, GS(MSG_PV_INIT_DRIVER_WARN),
+                                    DP_SNPRINTF(driver_warn, GS(MSG_PV_INIT_DRIVER_WARN),
                                         rc_sz, td_sz);
                                 }
                             }
@@ -2443,7 +2443,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 char msg[512];
                                 geom_retry = FALSE;
 
-                                sprintf(msg, GS(MSG_PV_INIT_HAS_RDB_BODY),
+                                DP_SNPRINTF(msg, GS(MSG_PV_INIT_HAS_RDB_BODY),
                                     (unsigned)rdb->num_parts,
                                     rdb->num_parts == 1 ? "" : "s",
                                     (unsigned long)real_cyls,
@@ -2527,7 +2527,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 char msg_nordb[512];
                                 geom_retry = FALSE;
 
-                                sprintf(msg_nordb, GS(MSG_PV_INIT_NO_RDB_BODY),
+                                DP_SNPRINTF(msg_nordb, GS(MSG_PV_INIT_NO_RDB_BODY),
                                     driver_warn);
 
                                 es.es_StructSize   = sizeof(es);
@@ -2641,7 +2641,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                         if (sel >= 0 && sel < (WORD)rdb->num_parts) {
                             struct EasyStruct es;
                             char msg[128];
-                            sprintf(msg, GS(MSG_PV_DELETE_BODY),
+                            DP_SNPRINTF(msg, GS(MSG_PV_DELETE_BODY),
                                 rdb->parts[sel].drive_name);
                             es.es_StructSize   = sizeof(es);
                             es.es_Flags        = 0;
@@ -2729,7 +2729,7 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                             if (new_lo > rdb->lo_cyl && blk_part < 0) {
                                 /* Safe: no partition starts inside the new reserved area */
-                                sprintf(wfmt, GS(MSG_PV_OVERFLOW_INCREASE_BODY),
+                                DP_SNPRINTF(wfmt, GS(MSG_PV_OVERFLOW_INCREASE_BODY),
                                     (unsigned long)bd->last_overflow_need,
                                     (unsigned long)bd->last_overflow_avail,
                                     (unsigned long)rdb->lo_cyl,
@@ -2742,7 +2742,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     dirty       = TRUE;
                                     write_ok    = RDB_Write(bd, rdb);
                                     if (!write_ok) {
-                                        sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_LOCYL),
+                                        DP_SNPRINTF(wfmt, GS(MSG_PV_WRITE_FAILED_LOCYL),
                                             (int)bd->last_io_err);
                                         es.es_TextFormat   = (UBYTE *)wfmt;
                                         es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
@@ -2751,7 +2751,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 }
                             } else if (blk_part >= 0) {
                                 /* A partition blocks the expansion */
-                                sprintf(wfmt, GS(MSG_PV_OVERFLOW_BLOCKED),
+                                DP_SNPRINTF(wfmt, GS(MSG_PV_OVERFLOW_BLOCKED),
                                     (unsigned long)new_lo,
                                     rdb->parts[blk_part].drive_name,
                                     (unsigned long)rdb->parts[blk_part].low_cyl,
@@ -2761,7 +2761,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                 EasyRequest(win, &es, NULL);
                             } else {
-                                sprintf(wfmt, GS(MSG_PV_OVERFLOW_PLAIN),
+                                DP_SNPRINTF(wfmt, GS(MSG_PV_OVERFLOW_PLAIN),
                                     (unsigned long)bd->last_overflow_need,
                                     (unsigned long)bd->last_overflow_avail);
                                 es.es_TextFormat   = (UBYTE *)wfmt;
@@ -2770,7 +2770,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                             }
                         } else if (!write_ok) {
                             if (bd && bd->last_io_err == 1)
-                                sprintf(wfmt, GS(MSG_PV_VERIFY_FAIL_FMT),
+                                DP_SNPRINTF(wfmt, GS(MSG_PV_VERIFY_FAIL_FMT),
                                     (unsigned long)bd->last_verify_block,
                                     (unsigned long)bd->last_verify_off,
                                     bd->last_wrote[0], bd->last_wrote[1],
@@ -2778,7 +2778,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     bd->last_read[0],  bd->last_read[1],
                                     bd->last_read[2],  bd->last_read[3]);
                             else
-                                sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
+                                DP_SNPRINTF(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
                                     bd ? (int)bd->last_io_err : 0);
                             es.es_TextFormat   = (UBYTE *)wfmt;
                             es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
@@ -2828,7 +2828,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                         needs_reboot = FALSE;
                                     }
                                 } else {
-                                    sprintf(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
+                                    DP_SNPRINTF(wfmt, GS(MSG_PV_WRITE_FAILED_FMT),
                                             (int)bd->last_io_err);
                                     es.es_TextFormat   = (UBYTE *)wfmt;
                                     es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);

@@ -209,11 +209,11 @@ static BOOL prog_cb(void *ud, ULONG cur, ULONG total)
         ULONG pct = (cur * 100UL) / total;
         if (cur != total && pct == p->last_pct) return TRUE;
         p->last_pct = pct;
-        sprintf(line, GS(MSG_IMG_PROGRESS_PCT_FMT),
+        DP_SNPRINTF(line, GS(MSG_IMG_PROGRESS_PCT_FMT),
                 (unsigned long)cur, (unsigned long)total,
                 (unsigned long)pct);
     } else {
-        sprintf(line, GS(MSG_IMG_PROGRESS_COPIED_FMT), (unsigned long)cur);
+        DP_SNPRINTF(line, GS(MSG_IMG_PROGRESS_COPIED_FMT), (unsigned long)cur);
     }
 
     /* Pad to 60 chars so any previous longer text is fully erased. */
@@ -256,7 +256,7 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
     if (disk_bytes > cap_bytes) {
         char body[400];
         FormatSize(disk_bytes, size_str);
-        sprintf(body, GS(MSG_IMG_DUMP_LARGE_WARN_FMT), size_str);
+        DP_SNPRINTF(body, GS(MSG_IMG_DUMP_LARGE_WARN_FMT), size_str);
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_WARN_TITLE);
         es.es_TextFormat=(UBYTE*)body;

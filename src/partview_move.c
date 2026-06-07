@@ -80,7 +80,7 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
     ULONG root_abs   = part_abs + root;
 
     if (!BlockDev_ReadBlock(bd, root_abs, buf)) {
-        sprintf(msg,
+        DP_SNPRINTF(msg,
                 GS(MSG_MOVE_CHK_READ_FAIL_FMT),
                 pi->drive_name,
                 (unsigned long)part_abs,
@@ -121,7 +121,7 @@ void check_ffs_root(struct Window *win, struct BlockDev *bd,
     ULONG disk_size   = buf[4];
     BOOL  dsz_ok      = (disk_size == num_blocks);
 
-    sprintf(msg,
+    DP_SNPRINTF(msg,
             GS(MSG_MOVE_CHK_REPORT_FMT),
             pi->drive_name, (unsigned long)heads, (unsigned long)sectors,
             (unsigned long)root, (unsigned long)root_abs,
@@ -282,7 +282,7 @@ static void draw_move_warn_text(struct Window *pw,
     WTEXT(GS(MSG_MOVE_WARN_L1))
     y = (WORD)(y + lh / 2);
 
-    sprintf(line, GS(MSG_MOVE_WARN_PART_FMT),
+    DP_SNPRINTF(line, GS(MSG_MOVE_WARN_PART_FMT),
             pname, (unsigned long)lo, (unsigned long)hi);
     WTEXT(line)
     WTEXT(GS(MSG_MOVE_WARN_COPIED))
@@ -330,7 +330,7 @@ BOOL offer_move_partition(struct Window *win,
     UWORD win_w, win_h, warn_h, gad_x, gad_w;
     UWORD str_y, chk_y, btn_y, half;
 
-    sprintf(cyl_str, "%lu",
+    DP_SNPRINTF(cyl_str, "%lu",
             (unsigned long)(default_lo ? default_lo : pi->low_cyl));
 
     scr = LockPubScreen(NULL);
@@ -389,7 +389,7 @@ BOOL offer_move_partition(struct Window *win,
         struct NewGadget ng;
         struct TagItem cbt[] = { { GTCB_Checked, FALSE }, { TAG_DONE, 0 } };
         static char chk_lbl[48];
-        sprintf(chk_lbl, GS(MSG_MOVE_BACKUP_CHK_FMT), pi->drive_name);
+        DP_SNPRINTF(chk_lbl, GS(MSG_MOVE_BACKUP_CHK_FMT), pi->drive_name);
         memset(&ng, 0, sizeof(ng));
         ng.ng_VisualInfo = vi;
         ng.ng_TextAttr   = scr->Font;
@@ -569,11 +569,11 @@ BOOL offer_move_partition(struct Window *win,
                 struct EasyStruct ok_es;
                 static char ok_msg[384];
                 if (wrote_rdb) {
-                    sprintf(ok_msg,
+                    DP_SNPRINTF(ok_msg,
                         GS(MSG_MOVE_OK_RDB_WRITTEN_FMT),
                         pi->drive_name, err_buf);
                 } else {
-                    sprintf(ok_msg,
+                    DP_SNPRINTF(ok_msg,
                         GS(MSG_MOVE_OK_RDB_FAILED_FMT),
                         pi->drive_name, err_buf);
                 }
@@ -587,7 +587,7 @@ BOOL offer_move_partition(struct Window *win,
             } else {
                 struct EasyStruct err_es;
                 static char err_msg[384];
-                sprintf(err_msg,
+                DP_SNPRINTF(err_msg,
                     GS(MSG_MOVE_FAILED_FMT),
                     err_buf);
                 err_es.es_StructSize   = sizeof(err_es);
@@ -774,7 +774,7 @@ static struct Window *grow_open_progress(struct Window *win, CONST_STRPTR title,
 static void grow_say(struct GrowProgUD *pu, CONST_STRPTR fmt, const char *arg)
 {
     char buf[GROW_LOG_LINE];
-    if (arg) sprintf(buf, fmt, arg);
+    if (arg) DP_SNPRINTF(buf, fmt, arg);
     else     grow_str_copy(buf, fmt, sizeof(buf));
     ffs_grow_progress(pu, buf);
 }
@@ -829,7 +829,7 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             static char busy_msg[256];
             if (prog_win) CloseWindow(prog_win);
             pi->high_cyl = old_hi;                 /* undo the size change */
-            sprintf(busy_msg,
+            DP_SNPRINTF(busy_msg,
                     GS(MSG_MOVE_BUSY_FMT),
                     pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
             busy_es.es_StructSize   = sizeof(busy_es);
@@ -857,14 +857,14 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
                 MaterializeVolume(mnt);
                 grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
                 rc = GROW_REMOUNTED;
-                sprintf(ok_msg,
+                DP_SNPRINTF(ok_msg,
                         GS(MSG_MOVE_FFS_REMOUNTED_FMT),
                         pi->drive_name, mnt, errbuf);
             } else {
                 /* Grow worked but the volume couldn't be remounted live. */
                 grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
                 rc = GROW_NEED_REBOOT;
-                sprintf(ok_msg,
+                DP_SNPRINTF(ok_msg,
                         GS(MSG_MOVE_FFS_REMOUNT_FAIL_FMT),
                         pi->drive_name, rmerr[0] ? rmerr : GS(MSG_MOVE_QMARK), errbuf);
             }
@@ -885,7 +885,7 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
             if (prog_win) CloseWindow(prog_win);
             rc = GROW_ABORTED;
-            sprintf(full_msg,
+            DP_SNPRINTF(full_msg,
                     GS(MSG_MOVE_FFS_FAIL_RESTORED_FMT),
                     errbuf);
             err_es.es_StructSize   = sizeof(err_es);
@@ -930,7 +930,7 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
         if (result) {
             struct EasyStruct ok_es;
             static char ok_msg[512];
-            sprintf(ok_msg,
+            DP_SNPRINTF(ok_msg,
                     GS(MSG_MOVE_PFS_OK_FMT), errbuf);
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
@@ -941,7 +941,7 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
-            sprintf(full_msg, GS(MSG_MOVE_PFS_FAIL_FMT), errbuf);
+            DP_SNPRINTF(full_msg, GS(MSG_MOVE_PFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
             err_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_FAIL_TITLE);
@@ -991,11 +991,11 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
             if (prog_win) CloseWindow(prog_win);
             if (wrote_rdb) {
-                sprintf(ok_msg,
+                DP_SNPRINTF(ok_msg,
                         GS(MSG_MOVE_SFS_OK_RDB_WRITTEN_FMT),
                         pi->drive_name, pi->drive_name, errbuf);
             } else {
-                sprintf(ok_msg,
+                DP_SNPRINTF(ok_msg,
                         GS(MSG_MOVE_SFS_OK_RDB_FAILED_FMT),
                         pi->drive_name, pi->drive_name, errbuf);
             }
@@ -1009,7 +1009,7 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             struct EasyStruct err_es;
             static char full_msg[384];
             if (prog_win) CloseWindow(prog_win);
-            sprintf(full_msg, GS(MSG_MOVE_SFS_FAIL_FMT), errbuf);
+            DP_SNPRINTF(full_msg, GS(MSG_MOVE_SFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
             err_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROW_FAIL_TITLE);

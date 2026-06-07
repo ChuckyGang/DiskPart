@@ -154,7 +154,7 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
     find_filesys(pi->dos_type, &fp);
     if (!fp.found) {
         char msg[96];
-        sprintf(msg, GS(MSG_QF_NO_HANDLER_FMT), (unsigned long)pi->dos_type);
+        DP_SNPRINTF(msg, GS(MSG_QF_NO_HANDLER_FMT), (unsigned long)pi->dos_type);
         set_err(errbuf, errlen, msg);
         return FALSE;
     }
@@ -165,7 +165,7 @@ BOOL MountPartition(struct BlockDev *bd, const struct PartInfo *pi,
     devname[sizeof(devname) - 1] = '\0';
     if (devname[0] == '\0' || name_in_use(devname)) {
         for (i = 0; i < 10; i++) {
-            sprintf(devname, "DPF%d", i);
+            DP_SNPRINTF(devname, "DPF%d", i);
             if (!name_in_use(devname)) break;
         }
     }
@@ -243,7 +243,7 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
        in pfsresize.c). */
     Delay(25);
 
-    sprintf(withcolon, "%s:", mnt);
+    DP_SNPRINTF(withcolon, "%s:", mnt);
 
     /* ACTION_FORMAT requires the filesystem to be inhibited first - otherwise
        the just-started handler is busy validating the (garbage) partition and
@@ -253,7 +253,7 @@ BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
     if (!Format((CONST_STRPTR)withcolon, (CONST_STRPTR)pi->volume_name,
                 pi->dos_type)) {
         char msg[64];
-        sprintf(msg, GS(MSG_QF_FORMAT_ERR_FMT), (long)IoErr());
+        DP_SNPRINTF(msg, GS(MSG_QF_FORMAT_ERR_FMT), (long)IoErr());
         set_err(errbuf, errlen, msg);
         Inhibit((CONST_STRPTR)withcolon, DOSFALSE);
         return FALSE;   /* left mounted; user can format it manually */
@@ -278,7 +278,7 @@ void MaterializeVolume(const char *name)
     Delay(25);                          /* give the handler time to start */
     oldwin = me->pr_WindowPtr;
     me->pr_WindowPtr = (APTR)-1;        /* suppress our own DOS requesters */
-    sprintf(wc, "%s:", name);
+    DP_SNPRINTF(wc, "%s:", name);
     l = Lock((CONST_STRPTR)wc, SHARED_LOCK);   /* brings the volume online */
     if (l) UnLock(l);
     me->pr_WindowPtr = oldwin;

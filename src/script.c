@@ -72,13 +72,13 @@ static void sc_puts(const char *s) { PutStr((CONST_STRPTR)s); }
 
 static void sc_err(ULONG ln, const char *msg)
 {
-    sprintf(s_ebuf, GS(MSG_SCR_ERROR_LINE_FMT), ln, msg);
+    DP_SNPRINTF(s_ebuf, GS(MSG_SCR_ERROR_LINE_FMT), ln, msg);
     sc_puts(s_ebuf);
 }
 
 static void sc_warn(ULONG ln, const char *msg)
 {
-    sprintf(s_ebuf, GS(MSG_SCR_WARNING_LINE_FMT), ln, msg);
+    DP_SNPRINTF(s_ebuf, GS(MSG_SCR_WARNING_LINE_FMT), ln, msg);
     sc_puts(s_ebuf);
 }
 
@@ -94,12 +94,12 @@ static BOOL sc_ask_yn(const char *question)
     LONG got;
 
     if (s_st.force) {
-        sprintf(s_ebuf, GS(MSG_SCR_YN_FORCE_FMT), question);
+        DP_SNPRINTF(s_ebuf, GS(MSG_SCR_YN_FORCE_FMT), question);
         sc_puts(s_ebuf);
         return TRUE;
     }
 
-    sprintf(s_ebuf, GS(MSG_SCR_YN_PROMPT_FMT), question);
+    DP_SNPRINTF(s_ebuf, GS(MSG_SCR_YN_PROMPT_FMT), question);
     sc_puts(s_ebuf);
     Flush(Output());
 
@@ -367,14 +367,14 @@ static void open_finish(ULONG ln)
 
     FormatSize(s_st.bd->total_bytes, szbuf);
     if (s_st.bd->disk_brand[0])
-        sprintf(s_msg, GS(MSG_SCR_OPEN_BRAND_SIZE_FMT), s_st.bd->disk_brand, szbuf);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_OPEN_BRAND_SIZE_FMT), s_st.bd->disk_brand, szbuf);
     else
-        sprintf(s_msg, GS(MSG_SCR_OPEN_SIZE_FMT), szbuf);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_OPEN_SIZE_FMT), szbuf);
     sc_puts(s_msg);
 
     memset(&s_st.rdb, 0, sizeof(s_st.rdb));
     if (RDB_Read(s_st.bd, &s_st.rdb) && s_st.rdb.valid) {
-        sprintf(s_msg, GS(MSG_SCR_EXISTING_RDB_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_EXISTING_RDB_FMT),
                 (ULONG)s_st.rdb.cylinders,
                 (unsigned)s_st.rdb.num_parts,
                 (unsigned)s_st.rdb.num_fs);
@@ -412,7 +412,7 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
     if (ntok >= 3 && ci_eq(tok[1], "FILE")) {
         const char *path = tok[2];
         open_close_existing(ln);
-        sprintf(s_msg, GS(MSG_SCR_OPENING_IMAGE_FMT), path);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_OPENING_IMAGE_FMT), path);
         sc_puts(s_msg);
         s_st.bd = BlockDev_OpenFile(path);
         if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_CANNOT_OPEN_IMAGE)); return RETURN_ERROR; }
@@ -438,7 +438,7 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
 
         open_close_existing(ln);
 
-        sprintf(s_msg, GS(MSG_SCR_OPENING_DEV_FMT), devname, unit);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_OPENING_DEV_FMT), devname, unit);
         sc_puts(s_msg);
 
         s_st.bd = BlockDev_Open(devname, unit);
@@ -483,7 +483,7 @@ static LONG do_create(ULONG ln, char **tok, UWORD ntok)
     open_close_existing(ln);
 
     FormatSize(size_bytes, szbuf);
-    sprintf(s_msg, GS(MSG_SCR_CREATING_IMAGE_FMT), path, szbuf);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_CREATING_IMAGE_FMT), path, szbuf);
     sc_puts(s_msg);
 
     s_st.bd = BlockDev_CreateFile(path, size_bytes);
@@ -507,7 +507,7 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         char  szbuf[20];
 
         if (s_st.rdb.valid) {
-            sprintf(s_msg, GS(MSG_SCR_INIT_EXISTING_RDB_FMT),
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_INIT_EXISTING_RDB_FMT),
                     ln, (ULONG)s_st.rdb.cylinders,
                     (unsigned)s_st.rdb.num_parts);
             sc_puts(s_msg);
@@ -527,7 +527,7 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         {
             UQUAD total = (UQUAD)cyls * heads * sects * 512UL;
             FormatSize(total, szbuf);
-            sprintf(s_msg, GS(MSG_SCR_RDB_INIT_FMT),
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_RDB_INIT_FMT),
                     cyls, heads, sects, szbuf);
         }
         sc_puts(s_msg);
@@ -554,13 +554,13 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
         FormatSize(s_st.bd->total_bytes, snew);
 
         if (new_cyls <= s_st.rdb.cylinders) {
-            sprintf(s_msg, GS(MSG_SCR_NEWGEO_NOCHANGE_FMT),
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_NEWGEO_NOCHANGE_FMT),
                     (ULONG)s_st.rdb.cylinders, sold, new_cyls, snew);
             sc_puts(s_msg);
             return RETURN_OK;
         }
 
-        sprintf(s_msg, GS(MSG_SCR_NEWGEO_CHANGE_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_NEWGEO_CHANGE_FMT),
                 (ULONG)s_st.rdb.cylinders, sold, new_cyls, snew);
         sc_puts(s_msg);
 
@@ -653,12 +653,12 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
     if (low > high)
         { sc_err(ln, GS(MSG_SCR_ADDPART_LOW_GT_HIGH)); return RETURN_ERROR; }
     if (low < s_st.rdb.lo_cyl) {
-        sprintf(s_msg, GS(MSG_SCR_ADDPART_LOW_RESERVED_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDPART_LOW_RESERVED_FMT),
                 low, (ULONG)s_st.rdb.lo_cyl);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
     if (high > s_st.rdb.hi_cyl) {
-        sprintf(s_msg, GS(MSG_SCR_ADDPART_HIGH_EXCEEDS_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDPART_HIGH_EXCEEDS_FMT),
                 high, (ULONG)s_st.rdb.hi_cyl);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
@@ -672,7 +672,7 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
         for (i = 0; i < s_st.rdb.num_parts; i++) {
             struct PartInfo *ex = &s_st.rdb.parts[i];
             if (low >= ex->low_cyl && low <= ex->high_cyl) {
-                sprintf(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
                         low, high, ex->drive_name,
                         (ULONG)ex->low_cyl, (ULONG)ex->high_cyl);
                 sc_err(ln, s_msg); return RETURN_ERROR;
@@ -685,13 +685,13 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
         }
         if (clamp_ex) {
             if (enforcesize) {
-                sprintf(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDPART_OVERLAP_FMT),
                         low, high, clamp_ex->drive_name,
                         (ULONG)clamp_ex->low_cyl, (ULONG)clamp_ex->high_cyl);
                 sc_err(ln, s_msg); return RETURN_ERROR;
             }
             high = clamp_to - 1;
-            sprintf(s_msg, GS(MSG_SCR_ADDPART_HIGH_CLAMPED_FMT),
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDPART_HIGH_CLAMPED_FMT),
                     high, clamp_ex->drive_name, (ULONG)clamp_to);
             sc_warn(ln, s_msg);
         }
@@ -733,7 +733,7 @@ static LONG do_addpart(ULONG ln, char **tok, UWORD ntok)
         char dtbuf[16], szbuf[20];
         FormatDosType(dostype, dtbuf);
         FormatSize((UQUAD)(high - low + 1) * blks_cyl * 512UL, szbuf);
-        sprintf(s_msg, GS(MSG_SCR_ADDPART_ADDED_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDPART_ADDED_FMT),
                 name, low, high, dtbuf, szbuf);
     }
     sc_puts(s_msg);
@@ -767,7 +767,7 @@ static LONG do_delpart(ULONG ln, char **tok, UWORD ntok)
 
     for (i = 0; i < s_st.rdb.num_parts; i++) {
         if (ci_eq(s_st.rdb.parts[i].drive_name, name)) {
-            sprintf(s_msg, GS(MSG_SCR_DELPART_DELETED_FMT),
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_DELPART_DELETED_FMT),
                     s_st.rdb.parts[i].drive_name,
                     (ULONG)s_st.rdb.parts[i].low_cyl,
                     (ULONG)s_st.rdb.parts[i].high_cyl);
@@ -787,7 +787,7 @@ static LONG do_delpart(ULONG ln, char **tok, UWORD ntok)
         }
     }
 
-    sprintf(s_msg, GS(MSG_SCR_DELPART_NOT_FOUND_FMT), name);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_DELPART_NOT_FOUND_FMT), name);
     sc_err(ln, s_msg);
     return RETURN_ERROR;
 }
@@ -845,7 +845,7 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
 
     if (fsize != (LONG)s_st.bd->block_size) {
         Close(fh);
-        sprintf(s_msg, GS(MSG_SCR_VERIFYRDB_SIZE_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYRDB_SIZE_FMT),
                 (long)fsize, (unsigned long)s_st.bd->block_size);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
@@ -880,7 +880,7 @@ static LONG do_verifyrdb(ULONG ln, char **tok, UWORD ntok)
     if (diff_count == 0) {
         sc_puts(GS(MSG_SCR_VERIFYRDB_MATCH)); return RETURN_OK;
     } else {
-        sprintf(s_msg, GS(MSG_SCR_VERIFYRDB_MISMATCH_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYRDB_MISMATCH_FMT),
                 (unsigned long)diff_count, (unsigned long)first_diff);
         sc_puts(s_msg);
         return RETURN_WARN;
@@ -923,7 +923,7 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
 
     if (block_size != s_st.bd->block_size) {
         Close(fh);
-        sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_BSIZE_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_BSIZE_FMT),
                 (unsigned long)block_size, (unsigned long)s_st.bd->block_size);
         sc_err(ln, s_msg); return RETURN_ERROR;
     }
@@ -941,7 +941,7 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
         return RETURN_ERROR;
     }
 
-    sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_CHECKING_FMT),
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_CHECKING_FMT),
             (unsigned long)num_blocks, (unsigned long)block_lo);
     sc_puts(s_msg);
 
@@ -950,23 +950,23 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
         ULONG i, diff = 0;
 
         if (Read(fh, fbuf, (LONG)block_size) != (LONG)block_size) {
-            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_FILE_RERR_FMT), (unsigned long)disk_blk);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_FILE_RERR_FMT), (unsigned long)disk_blk);
             sc_puts(s_msg); bad_blocks++; break;
         }
         if (!BlockDev_ReadBlock(s_st.bd, disk_blk, dbuf)) {
-            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_DISK_RERR_FMT), (unsigned long)disk_blk);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_DISK_RERR_FMT), (unsigned long)disk_blk);
             sc_puts(s_msg); bad_blocks++; continue;
         }
         for (i = 0; i < block_size; i++)
             if (fbuf[i] != dbuf[i]) diff++;
 
         if (diff == 0) {
-            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_BLK_MATCH_FMT), (unsigned long)disk_blk);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_BLK_MATCH_FMT), (unsigned long)disk_blk);
         } else {
             ULONG first = 0;
             for (first = 0; first < block_size; first++)
                 if (fbuf[first] != dbuf[first]) break;
-            sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_BLK_MISMATCH_FMT),
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_BLK_MISMATCH_FMT),
                     (unsigned long)disk_blk, (unsigned long)diff, (unsigned long)first);
             bad_blocks++;
         }
@@ -976,11 +976,11 @@ static LONG do_verifyext(ULONG ln, char **tok, UWORD ntok)
     FreeVec(fbuf); FreeVec(dbuf);
 
     if (bad_blocks == 0) {
-        sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_PASS_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_PASS_FMT),
                 (unsigned long)num_blocks);
         sc_puts(s_msg); return RETURN_OK;
     } else {
-        sprintf(s_msg, GS(MSG_SCR_VERIFYEXT_FAIL_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_VERIFYEXT_FAIL_FMT),
                 (unsigned long)bad_blocks, (unsigned long)num_blocks);
         sc_puts(s_msg); return RETURN_WARN;
     }
@@ -1048,12 +1048,12 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
         LONG   fsize;
         UBYTE *buf;
 
-        sprintf(s_msg, GS(MSG_SCR_ADDFS_LOADING_FMT), v);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDFS_LOADING_FMT), v);
         sc_puts(s_msg);
 
         fh = Open((STRPTR)v, MODE_OLDFILE);
         if (!fh) {
-            sprintf(s_msg, GS(MSG_SCR_ADDFS_CANT_OPEN_FMT), v);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDFS_CANT_OPEN_FMT), v);
             sc_err(ln, s_msg); return RETURN_ERROR;
         }
 
@@ -1090,7 +1090,7 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
         {
             char szbuf[20];
             FormatSize((UQUAD)fsize, szbuf);
-            sprintf(s_msg, GS(MSG_SCR_ADDFS_LOADED_FMT), szbuf);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDFS_LOADED_FMT), szbuf);
             sc_puts(s_msg);
         }
     }
@@ -1100,11 +1100,11 @@ static LONG do_addfs(ULONG ln, char **tok, UWORD ntok)
 
     FormatDosType(dostype, dtbuf);
     if (version)
-        sprintf(s_msg, GS(MSG_SCR_ADDFS_ADDED_VER_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDFS_ADDED_VER_FMT),
                 dtbuf,
                 (ULONG)(version >> 16), (ULONG)(version & 0xFFFF));
     else
-        sprintf(s_msg, GS(MSG_SCR_ADDFS_ADDED_FMT), dtbuf);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDFS_ADDED_FMT), dtbuf);
     sc_puts(s_msg);
     return RETURN_OK;
 }
@@ -1130,7 +1130,7 @@ static void script_grow_progress(void *ud, const char *msg)
 {
     char buf[96];
     (void)ud;
-    sprintf(buf, GS(MSG_SCR_GROW_STEP_FMT), msg);
+    DP_SNPRINTF(buf, GS(MSG_SCR_GROW_STEP_FMT), msg);
     sc_puts(buf);
 }
 
@@ -1165,7 +1165,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
         if (ci_eq(s_st.rdb.parts[i].drive_name, name)) { pi = &s_st.rdb.parts[i]; break; }
     }
     if (!pi) {
-        sprintf(s_msg, GS(MSG_SCR_GROW_NOT_FOUND_FMT), name);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_NOT_FOUND_FMT), name);
         sc_puts(s_msg);
         return RETURN_ERROR;
     }
@@ -1175,7 +1175,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
     else if (SFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_SFS;
     else if (PFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_PFS;
     else {
-        sprintf(s_msg, GS(MSG_SCR_GROW_UNSUPPORTED_FMT), pi->drive_name);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_UNSUPPORTED_FMT), pi->drive_name);
         sc_puts(s_msg);
         return RETURN_ERROR;
     }
@@ -1185,7 +1185,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
     sectors  = pi->sectors > 0 ? pi->sectors : s_st.rdb.sectors;
     blks_cyl = heads * sectors;
     if (blks_cyl == 0) {
-        sprintf(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
         sc_puts(s_msg);
         return RETURN_ERROR;
     }
@@ -1200,7 +1200,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
             gap_max = ex->low_cyl - 1;
     }
     if (gap_max <= pi->high_cyl) {
-        sprintf(s_msg, GS(MSG_SCR_GROW_NO_SPACE_FMT), pi->drive_name);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_NO_SPACE_FMT), pi->drive_name);
         sc_puts(s_msg);
         return RETURN_ERROR;
     }
@@ -1213,13 +1213,13 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
         UQUAD bytes = parse_size_bytes(sizestr);
         ULONG add_cyls;
         if (bytes == 0) {
-            sprintf(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
             sc_puts(s_msg);
             return RETURN_ERROR;
         }
         add_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
         if (add_cyls == 0) {
-            sprintf(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_BAD_SIZE_FMT), sizestr);
             sc_puts(s_msg);
             return RETURN_ERROR;
         }
@@ -1228,14 +1228,14 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
             /* Requested more than there is - clamp to the maximum. */
             new_hi = gap_max;
             FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
-            sprintf(s_msg, GS(MSG_SCR_GROW_CLAMP_FMT), szbuf);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_CLAMP_FMT), szbuf);
             sc_puts(s_msg);
         }
     }
 
     /* Announce the plan: drive, old -> new cylinder, amount added. */
     FormatSize((UQUAD)(new_hi - old_hi) * blks_cyl * 512UL, szbuf);
-    sprintf(s_msg, GS(MSG_SCR_GROW_PLAN_FMT),
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_PLAN_FMT),
             pi->drive_name, (ULONG)old_hi, (ULONG)new_hi, szbuf);
     sc_puts(s_msg);
 
@@ -1244,7 +1244,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
         return RETURN_OK;
     }
 
-    sprintf(s_msg, GS(MSG_SCR_GROW_ASK), pi->drive_name);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_ASK), pi->drive_name);
     if (!sc_ask_yn(s_msg)) { sc_puts(GS(MSG_SCR_ABORTED)); return RETURN_ERROR; }
 
     /* Commit the new size in memory, then run the grow offline. */
@@ -1253,12 +1253,12 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
 
     /* Unmount first - the grow writes filesystem blocks directly and must not
        run under a live handler. */
-    sprintf(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+    DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
     script_grow_progress(NULL, step);
     if (!UnmountPartition(s_st.bd, pi->drive_name,
                           script_grow_progress, NULL, umerr, sizeof(umerr))) {
         pi->high_cyl = old_hi;                 /* undo */
-        sprintf(s_msg, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
                 pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
         sc_puts(s_msg);
         return RETURN_ERROR;
@@ -1286,7 +1286,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
         strncpy(diag, s_msg, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
         pi->high_cyl = old_hi;
         MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr));
-        sprintf(s_msg, GS(MSG_SCR_GROW_FAIL_FMT), diag);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_FAIL_FMT), diag);
         sc_puts(s_msg);
         return RETURN_ERROR;
     }
@@ -1303,17 +1303,17 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
 
     /* FFS can remount live (no reboot); SFS/PFS leave the volume inhibited. */
     if (fskind == GROW_FS_FFS) {
-        sprintf(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
         script_grow_progress(NULL, step);
         if (MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr))) {
             MaterializeVolume(mnt);
-            sprintf(s_msg, GS(MSG_SCR_GROW_REMOUNTED_FMT), pi->drive_name);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_REMOUNTED_FMT), pi->drive_name);
             sc_puts(s_msg);
             return RETURN_OK;
         }
     }
 
-    sprintf(s_msg, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
     sc_puts(s_msg);
     return RETURN_OK;
 }
@@ -1330,7 +1330,7 @@ static LONG do_write(ULONG ln)
         { sc_err(ln, GS(MSG_SCR_WRITE_NO_RDB)); return RETURN_ERROR; }
 
     if (s_st.dryrun) {
-        sprintf(s_msg, GS(MSG_SCR_WRITE_DRYRUN_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_WRITE_DRYRUN_FMT),
                 (unsigned)s_st.rdb.num_parts,
                 (unsigned)s_st.rdb.num_fs);
         sc_puts(s_msg);
@@ -1338,7 +1338,7 @@ static LONG do_write(ULONG ln)
         return RETURN_OK;
     }
 
-    sprintf(s_msg, GS(MSG_SCR_WRITE_ABOUT_FMT),
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_WRITE_ABOUT_FMT),
             (unsigned)s_st.rdb.num_parts,
             (unsigned)s_st.rdb.num_fs);
     sc_puts(s_msg);
@@ -1362,17 +1362,17 @@ static LONG do_write(ULONG ln)
             struct PartInfo *pi = &s_st.rdb.parts[i];
             if (!pi->want_format || pi->volume_name[0] == '\0') continue;
             if (s_st.bd->backend == BD_FILE) {
-                sprintf(s_msg, GS(MSG_SCR_FMT_SKIPPED_FMT),
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_FMT_SKIPPED_FMT),
                         pi->drive_name);
             } else {
                 char err[80], mounted[40];
                 err[0] = '\0';
                 if (QuickFormat_Partition(s_st.bd, pi, mounted, err, sizeof(err))) {
-                    sprintf(s_msg, GS(MSG_SCR_FORMATTED_FMT),
+                    DP_SNPRINTF(s_msg, GS(MSG_SCR_FORMATTED_FMT),
                             mounted[0] ? mounted : pi->drive_name,
                             pi->volume_name);
                 } else {
-                    sprintf(s_msg, GS(MSG_SCR_FMT_FAILED_FMT),
+                    DP_SNPRINTF(s_msg, GS(MSG_SCR_FMT_FAILED_FMT),
                             pi->drive_name, err);
                 }
             }
@@ -1394,9 +1394,9 @@ static LONG do_write(ULONG ln)
             if (re_added) continue;
             err[0] = '\0';
             if (UnmountDevice(nm, err, sizeof(err)))
-                sprintf(s_msg, GS(MSG_SCR_UNMOUNTED_FMT), nm);
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_UNMOUNTED_FMT), nm);
             else
-                sprintf(s_msg, GS(MSG_SCR_STILL_MOUNTED_FMT),
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_STILL_MOUNTED_FMT),
                         nm, err);
             sc_puts(s_msg);
         }
@@ -1426,13 +1426,13 @@ static BOOL script_prog_cb(void *ud, ULONG cur, ULONG total)
         ULONG pct = (cur * 100UL) / total;
         if (cur != total && pct < s_prog_pct + 5) return TRUE;
         s_prog_pct = pct;
-        sprintf(s_msg, GS(MSG_SCR_PROG_PCT_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_PROG_PCT_FMT),
                 (unsigned long)pct,
                 (unsigned long)cur, (unsigned long)total);
     } else {
         if (cur < s_prog_blocks + 102400) return TRUE;   /* every 50 MB */
         s_prog_blocks = cur;
-        sprintf(s_msg, GS(MSG_SCR_PROG_BLOCKS_FMT), (unsigned long)cur);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_PROG_BLOCKS_FMT), (unsigned long)cur);
     }
     sc_puts(s_msg);
     Flush(Output());
@@ -1450,12 +1450,12 @@ static LONG do_imageout(ULONG ln, char **tok, UWORD ntok)
     if (!path) { sc_err(ln, GS(MSG_SCR_IMAGEOUT_NEED_FILE)); return RETURN_ERROR; }
 
     if (s_st.dryrun) {
-        sprintf(s_msg, GS(MSG_SCR_IMAGEOUT_DRYRUN_FMT), path);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_IMAGEOUT_DRYRUN_FMT), path);
         sc_puts(s_msg);
         return RETURN_OK;
     }
 
-    sprintf(s_msg, GS(MSG_SCR_WRITING_IMAGE_FMT), path);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_WRITING_IMAGE_FMT), path);
     sc_puts(s_msg);
     s_prog_pct = 0;
     s_prog_blocks = 0;
@@ -1464,7 +1464,7 @@ static LONG do_imageout(ULONG ln, char **tok, UWORD ntok)
                               script_prog_cb, NULL,
                               errbuf, sizeof(errbuf));
     if (!ok) {
-        sprintf(s_msg, GS(MSG_SCR_DUMP_FAILED_FMT), errbuf[0] ? errbuf : GS(MSG_SCR_UNKNOWN));
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_DUMP_FAILED_FMT), errbuf[0] ? errbuf : GS(MSG_SCR_UNKNOWN));
         sc_err(ln, s_msg);
         return RETURN_ERROR;
     }
@@ -1483,7 +1483,7 @@ static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
     if (!path) { sc_err(ln, GS(MSG_SCR_IMAGEIN_NEED_FILE)); return RETURN_ERROR; }
 
     if (s_st.dryrun) {
-        sprintf(s_msg, GS(MSG_SCR_IMAGEIN_DRYRUN_FMT), path);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_IMAGEIN_DRYRUN_FMT), path);
         sc_puts(s_msg);
         return RETURN_OK;
     }
@@ -1494,7 +1494,7 @@ static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
         return RETURN_OK;
     }
 
-    sprintf(s_msg, GS(MSG_SCR_READING_IMAGE_FMT), path);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_READING_IMAGE_FMT), path);
     sc_puts(s_msg);
     s_prog_pct = 0;
     s_prog_blocks = 0;
@@ -1503,7 +1503,7 @@ static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
                               script_prog_cb, NULL,
                               errbuf, sizeof(errbuf));
     if (!ok) {
-        sprintf(s_msg, GS(MSG_SCR_RESTORE_FAILED_FMT), errbuf[0] ? errbuf : GS(MSG_SCR_UNKNOWN));
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_RESTORE_FAILED_FMT), errbuf[0] ? errbuf : GS(MSG_SCR_UNKNOWN));
         sc_err(ln, s_msg);
         return RETURN_ERROR;
     }
@@ -1534,7 +1534,7 @@ static LONG do_info(ULONG ln)
 
     FormatSize((UQUAD)s_st.rdb.cylinders
                * s_st.rdb.heads * s_st.rdb.sectors * 512UL, szbuf);
-    sprintf(s_msg, GS(MSG_SCR_INFO_GEO_FMT),
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_GEO_FMT),
             (ULONG)s_st.rdb.cylinders,
             (ULONG)s_st.rdb.heads,
             (ULONG)s_st.rdb.sectors,
@@ -1542,12 +1542,12 @@ static LONG do_info(ULONG ln)
     sc_puts(s_msg);
 
     if (s_st.rdb.lo_cyl > 0) {
-        sprintf(s_msg, GS(MSG_SCR_INFO_RESERVED_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_RESERVED_FMT),
                 (ULONG)s_st.rdb.lo_cyl - 1);
         sc_puts(s_msg);
     }
 
-    sprintf(s_msg, GS(MSG_SCR_INFO_PARTS_FMT), (unsigned)s_st.rdb.num_parts);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_PARTS_FMT), (unsigned)s_st.rdb.num_parts);
     sc_puts(s_msg);
 
     for (i = 0; i < s_st.rdb.num_parts; i++) {
@@ -1558,14 +1558,14 @@ static LONG do_info(ULONG ln)
         FormatDosType(pi->dos_type, dtbuf);
         FormatSize((UQUAD)(pi->high_cyl - pi->low_cyl + 1) * blks * 512UL,
                    szbuf);
-        sprintf(s_msg, GS(MSG_SCR_INFO_PART_ROW_FMT),
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_PART_ROW_FMT),
                 i, pi->drive_name,
                 (ULONG)pi->low_cyl, (ULONG)pi->high_cyl,
                 dtbuf, (long)pi->boot_pri, szbuf);
         sc_puts(s_msg);
     }
 
-    sprintf(s_msg, GS(MSG_SCR_INFO_FS_COUNT_FMT), (unsigned)s_st.rdb.num_fs);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_FS_COUNT_FMT), (unsigned)s_st.rdb.num_fs);
     sc_puts(s_msg);
 
     for (i = 0; i < s_st.rdb.num_fs; i++) {
@@ -1574,20 +1574,20 @@ static LONG do_info(ULONG ln)
         if (fi->code_size > 0) {
             FormatSize((UQUAD)fi->code_size, szbuf);
             if (fi->version)
-                sprintf(s_msg, GS(MSG_SCR_INFO_FS_VER_SZ_FMT),
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_FS_VER_SZ_FMT),
                         i, dtbuf,
                         (ULONG)(fi->version >> 16),
                         (ULONG)(fi->version & 0xFFFF), szbuf);
             else
-                sprintf(s_msg, GS(MSG_SCR_INFO_FS_SZ_FMT), i, dtbuf, szbuf);
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_FS_SZ_FMT), i, dtbuf, szbuf);
         } else {
             if (fi->version)
-                sprintf(s_msg, GS(MSG_SCR_INFO_FS_VER_FMT),
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_FS_VER_FMT),
                         i, dtbuf,
                         (ULONG)(fi->version >> 16),
                         (ULONG)(fi->version & 0xFFFF));
             else
-                sprintf(s_msg, GS(MSG_SCR_INFO_FS_FMT), i, dtbuf);
+                DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_FS_FMT), i, dtbuf);
         }
         sc_puts(s_msg);
     }
@@ -1629,7 +1629,7 @@ static LONG do_reboot(ULONG ln)
     Flush(Output());
 
     for (i = 3; i > 0; i--) {
-        sprintf(s_msg, GS(MSG_SCR_COUNTDOWN_FMT), (unsigned)i);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_COUNTDOWN_FMT), (unsigned)i);
         sc_puts(s_msg);
         Flush(Output());
         Delay(50);   /* 50 ticks = 1 second at 50 Hz */
@@ -1666,7 +1666,7 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "CLOSE"))   return do_close(ln);
     if (ci_eq(tok[0], "REBOOT"))  return do_reboot(ln);
 
-    sprintf(s_msg, GS(MSG_SCR_UNKNOWN_CMD_FMT), tok[0]);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_UNKNOWN_CMD_FMT), tok[0]);
     sc_err(ln, s_msg);
     return RETURN_ERROR;
 }
@@ -1693,7 +1693,7 @@ LONG script_run(const char *filename, BOOL dryrun, BOOL force)
     }
 
     if (dryrun) sc_puts(GS(MSG_SCR_DRYRUN_SUPPRESSED));
-    sprintf(s_msg, GS(MSG_SCR_SCRIPT_HDR_FMT), filename);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_SCRIPT_HDR_FMT), filename);
     sc_puts(s_msg);
 
     while (rc == RETURN_OK) {

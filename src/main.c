@@ -323,7 +323,7 @@ static WORD run_devname_window(void)
             if (!prev) goto cleanup;
         }
 
-        sprintf(dev_title, "%s%s", DISKPART_VERTITLE,
+        DP_SNPRINTF(dev_title, "%s%s", DISKPART_VERTITLE,
                 GS(MSG_MAIN_TITLE_SELECT_DEV));
 
         {
@@ -480,7 +480,7 @@ static BOOL probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
 
     switch (phase) {
     case PROBE_START:
-        sprintf(buf, GS(MSG_MAIN_TESTING_UNIT_FMT), (unsigned long)unit);
+        DP_SNPRINTF(buf, GS(MSG_MAIN_TESTING_UNIT_FMT), (unsigned long)unit);
         /* Pad to 60 chars so previous longer text is fully erased */
         len = (WORD)strlen(buf);
         for (pad = len; pad < 60; pad++) buf[pad] = ' ';
@@ -492,7 +492,7 @@ static BOOL probe_win_cb(void *ud, ULONG unit, UWORD phase, const char *info)
 
     case PROBE_FOUND:
         if (pw->results >= PROBE_WIN_MAX_RESULTS) break;
-        sprintf(buf, GS(MSG_MAIN_UNIT_FMT), (unsigned long)unit,
+        DP_SNPRINTF(buf, GS(MSG_MAIN_UNIT_FMT), (unsigned long)unit,
                 info ? info : GS(MSG_MAIN_FOUND));
         SetAPen(rp, 1);
         Move(rp, pw->x, pw->y_result0 + (WORD)pw->results * (WORD)pw->line_h);
@@ -532,7 +532,7 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
 
     memset(pw, 0, sizeof(*pw));
     {
-        int n = sprintf(pw->title, "%s", DISKPART_VERTITLE);
+        int n = DP_SNPRINTF(pw->title, "%s", DISKPART_VERTITLE);
         sprintf(pw->title + n, GS(MSG_MAIN_TITLE_PROBING_FMT), devname);
     }
 
@@ -611,7 +611,7 @@ static void probe_win_open(struct ProbeWin *pw, const char *devname)
     /* Draw the header line (row 0) now; status/results come via callback */
     {
         char hdr[80];
-        sprintf(hdr, GS(MSG_MAIN_DEVICE_FMT), devname);
+        DP_SNPRINTF(hdr, GS(MSG_MAIN_DEVICE_FMT), devname);
         SetAPen(pw->win->RPort, 1);
         Move(pw->win->RPort, pw->x, pw->y_status);
         Text(pw->win->RPort, hdr, strlen(hdr));
@@ -663,7 +663,7 @@ static WORD run_unitsel_window(const char *devname)
     }
 
     {
-        int n = sprintf(win_title, "%s", DISKPART_VERTITLE);
+        int n = DP_SNPRINTF(win_title, "%s", DISKPART_VERTITLE);
         sprintf(win_title + n, GS(MSG_MAIN_TITLE_DASH_FMT), devname);
     }
 
@@ -933,7 +933,7 @@ static BOOL image_size_dialog(const char *path, char *out, ULONG outsz)
     BOOL            ok    = FALSE;
     static char     prompt[300];
 
-    sprintf(prompt, GS(MSG_MAIN_IMG_NOEXIST_FMT), path);
+    DP_SNPRINTF(prompt, GS(MSG_MAIN_IMG_NOEXIST_FMT), path);
 
     scr = LockPubScreen(NULL);
     if (!scr) return FALSE;
@@ -1138,7 +1138,7 @@ static BOOL prepare_image(const char *path)
     if (!bd) {
         struct EasyStruct es;
         static char       body[300];
-        sprintf(body, GS(MSG_MAIN_IMG_CREATE_FAIL_FMT), path);
+        DP_SNPRINTF(body, GS(MSG_MAIN_IMG_CREATE_FAIL_FMT), path);
         es.es_StructSize   = sizeof(es);
         es.es_Flags        = 0;
         es.es_Title        = (UBYTE *)GS(MSG_INFO_TITLE);
@@ -1224,7 +1224,7 @@ int main(void)
         if (!skip_warning) {
             struct EasyStruct es;
             char body[512];
-            sprintf(body, GS(MSG_MAIN_WARN_BODY),
+            DP_SNPRINTF(body, GS(MSG_MAIN_WARN_BODY),
                 DISKPART_VERSION, DiskPart_BuildStamp);
 
             es.es_StructSize   = sizeof(es);
@@ -1256,7 +1256,7 @@ int main(void)
                     continue;
                 if (!prepare_image(image_path))
                     continue;
-                sprintf(image_devname, "FILE:%s", image_path);
+                DP_SNPRINTF(image_devname, "FILE:%s", image_path);
                 if (partview_run(image_devname, 0))
                     break;
                 continue;

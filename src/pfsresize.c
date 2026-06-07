@@ -480,7 +480,7 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         PFS_PROGRESS(GS(MSG_PFS_FLUSHING_CACHE));
         Delay(50);
         if (pi->drive_name[0]) {
-            sprintf(inh_name, "%s:", pi->drive_name);
+            DP_SNPRINTF(inh_name, "%s:", pi->drive_name);
             if (Inhibit((STRPTR)inh_name, DOSTRUE)) {
                 did_inhibit = TRUE;
             }
