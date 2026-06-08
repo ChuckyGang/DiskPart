@@ -466,7 +466,9 @@ void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,
 
         if (!have_size && bd->total_bytes > 0) {
             /* bd->total_bytes is set by BlockDev_Open from READ CAPACITY (10)
-               if available, otherwise from TD_GETGEOMETRY. */
+               if available, otherwise from TD_GETGEOMETRY, and as a last
+               resort from a last-readable-block probe (internal IDE drives
+               whose driver truncates the reported size). */
             FormatSize(bd->total_bytes, sz);
             if (bd->total_bytes >= (UQUAD)1024*1024*1024)
                 sprintf(sz + strlen(sz), GS(MSG_DEV_SIZE_MB_FMT),

@@ -76,6 +76,7 @@ struct BlockDev {
     UQUAD            td_total_bytes;      /* capacity from TD_GETGEOMETRY        */
     ULONG            rc_total_blocks;     /* READ CAPACITY(10) total blocks (0=unavail) */
     ULONG            rc_block_size;       /* READ CAPACITY(10) bytes per block   */
+    ULONG            probed_blocks;       /* last-readable-block probe result (0=not probed) */
     UBYTE            backend;             /* BD_DEVICE or BD_FILE */
     BPTR             fh;                  /* file handle, BD_FILE only (0 otherwise) */
     char             filepath[108];       /* image path,  BD_FILE only */

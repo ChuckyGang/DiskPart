@@ -120,6 +120,78 @@ static BOOL try_read_capacity(struct BlockDev *bd,
 }
 
 /* ------------------------------------------------------------------ */
+/* probe_last_block                                                    */
+/*                                                                     */
+/* Last resort when READ CAPACITY is unavailable and the driver's      */
+/* geometry is suspect (e.g. internal IDE presented as scsi.device,    */
+/* which truncates the reported size).  Find the true capacity by      */
+/* binary-searching the highest block that BlockDev_ReadBlock can      */
+/* read.  Driver-agnostic, read-only, no hardware register access.     */
+/*                                                                     */
+/* Cost: ~2*log2(size) single-block reads (~60 for a 1 TB ceiling).    */
+/* Seeded from floor_blocks (the driver's reported total) so almost    */
+/* all reads land in range and return fast; only the bracketing read   */
+/* and the bisect overshoot ever address a non-existent block, and     */
+/* real SCSI/IDE rejects those promptly with an illegal-LBA error.     */
+/*                                                                     */
+/* Returns the block count (last_readable + 1), or 0 on failure.       */
+/* ------------------------------------------------------------------ */
+
+/* 2^31 blocks * 512 bytes = 1 TB - well beyond any classic-Amiga RDB
+   controller, and keeps (hi - lo) within ULONG range during bisect. */
+#define PROBE_MAX_BLOCKS  0x80000000UL
+
+static ULONG probe_last_block(struct BlockDev *bd, ULONG floor_blocks)
+{
+    UBYTE *buf;
+    ULONG  lo;          /* highest block known readable          */
+    ULONG  hi;          /* lowest block known unreadable (0=none) */
+    ULONG  probe;
+
+    buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC);
+    if (!buf) return 0;
+
+    /* Block 0 must read or the device is unusable - bail out. */
+    if (!BlockDev_ReadBlock(bd, 0, buf)) { FreeVec(buf); return 0; }
+
+    lo = 0;
+    hi = 0;
+
+    /* Gallop upward from just below the reported size, doubling each
+       step, until a read fails or we reach the ceiling. */
+    probe = (floor_blocks > 1 && floor_blocks <= PROBE_MAX_BLOCKS)
+            ? floor_blocks - 1 : 1;
+    while (probe < PROBE_MAX_BLOCKS) {
+        if (BlockDev_ReadBlock(bd, probe, buf)) {
+            lo = probe;
+            probe <<= 1;
+            if (probe > PROBE_MAX_BLOCKS) probe = PROBE_MAX_BLOCKS;
+        } else {
+            hi = probe;
+            break;
+        }
+    }
+    /* Readable right up to the ceiling: probe it once and stop there. */
+    if (hi == 0) {
+        if (BlockDev_ReadBlock(bd, PROBE_MAX_BLOCKS, buf)) lo = PROBE_MAX_BLOCKS;
+        else hi = PROBE_MAX_BLOCKS;
+    }
+
+    if (lo == 0) { FreeVec(buf); return 0; }       /* only block 0 readable */
+    if (hi == 0) { FreeVec(buf); return lo + 1; }  /* hit ceiling          */
+
+    /* Binary-search the boundary between lo (good) and hi (bad). */
+    while (hi - lo > 1) {
+        ULONG mid = lo + ((hi - lo) >> 1);
+        if (BlockDev_ReadBlock(bd, mid, buf)) lo = mid;
+        else                                   hi = mid;
+    }
+
+    FreeVec(buf);
+    return lo + 1;
+}
+
+/* ------------------------------------------------------------------ */
 /* BlockDev_OpenFile / BlockDev_CreateFile                             */
 /*                                                                     */
 /* File backend: treat a host file as a 512-byte-block disk image.    */
@@ -327,6 +399,26 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
         }
     }
 
+    /* If READ CAPACITY was unavailable (common for internal IDE drives
+       presented as scsi.device, whose driver can't translate the SCSI
+       opcode and may report a truncated geometry), fall back to probing
+       the last readable block.  Seed from the driver's reported total so
+       the search stays in range; only trust the probe when it finds MORE
+       blocks than the driver claimed - i.e. the geometry was truncated. */
+    if (bd->rc_total_blocks == 0) {
+        ULONG floor_blocks = (ULONG)(bd->td_total_bytes / 512);
+        ULONG probed = probe_last_block(bd, floor_blocks);
+        if (probed > 0) {
+            bd->probed_blocks = probed;
+            if (probed > floor_blocks) {
+                bd->total_bytes = (UQUAD)probed * 512;
+            } else if (floor_blocks == 0) {
+                /* Driver gave no size at all - the probe is all we have. */
+                bd->total_bytes = (UQUAD)probed * 512;
+            }
+        }
+    }
+
     return bd;
 }
 
@@ -469,12 +561,35 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
     bd->iotd.iotd_Req.io_Actual  = 0;
     bd->iotd.iotd_Req.io_Flags   = 0;
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
-    if (err != 0) {
-        bd->last_io_err = err;
-        return FALSE;
+    if (err == 0) return TRUE;
+
+    /* Fallback: CMD_WRITE (32-bit byte offset) for drivers that don't
+       implement TD_WRITE64 and reject it with IOERR_NOCMD (-3) - notably
+       the old Commodore gayle scsi.device on A600/A1200 (KS 3.0/3.1), which
+       predates the TD64/NSD commands.  (The read path already falls back to
+       CMD_READ for the same drivers; the write path was missing this.)
+
+       Gated strictly on IOERR_NOCMD so a genuine TD_WRITE64 write failure is
+       never silently retried through a different path.  The UAE/Amiberry
+       "CMD_WRITE hangs on cached FS blocks" hazard only affects live, mounted
+       partitions; DiskPart writes run with the partition inhibited/unmounted,
+       and UAE supports TD_WRITE64 so it never reaches this fallback anyway.
+       These pre-NSD drivers address at most 4 GB, so the 32-bit offset is
+       sufficient - refuse rather than wrap if a >4 GB block is ever asked. */
+    if (err == IOERR_NOCMD && (ULONG)(byte_off >> 32) == 0) {
+        bd->iotd.iotd_Req.io_Command = CMD_WRITE;
+        bd->iotd.iotd_Req.io_Length  = bd->block_size;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
+        bd->iotd.iotd_Count          = 0;
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+        if (err == 0) return TRUE;
     }
 
-    return TRUE;
+    bd->last_io_err = err;
+    return FALSE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -506,16 +621,22 @@ BOOL BlockDev_GetGeometry(struct BlockDev *bd,
     td_ok = (DoIO((struct IORequest *)&bd->iotd) == 0) &&
             (geom.dg_TotalSectors > 0 || geom.dg_Cylinders > 0);
 
-    /* Fail only if both TD_GETGEOMETRY and READ CAPACITY have no data */
-    if (!td_ok && bd->rc_total_blocks == 0) return FALSE;
+    /* Fail only if TD_GETGEOMETRY, READ CAPACITY and the probe all have
+       no data to offer. */
+    if (!td_ok && bd->rc_total_blocks == 0 && bd->probed_blocks == 0)
+        return FALSE;
 
     *heads   = (geom.dg_Heads        > 0) ? geom.dg_Heads        : 16;
     *sectors = (geom.dg_TrackSectors > 0) ? geom.dg_TrackSectors : 63;
 
-    /* Prefer READ CAPACITY total block count - it comes directly from
-       the drive and is not subject to driver CHS arithmetic bugs. */
+    /* Cylinder count, most-trustworthy total first:
+       READ CAPACITY (straight from the drive, no driver CHS math) >
+       last-readable-block probe (measured, bypasses a lying driver) >
+       the driver's own CHS values. */
     if (bd->rc_total_blocks > 0)
         *cyls = bd->rc_total_blocks / (*heads * *sectors);
+    else if (bd->probed_blocks > 0)
+        *cyls = bd->probed_blocks / (*heads * *sectors);
     else if (geom.dg_Cylinders > 0)
         *cyls = geom.dg_Cylinders;
     else

@@ -21,6 +21,7 @@
 
 #include <exec/types.h>
 #include <exec/memory.h>
+#include <exec/errors.h>
 #include <proto/exec.h>
 #include <devices/trackdisk.h>
 #ifndef TD_WRITE64
@@ -45,35 +46,69 @@
 #define MOVE_CHUNK 128
 
 /* Read 'count' consecutive physical sectors starting at 'start' into buf.
-   Uses TD_READ64 (64-bit byte offset).  buf must hold count * 512 bytes. */
+   Uses TD_READ64 (64-bit byte offset).  buf must hold count * 512 bytes.
+   Falls back to CMD_READ on drivers that lack TD_READ64 (IOERR_NOCMD) -
+   the old gayle scsi.device on A600/A1200, same as BlockDev_ReadBlock. */
 static BOOL move_read_blocks(struct BlockDev *bd,
                               ULONG start, ULONG count, UBYTE *buf)
 {
     UQUAD byte_off = (UQUAD)start * bd->block_size;
+    ULONG length   = (ULONG)((UQUAD)count * bd->block_size);
+    BYTE  err;
     bd->iotd.iotd_Req.io_Command = TD_READ64;
-    bd->iotd.iotd_Req.io_Length  = (ULONG)((UQUAD)count * bd->block_size);
+    bd->iotd.iotd_Req.io_Length  = length;
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
     bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
     bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
     bd->iotd.iotd_Req.io_Actual  = 0;
     bd->iotd.iotd_Req.io_Flags   = 0;
-    return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+    if (err == 0) return TRUE;
+
+    if (err == IOERR_NOCMD && (ULONG)(byte_off >> 32) == 0) {
+        bd->iotd.iotd_Req.io_Command = CMD_READ;
+        bd->iotd.iotd_Req.io_Length  = length;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
+        bd->iotd.iotd_Count          = 0;
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    }
+    return FALSE;
 }
 
 /* Write 'count' consecutive physical sectors starting at 'start' from buf.
-   Uses TD_WRITE64 (matches existing BlockDev_WriteBlock pattern). */
+   Uses TD_WRITE64, falling back to CMD_WRITE on drivers that reject it with
+   IOERR_NOCMD (old A600/A1200 gayle scsi.device) - mirrors the fallback in
+   BlockDev_WriteBlock.  See that function for the gating rationale. */
 static BOOL move_write_blocks(struct BlockDev *bd,
                                ULONG start, ULONG count, const UBYTE *buf)
 {
     UQUAD byte_off = (UQUAD)start * bd->block_size;
+    ULONG length   = (ULONG)((UQUAD)count * bd->block_size);
+    BYTE  err;
     bd->iotd.iotd_Req.io_Command = TD_WRITE64;
-    bd->iotd.iotd_Req.io_Length  = (ULONG)((UQUAD)count * bd->block_size);
+    bd->iotd.iotd_Req.io_Length  = length;
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
     bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
     bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
     bd->iotd.iotd_Req.io_Actual  = 0;
     bd->iotd.iotd_Req.io_Flags   = 0;
-    return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
+    if (err == 0) return TRUE;
+
+    if (err == IOERR_NOCMD && (ULONG)(byte_off >> 32) == 0) {
+        bd->iotd.iotd_Req.io_Command = CMD_WRITE;
+        bd->iotd.iotd_Req.io_Length  = length;
+        bd->iotd.iotd_Req.io_Data    = (APTR)buf;
+        bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
+        bd->iotd.iotd_Count          = 0;
+        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Flags   = 0;
+        return DoIO((struct IORequest *)&bd->iotd) == 0 ? TRUE : FALSE;
+    }
+    return FALSE;
 }
 
 /* ------------------------------------------------------------------ */
