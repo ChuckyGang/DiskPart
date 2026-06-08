@@ -53,6 +53,7 @@ extern struct DosLibrary *DOSBase;
     "FILE/K,VERSION/K,STACKSIZE/K,"                               \
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
     "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K,"               \
+    "NOUNMOUNT/S,"                                                \
     "GROW/M"
 
 enum {
@@ -93,6 +94,7 @@ enum {
     ARG_IMAGEIN,
     ARG_NOWARNING,
     ARG_VOLNAME,
+    ARG_NOUNMOUNT,
     ARG_GROW,
     ARG_COUNT
 };
@@ -1261,7 +1263,7 @@ static void cli_grow_progress(void *ud, const char *msg)
 }
 
 static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
-                     const char *drive_s, const char *size_s)
+                     const char *drive_s, const char *size_s, BOOL no_unmount)
 {
     struct BlockDev *bd;
     struct PartInfo *pi = NULL;
@@ -1374,15 +1376,24 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     umerr[0] = rmerr[0] = '\0';
     pi->high_cyl = new_hi;
 
-    DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
-    cli_grow_progress(NULL, step);
-    if (!UnmountPartition(bd, pi->drive_name,
-                          cli_grow_progress, NULL, umerr, sizeof(umerr))) {
-        pi->high_cyl = old_hi;
-        DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
-                pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
-        cli_puts(outbuf);
-        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    /* NOUNMOUNT: skip the full unmount (ACTION_DIE + RemDosEntry), which
+       fails on the boot partition and any volume with open files/locks.
+       The FFS/SFS/PFS grow routines still Inhibit() the handler around
+       their direct writes, so the writes themselves are safe.  Afterwards
+       the live handler keeps the OLD DosEnvec/root, so we never remount and
+       re-inhibit the volume (see below) to keep it untouchable until the
+       mandatory reboot. */
+    if (!no_unmount) {
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+        cli_grow_progress(NULL, step);
+        if (!UnmountPartition(bd, pi->drive_name,
+                              cli_grow_progress, NULL, umerr, sizeof(umerr))) {
+            pi->high_cyl = old_hi;
+            DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
+                    pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
     }
 
     switch (fskind) {
@@ -1404,7 +1415,10 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
         char diag[200];
         strncpy(diag, outbuf, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
         pi->high_cyl = old_hi;
-        MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+        /* Only remount if we unmounted; under NOUNMOUNT the handler was
+           only Inhibited and has already been released by the grow routine. */
+        if (!no_unmount)
+            MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
         DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_FAIL_FMT), diag);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1418,7 +1432,9 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
     }
     cli_puts(GS(MSG_CLI_OK));
 
-    if (fskind == CLI_GROW_FFS) {
+    /* Under NOUNMOUNT the volume is still mounted with the old DosEnvec;
+       a live remount is impossible, so fall through to the reboot notice. */
+    if (fskind == CLI_GROW_FFS && !no_unmount) {
         DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
         cli_grow_progress(NULL, step);
         if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
@@ -1427,6 +1443,17 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
             cli_puts(outbuf);
             RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
         }
+    }
+
+    /* NOUNMOUNT: the per-FS grow released its Inhibit, so the live handler
+       could be used again - but with the OLD root/DosEnvec, which now
+       diverges from the relocated on-disk root.  Re-inhibit and leave the
+       volume locked so it can't be written until the mandatory reboot (the
+       same pending-reboot state SFS/PFS already use; idempotent for them). */
+    if (no_unmount) {
+        char inh[40];
+        DP_SNPRINTF(inh, "%s:", pi->drive_name);
+        Inhibit((STRPTR)inh, DOSTRUE);
     }
 
     DP_SNPRINTF(outbuf, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
@@ -2293,7 +2320,8 @@ LONG cli_run(void)
                 if (!drive || !size)
                     { cli_puts(GS(MSG_SCR_GROW_USAGE)); rc = RETURN_WARN; }
                 else
-                    rc = cmd_grow(devname, unit, force, drive, size);
+                    rc = cmd_grow(devname, unit, force, drive, size,
+                                  (BOOL)args[ARG_NOUNMOUNT]);
             }
 
             if (rc == RETURN_OK && args[ARG_DELPART])

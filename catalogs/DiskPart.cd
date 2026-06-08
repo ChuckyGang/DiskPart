@@ -1750,6 +1750,18 @@ SFS filesystem on %s grown successfully.\nWARNING: RDB write FAILED.\nClick Writ
 MSG_MOVE_SFS_FAIL_FMT
 SFS grow failed:\n%s
 ;
+MSG_MOVE_BUSY_OFFER_FMT
+Cannot unmount %s: the volume is in use (%s).\nThis is normal for the boot partition.\n\nGrow it in place instead? The volume will be LOCKED and\nyou MUST reboot before using it - do not access it first.
+;
+MSG_MOVE_BUSY_OFFER_GADGETS
+Grow + Reboot|Cancel
+;
+MSG_MOVE_FFS_NOUNMOUNT_OK_FMT
+FFS filesystem on %s grown in place.\nRDB saved. The volume is now LOCKED until reboot.\nREBOOT NOW to use the new space - do not access it first.\n\nDiagnostic: %s
+;
+MSG_MOVE_FFS_NOUNMOUNT_RDBFAIL_FMT
+FFS filesystem on %s grown in place.\nWARNING: RDB write FAILED - click Write to save it, then\nREBOOT. The volume is LOCKED until reboot.\n\nDiagnostic: %s
+;
 ;==========================================================================
 ; rdb.c
 ;==========================================================================

@@ -13,6 +13,7 @@
 #include <graphics/rastport.h>
 #include <libraries/gadtools.h>
 #include <proto/exec.h>
+#include <proto/dos.h>
 #include <proto/intuition.h>
 #include <proto/graphics.h>
 #include <proto/gadtools.h>
@@ -788,6 +789,7 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
     char umerr[80];    /* why unmount failed (in-use), for diagnostics          */
     char rmerr[80];    /* why remount failed, for diagnostics                   */
     BOOL can_remount;
+    BOOL no_unmount = FALSE;  /* TRUE once the user opts to grow a busy volume  */
     int  rc = GROW_NEED_REBOOT;
     umerr[0] = '\0';
     rmerr[0] = '\0';
@@ -825,20 +827,26 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
         grow_say(&prog_ud, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
         can_remount = UnmountDevice(pi->drive_name, umerr, sizeof(umerr));
         if (!can_remount) {
-            struct EasyStruct busy_es;
-            static char busy_msg[256];
-            if (prog_win) CloseWindow(prog_win);
-            pi->high_cyl = old_hi;                 /* undo the size change */
-            DP_SNPRINTF(busy_msg,
-                    GS(MSG_MOVE_BUSY_FMT),
+            /* The volume can't be unmounted (boot partition, or open files).
+               Offer to grow it in place instead: the FFS grow still inhibits
+               its writes, then we lock the volume and require a reboot.  If
+               the user declines, leave everything untouched. */
+            struct EasyStruct offer_es;
+            static char offer_msg[256];
+            DP_SNPRINTF(offer_msg,
+                    GS(MSG_MOVE_BUSY_OFFER_FMT),
                     pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
-            busy_es.es_StructSize   = sizeof(busy_es);
-            busy_es.es_Flags        = 0;
-            busy_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
-            busy_es.es_TextFormat   = (UBYTE *)busy_msg;
-            busy_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
-            EasyRequest(win, &busy_es, NULL);
-            return GROW_ABORTED;
+            offer_es.es_StructSize   = sizeof(offer_es);
+            offer_es.es_Flags        = 0;
+            offer_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
+            offer_es.es_TextFormat   = (UBYTE *)offer_msg;
+            offer_es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_BUSY_OFFER_GADGETS);
+            if (EasyRequest(win, &offer_es, NULL) != 1) {
+                if (prog_win) CloseWindow(prog_win);
+                pi->high_cyl = old_hi;             /* undo the size change */
+                return GROW_ABORTED;
+            }
+            no_unmount = TRUE;
         }
 
         result = FFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
@@ -847,6 +855,26 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             struct EasyStruct ok_es;
             static char ok_msg[512];
 
+            if (no_unmount) {
+                /* Grown in place. The live handler still holds the OLD
+                   DosEnvec/root, so re-inhibit to lock the volume (the FFS
+                   grow released its own inhibit) and persist the RDB now -
+                   the new size must be on disk before the reboot, or the
+                   relocated root and the on-disk geometry would disagree. */
+                BOOL wrote_rdb;
+                char inh[40];
+                DP_SNPRINTF(inh, "%s:", pi->drive_name);
+                Inhibit((STRPTR)inh, DOSTRUE);
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_WRITING_RDB), NULL);
+                wrote_rdb = RDB_Write(bd, (struct RDBInfo *)rdb);
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
+                if (prog_win) CloseWindow(prog_win);
+                rc = GROW_NEED_REBOOT;
+                DP_SNPRINTF(ok_msg,
+                        wrote_rdb ? GS(MSG_MOVE_FFS_NOUNMOUNT_OK_FMT)
+                                  : GS(MSG_MOVE_FFS_NOUNMOUNT_RDBFAIL_FMT),
+                        pi->drive_name, errbuf);
+            } else {
             grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
             if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
                 /* Grown and remounted with the new geometry - no reboot. */
@@ -869,6 +897,7 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
                         pi->drive_name, rmerr[0] ? rmerr : GS(MSG_MOVE_QMARK), errbuf);
             }
             if (prog_win) CloseWindow(prog_win);
+            }
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
             ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROWN_TITLE);
@@ -879,10 +908,13 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             struct EasyStruct err_es;
             static char full_msg[384];
             /* Grow failed - restore the original size and remount so the user
-               keeps a working volume. */
+               keeps a working volume.  Under no_unmount we never unmounted
+               (the FFS grow already released its inhibit), so don't remount. */
             pi->high_cyl = old_hi;
-            grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
-            MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+            if (!no_unmount) {
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+                MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+            }
             if (prog_win) CloseWindow(prog_win);
             rc = GROW_ABORTED;
             DP_SNPRINTF(full_msg,

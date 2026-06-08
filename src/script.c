@@ -1145,14 +1145,19 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
     ULONG gap_max, old_hi, new_hi;
     int   fskind;
     BOOL  to_end, ok;
+    BOOL  no_unmount = FALSE;
 
     if (!s_st.bd)
         { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
     if (!s_st.rdb_ready || !s_st.rdb.valid)
         { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
 
-    /* Positional: tok[1] = drive, tok[2] = size. */
+    /* Positional: tok[1] = drive, tok[2] = size.  Optional trailing
+       NOUNMOUNT keyword grows the volume in place (boot partition / any
+       volume with open files) and requires a reboot afterwards. */
     if (ntok < 3) { sc_puts(GS(MSG_SCR_GROW_USAGE)); return RETURN_ERROR; }
+    for (i = 3; i < ntok; i++)
+        if (ci_eq(tok[i], "NOUNMOUNT")) no_unmount = TRUE;
 
     strncpy(name, tok[1], 30); name[30] = '\0';
     nlen = (UWORD)strlen(name);
@@ -1252,16 +1257,20 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
     pi->high_cyl = new_hi;
 
     /* Unmount first - the grow writes filesystem blocks directly and must not
-       run under a live handler. */
-    DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
-    script_grow_progress(NULL, step);
-    if (!UnmountPartition(s_st.bd, pi->drive_name,
-                          script_grow_progress, NULL, umerr, sizeof(umerr))) {
-        pi->high_cyl = old_hi;                 /* undo */
-        DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
-                pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
-        sc_puts(s_msg);
-        return RETURN_ERROR;
+       run under a live handler.  NOUNMOUNT skips this (the per-FS grow still
+       Inhibit()s its writes); the live handler keeps the old DosEnvec, so a
+       reboot is required and we never remount. */
+    if (!no_unmount) {
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+        script_grow_progress(NULL, step);
+        if (!UnmountPartition(s_st.bd, pi->drive_name,
+                              script_grow_progress, NULL, umerr, sizeof(umerr))) {
+            pi->high_cyl = old_hi;                 /* undo */
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_UNMOUNT_FAIL_FMT),
+                    pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+            sc_puts(s_msg);
+            return RETURN_ERROR;
+        }
     }
 
     switch (fskind) {
@@ -1285,7 +1294,10 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
         char diag[200];
         strncpy(diag, s_msg, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
         pi->high_cyl = old_hi;
-        MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr));
+        /* Only remount if we unmounted; NOUNMOUNT only Inhibited (already
+           released by the grow routine). */
+        if (!no_unmount)
+            MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr));
         DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_FAIL_FMT), diag);
         sc_puts(s_msg);
         return RETURN_ERROR;
@@ -1301,8 +1313,9 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
     sc_puts(GS(MSG_SCR_OK_DOT));
     s_st.dirty = FALSE;
 
-    /* FFS can remount live (no reboot); SFS/PFS leave the volume inhibited. */
-    if (fskind == GROW_FS_FFS) {
+    /* FFS can remount live (no reboot); SFS/PFS leave the volume inhibited.
+       NOUNMOUNT always needs a reboot (handler still on the old DosEnvec). */
+    if (fskind == GROW_FS_FFS && !no_unmount) {
         DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
         script_grow_progress(NULL, step);
         if (MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr))) {
@@ -1311,6 +1324,17 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
             sc_puts(s_msg);
             return RETURN_OK;
         }
+    }
+
+    /* NOUNMOUNT: FFS released its Inhibit after the grow, so the live handler
+       could write to the volume again - with the OLD root/DosEnvec, which now
+       diverges from the relocated on-disk root.  Re-inhibit and leave it
+       locked until the mandatory reboot (matches the SFS/PFS pending-reboot
+       state; idempotent for those). */
+    if (no_unmount) {
+        char inh[40];
+        DP_SNPRINTF(inh, "%s:", pi->drive_name);
+        Inhibit((STRPTR)inh, DOSTRUE);
     }
 
     DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_REBOOT_FMT), pi->drive_name);
