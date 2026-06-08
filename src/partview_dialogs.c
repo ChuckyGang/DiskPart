@@ -560,8 +560,14 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
     DP_SNPRINTF(bootpri_str, "%ld", (long)pi->boot_pri);
     /* Default volume label for a new partition.  Empty means "do not format";
        prefilling makes quick-format the default (the "Do not format" checkbox
-       and clearing this field are the opt-outs). */
-    strncpy(volname_str, GS(MSG_DLG_VOLNAME_DEFAULT), sizeof(volname_str) - 1);
+       and clearing this field are the opt-outs).  Prefix the device name
+       (e.g. "DH1 - Empty") so several unformatted partitions don't all show
+       up as identical "Empty" volumes on Workbench. */
+    if (pi->drive_name[0])
+        DP_SNPRINTF(volname_str, "%s - %s",
+                    pi->drive_name, GS(MSG_DLG_VOLNAME_DEFAULT));
+    else
+        strncpy(volname_str, GS(MSG_DLG_VOLNAME_DEFAULT), sizeof(volname_str) - 1);
     volname_str[sizeof(volname_str) - 1] = '\0';
 
     scr = LockPubScreen(NULL);
