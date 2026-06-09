@@ -601,7 +601,14 @@ static BOOL vrdb_make_gadgets(APTR vi, struct Screen *scr,
     UWORD bor_l   = (UWORD)scr->WBorLeft;
     UWORD bor_t   = (UWORD)scr->WBorTop + (UWORD)scr->Font->ta_YSize + 1;
     UWORD bor_r   = (UWORD)scr->WBorRight;
-    UWORD bor_b   = (UWORD)scr->WBorBottom;
+    /* These windows open with WFLG_SIZEBBOTTOM, which puts the sizing gadget in
+       the bottom border and makes Intuition enlarge the real bottom border well
+       beyond scr->WBorBottom.  Reserving only WBorBottom leaves the Close
+       button's lower edge drawn into that enlarged border / size gadget, where
+       it gets clipped.  Reserve a font height plus a few pixels for the size
+       gadget (matching the estimate in partview.c); overestimating only adds a
+       little gap below the button, underestimating clips it. */
+    UWORD bor_b   = (UWORD)scr->WBorBottom + (UWORD)scr->Font->ta_YSize + 4;
     UWORD pad     = 4;
     UWORD row_h   = (UWORD)scr->Font->ta_YSize + 2;
     UWORD btn_h   = (UWORD)scr->Font->ta_YSize + 6;
