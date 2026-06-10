@@ -3229,3 +3229,9 @@ ERROR: filesystem driver file too large (limit 1 MB).\n
 MSG_SCR_ADDFS_TOO_BIG
 ADDFS: filesystem driver file too large (limit 1 MB).
 ;
+MSG_MOVE_PFS_OK_RDB_WRITTEN_FMT
+PFS filesystem on %s grown successfully.\nRDB written automatically.\nREBOOT NOW to use the new space.\n\nDiagnostic: %s
+;
+MSG_MOVE_PFS_OK_RDB_FAILED_FMT
+PFS filesystem on %s grown successfully.\nWARNING: RDB write FAILED.\nClick Write to save the RDB before rebooting.\n\nDiagnostic: %s
+;

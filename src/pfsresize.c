@@ -359,8 +359,24 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        new_num_idxb - old_num_idxb : 0;
         reserved_needed = num_new_bmb + num_new_idxb;
 
-        /* Abort if SUPERINDEX mode is set */
-        if (options & PFS_MODE_SUPERINDEX) {
+        /* MODE_SUPERINDEX (0x80) is part of the standard format mask on
+           essentially every pfs3 hard-disk partition: it selects the
+           104-entry idx.large.bitmapindex[] array (g->supermode in pfs3aio
+           -> GetBitmapIndex uses MAXBITMAPINDEX).  PFS3 auto-extends that
+           array on demand via NewBitmapIndexBlock(), pulling index/bitmap
+           blocks from the reserved area, exactly like the small-index case.
+           So growing WITHIN the large array needs no special handling here.
+
+           The genuinely unsupported layout is the 3-level extension
+           superindex (rootblockextension.superindex[], MAXSUPER+1 entries),
+           which pfs3 only engages once the index exceeds MAXBITMAPINDEX
+           (~109 GB at a 1K reserved block size).  We refuse that case:
+           if the partition ALREADY needs more index blocks than the large
+           array holds, idx.large.bitmapindex[] is not the real top level
+           and the minimal-edit grow strategy would be invalid.  The
+           new_num_idxb > PFS_MAX_BITMAPINDEX check below additionally
+           refuses a grow that would cross that boundary. */
+        if (old_num_idxb > PFS_MAX_BITMAPINDEX) {
             sprintf(err_buf,
                     GS(MSG_PFS_SUPERINDEX),
                     (unsigned long)options);

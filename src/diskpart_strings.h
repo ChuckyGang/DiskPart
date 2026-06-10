@@ -1051,8 +1051,10 @@
 #define MSG_SCR_ADDPART_LOW_INVALID  1045
 #define MSG_CLI_ADDFS_TOO_BIG        1046
 #define MSG_SCR_ADDFS_TOO_BIG        1047
+#define MSG_MOVE_PFS_OK_RDB_WRITTEN_FMT 1048
+#define MSG_MOVE_PFS_OK_RDB_FAILED_FMT 1049
 
-#define MSG_COUNT 1048
+#define MSG_COUNT 1050
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2112,5 +2114,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1045 MSG_SCR_ADDPART_LOW_INVALID */ "ADDPART: LOW value invalid (not a number or out of range).",
     /* 1046 MSG_CLI_ADDFS_TOO_BIG */ "ERROR: filesystem driver file too large (limit 1 MB).\n",
     /* 1047 MSG_SCR_ADDFS_TOO_BIG */ "ADDFS: filesystem driver file too large (limit 1 MB).",
+    /* 1048 MSG_MOVE_PFS_OK_RDB_WRITTEN_FMT */ "PFS filesystem on %s grown successfully.\nRDB written automatically.\nREBOOT NOW to use the new space.\n\nDiagnostic: %s",
+    /* 1049 MSG_MOVE_PFS_OK_RDB_FAILED_FMT */ "PFS filesystem on %s grown successfully.\nWARNING: RDB write FAILED.\nClick Write to save the RDB before rebooting.\n\nDiagnostic: %s",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

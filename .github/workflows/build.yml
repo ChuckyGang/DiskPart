@@ -91,7 +91,10 @@ jobs:
           python3 support/make_lha.py "$ARCHIVE" \
             "DiskPart:out/DiskPart" \
             "DiskPart.info:out/DiskPart.info" \
-            "README.md:README.md"
+            "README.md:README.md" \
+            "Catalogs/DiskPart.cd:catalogs/DiskPart.cd" \
+            "Catalogs/README.txt:catalogs/README.txt" \
+            "support/gencat.py:support/gencat.py"
           ls -lh "$ARCHIVE"
 
       - name: Delete previous PROTO release (if any)

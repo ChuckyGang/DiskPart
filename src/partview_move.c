@@ -958,21 +958,37 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
 
         BOOL result = PFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
                                         ffs_grow_progress, &prog_ud);
-        if (prog_win) CloseWindow(prog_win);
         if (result) {
+            BOOL wrote_rdb;
             struct EasyStruct ok_es;
             static char ok_msg[512];
+            /* PFS_GrowPartition writes the rootblock but NOT the RDB.  Persist
+               the new partition geometry now (as the CLI and SFS paths do):
+               if the user reboots before a manual Write, the grown rootblock
+               would disagree with the old on-disk high_cyl - an inconsistent
+               volume, exactly the unsafe state to avoid. */
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_WRITING_RDB), NULL);
+            wrote_rdb = RDB_Write(bd, (struct RDBInfo *)rdb);
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
+            if (prog_win) CloseWindow(prog_win);
             DP_SNPRINTF(ok_msg,
-                    GS(MSG_MOVE_PFS_OK_FMT), errbuf);
+                    wrote_rdb ? GS(MSG_MOVE_PFS_OK_RDB_WRITTEN_FMT)
+                              : GS(MSG_MOVE_PFS_OK_RDB_FAILED_FMT),
+                    pi->drive_name, errbuf);
             ok_es.es_StructSize   = sizeof(ok_es);
             ok_es.es_Flags        = 0;
             ok_es.es_Title        = (UBYTE *)GS(MSG_MOVE_GROWN_TITLE);
             ok_es.es_TextFormat   = (UBYTE *)ok_msg;
             ok_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
-            EasyRequest(win, &ok_es, NULL, pi->drive_name);
+            EasyRequest(win, &ok_es, NULL);
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
+            /* Grow failed - restore the displayed size so the partition view
+               doesn't keep showing a phantom grown partition that was never
+               written to disk (which would mislead the user). */
+            pi->high_cyl = old_hi;
+            if (prog_win) CloseWindow(prog_win);
             DP_SNPRINTF(full_msg, GS(MSG_MOVE_PFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
             err_es.es_Flags        = 0;
@@ -980,6 +996,7 @@ int offer_pfs_grow(struct Window *win, struct BlockDev *bd,
             err_es.es_TextFormat   = (UBYTE *)full_msg;
             err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &err_es, NULL);
+            return GROW_ABORTED;
         }
         return GROW_NEED_REBOOT;
     }
@@ -1040,6 +1057,9 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
         } else {
             struct EasyStruct err_es;
             static char full_msg[384];
+            /* Grow failed - restore the displayed size so the partition view
+               doesn't keep showing a phantom grown partition. */
+            pi->high_cyl = old_hi;
             if (prog_win) CloseWindow(prog_win);
             DP_SNPRINTF(full_msg, GS(MSG_MOVE_SFS_FAIL_FMT), errbuf);
             err_es.es_StructSize   = sizeof(err_es);
@@ -1048,6 +1068,7 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             err_es.es_TextFormat   = (UBYTE *)full_msg;
             err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
             EasyRequest(win, &err_es, NULL);
+            return GROW_ABORTED;
         }
         return GROW_NEED_REBOOT;
     }

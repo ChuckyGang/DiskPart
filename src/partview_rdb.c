@@ -614,8 +614,9 @@ static BOOL vrdb_make_gadgets(APTR vi, struct Screen *scr,
     UWORD btn_h   = (UWORD)scr->Font->ta_YSize + 6;
     /* Extra clearance between the listview and the Close button: the listview's
        scroll arrows sit at its bottom-right and a bare 'pad' lets them touch /
-       overlap the button.  Use a full text-row of separation instead. */
-    UWORD gap     = row_h;
+       overlap the button.  Half a text-row plus the pad keeps the arrow clear
+       while looking a touch tighter than a full row. */
+    UWORD gap     = pad + row_h / 2;
     UWORD inner_w = win_w - bor_l - bor_r;
     UWORD overhead = bor_t + pad*2 + gap + btn_h + bor_b;
     UWORD lv_h    = (win_h > overhead + row_h) ? (win_h - overhead) : row_h;

@@ -489,16 +489,17 @@ BOOL BlockDev_ReadBlock(struct BlockDev *bd, ULONG blocknum, void *buf)
         if (err == 0) return TRUE;
     }
 
-    /* Fall back to TD_READ64 - uses iotd_Count as high 32 bits of byte offset,
-       avoiding the 32-bit overflow on disks > 4 GB. */
+    /* Fall back to TD_READ64.  The TD64 standard (and UAE/scsi.device) take the
+       HIGH 32 bits of the byte offset from io_Actual, NOT iotd_Count - getting
+       this wrong silently wraps every access past 4 GB to (offset mod 4 GB). */
     {
         UQUAD byte_off = (UQUAD)blocknum * bd->block_size;
         bd->iotd.iotd_Req.io_Command = TD_READ64;
         bd->iotd.iotd_Req.io_Length  = bd->block_size;
         bd->iotd.iotd_Req.io_Data    = (APTR)buf;
         bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
-        bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
-        bd->iotd.iotd_Req.io_Actual  = 0;
+        bd->iotd.iotd_Req.io_Actual  = (ULONG)(byte_off >> 32);  /* high 32 bits */
+        bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);  /* belt & braces */
         bd->iotd.iotd_Req.io_Flags   = 0;
         if (DoIO((struct IORequest *)&bd->iotd) == 0) return TRUE;
     }
@@ -557,8 +558,8 @@ BOOL BlockDev_WriteBlock(struct BlockDev *bd, ULONG blocknum, const void *buf)
     bd->iotd.iotd_Req.io_Length  = bd->block_size;
     bd->iotd.iotd_Req.io_Data    = (APTR)buf;
     bd->iotd.iotd_Req.io_Offset  = (ULONG)(byte_off & 0xFFFFFFFFUL);
-    bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);
-    bd->iotd.iotd_Req.io_Actual  = 0;
+    bd->iotd.iotd_Req.io_Actual  = (ULONG)(byte_off >> 32);  /* TD64 high 32 bits */
+    bd->iotd.iotd_Count          = (ULONG)(byte_off >> 32);  /* belt & braces */
     bd->iotd.iotd_Req.io_Flags   = 0;
     err = (BYTE)DoIO((struct IORequest *)&bd->iotd);
     if (err == 0) return TRUE;
