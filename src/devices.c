@@ -356,12 +356,19 @@ static void trim_trailing(char *s)
 static BOOL try_scsi_inquiry(struct BlockDev *bd, char *vendor, char *product)
 {
     struct SCSICmd scsi;
-    UBYTE buf[36];
+    UBYTE *buf;     /* sector-sized + long-aligned heap buffer, NOT a 36-byte
+                       stack array: lide.device (IDE-as-SCSI) transfers a whole
+                       512-byte sector for HD_SCSICMD passthrough and does
+                       word-wide PIO, overrunning a small/odd stack buffer and
+                       smashing the stack -> Guru 81000005 (AN_MemCorrupt). */
     UBYTE cmd[6];
     UBYTE sense[18];
+    BOOL  ok = FALSE;
+
+    buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!buf) return FALSE;
 
     memset(&scsi,  0, sizeof(scsi));
-    memset(buf,    0, sizeof(buf));
     memset(cmd,    0, sizeof(cmd));
     memset(sense,  0, sizeof(sense));
 
@@ -381,15 +388,16 @@ static BOOL try_scsi_inquiry(struct BlockDev *bd, char *vendor, char *product)
     bd->iotd.iotd_Req.io_Data    = (APTR)&scsi;
     bd->iotd.iotd_Req.io_Flags   = 0;
 
-    if (DoIO((struct IORequest *)&bd->iotd) != 0) return FALSE;
-    if (scsi.scsi_Status != 0) return FALSE;
+    if (DoIO((struct IORequest *)&bd->iotd) == 0 && scsi.scsi_Status == 0) {
+        memcpy(vendor,  buf + 8,  8);  vendor[8]   = '\0';
+        memcpy(product, buf + 16, 16); product[16] = '\0';
+        trim_trailing(vendor);
+        trim_trailing(product);
+        ok = (BOOL)(vendor[0] != '\0' || product[0] != '\0');
+    }
 
-    memcpy(vendor,  buf + 8,  8);  vendor[8]   = '\0';
-    memcpy(product, buf + 16, 16); product[16] = '\0';
-    trim_trailing(vendor);
-    trim_trailing(product);
-
-    return (BOOL)(vendor[0] != '\0' || product[0] != '\0');
+    FreeVec(buf);
+    return ok;
 }
 
 void Devices_GetUnitsForName(const char *devname, struct UnitList *ul,

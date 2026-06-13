@@ -97,12 +97,21 @@ static BOOL try_read_capacity(struct BlockDev *bd,
                                ULONG *out_total, ULONG *out_blksz)
 {
     struct SCSICmd scsi;
-    UBYTE buf[8];
+    UBYTE *buf;     /* sector-sized + long-aligned, NOT an 8-byte stack array:
+                       IDE-as-SCSI drivers (e.g. lide.device) transfer a whole
+                       512-byte sector for HD_SCSICMD passthrough regardless of
+                       the CDB allocation length, and do word-wide PIO that
+                       needs even alignment.  A small/odd stack buffer is
+                       overrun, smashing the exec memory list -> Guru 81000005
+                       (AN_MemCorrupt) and a reboot during the unit probe. */
     UBYTE cdb[10];
     UBYTE sense[18];
+    BOOL  ok = FALSE;
+
+    buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!buf) return FALSE;
 
     memset(&scsi,  0, sizeof(scsi));
-    memset(buf,    0, sizeof(buf));
     memset(cdb,    0, sizeof(cdb));
     memset(sense,  0, sizeof(sense));
 
@@ -122,19 +131,20 @@ static BOOL try_read_capacity(struct BlockDev *bd,
     bd->iotd.iotd_Req.io_Flags   = 0;
     bd->iotd.iotd_Count          = 0;
 
-    if (DoIO((struct IORequest *)&bd->iotd) != 0) return FALSE;
-    if (scsi.scsi_Status != 0)                    return FALSE;
-
-    {
+    if (DoIO((struct IORequest *)&bd->iotd) == 0 && scsi.scsi_Status == 0) {
         ULONG last_lba = ((ULONG)buf[0]<<24)|((ULONG)buf[1]<<16)|
                          ((ULONG)buf[2]<<8) |(ULONG)buf[3];
         ULONG blksz    = ((ULONG)buf[4]<<24)|((ULONG)buf[5]<<16)|
                          ((ULONG)buf[6]<<8) |(ULONG)buf[7];
-        if (last_lba == 0) return FALSE;
-        *out_total = last_lba + 1;
-        *out_blksz = (blksz >= 512) ? blksz : 512;
+        if (last_lba != 0) {
+            *out_total = last_lba + 1;
+            *out_blksz = (blksz >= 512) ? blksz : 512;
+            ok = TRUE;
+        }
     }
-    return TRUE;
+
+    FreeVec(buf);
+    return ok;
 }
 
 /* ------------------------------------------------------------------ */
@@ -397,7 +407,9 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
     {
         struct SCSICmd scmd;
         UBYTE cdb[6];
-        UBYTE *inq = (UBYTE *)AllocVec(36, MEMF_PUBLIC | MEMF_CLEAR);
+        /* 512, not 36: same lide.device full-sector-passthrough hazard as
+           try_read_capacity() - an undersized buffer is overrun. */
+        UBYTE *inq = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
         if (inq) {
             memset(&scmd, 0, sizeof(scmd));
             memset(cdb,   0, sizeof(cdb));
