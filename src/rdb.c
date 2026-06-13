@@ -36,6 +36,24 @@
 #define TD_READ64   (CMD_NONSTD + 15)   /* = 24 */
 #endif
 
+/* New-Style Device query (devices/newstyle.h is absent from the Bartman SDK).
+   NSCMD_DEVICEQUERY (0x4000) is deliberately chosen so that pre-NSD drivers
+   reject it with IOERR_NOCMD, making it a safe "is this a modern driver?"
+   probe.  A driver that lists NSCMD_TD_READ64 reports honest 64-bit geometry,
+   so its TD_GETGEOMETRY size can be trusted without the past-end capacity
+   probe (which can hang/crash drivers that mishandle out-of-range reads). */
+#ifndef NSCMD_DEVICEQUERY
+#define NSCMD_DEVICEQUERY  0x4000
+#define NSCMD_TD_READ64    0xC000
+struct NSDeviceQueryResult {
+    ULONG        DevQueryFormat;     /* always 0                      */
+    ULONG        SizeAvailable;      /* bytes the driver filled in    */
+    UWORD        DeviceType;
+    UWORD        DeviceSubType;
+    const UWORD *SupportedCommands;  /* 0-terminated command list     */
+};
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Local CreateMsgPort / DeleteMsgPort                                 */
 /* (amiga.lib is not available in the ELF toolchain)                  */
@@ -189,6 +207,44 @@ static ULONG probe_last_block(struct BlockDev *bd, ULONG floor_blocks)
 
     FreeVec(buf);
     return lo + 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* device_is_modern                                                    */
+/*                                                                     */
+/* TRUE if the driver answers NSCMD_DEVICEQUERY and advertises 64-bit  */
+/* reads (NSCMD_TD_READ64).  Such drivers (e.g. lide.device 4.x,       */
+/* scsi.device 43+, fat trackdisk) report honest geometry, so we trust */
+/* their TD_GETGEOMETRY total and skip the past-end capacity probe.    */
+/* Pre-NSD drivers reject the query (IOERR_NOCMD) and return FALSE,    */
+/* so the truncation probe still runs for the old controllers that     */
+/* need it (e.g. A3000 scsi.device under-reporting large drives).      */
+/* ------------------------------------------------------------------ */
+
+static BOOL device_is_modern(struct BlockDev *bd)
+{
+    struct NSDeviceQueryResult nsd;
+    const UWORD *cmd;
+
+    memset(&nsd, 0, sizeof(nsd));
+
+    bd->iotd.iotd_Req.io_Command = NSCMD_DEVICEQUERY;
+    bd->iotd.iotd_Req.io_Length  = sizeof(nsd);
+    bd->iotd.iotd_Req.io_Data    = (APTR)&nsd;
+    bd->iotd.iotd_Req.io_Offset  = 0;
+    bd->iotd.iotd_Req.io_Actual  = 0;
+    bd->iotd.iotd_Req.io_Flags   = 0;
+    bd->iotd.iotd_Count          = 0;
+
+    if (DoIO((struct IORequest *)&bd->iotd) != 0) return FALSE; /* pre-NSD */
+
+    /* A valid reply must point at a 0-terminated command list.  nsd was
+       zero-initialised, so a driver that succeeded without filling it in
+       leaves SupportedCommands NULL and is treated as not-modern. */
+    if (!nsd.SupportedCommands) return FALSE;
+    for (cmd = nsd.SupportedCommands; *cmd; cmd++)
+        if (*cmd == NSCMD_TD_READ64) return TRUE;
+    return FALSE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -404,8 +460,14 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
        opcode and may report a truncated geometry), fall back to probing
        the last readable block.  Seed from the driver's reported total so
        the search stays in range; only trust the probe when it finds MORE
-       blocks than the driver claimed - i.e. the geometry was truncated. */
-    if (bd->rc_total_blocks == 0) {
+       blocks than the driver claimed - i.e. the geometry was truncated.
+
+       Skip the probe entirely for modern (NSD/TD64) drivers: they report
+       honest geometry via TD_GETGEOMETRY, so the probe would gain nothing
+       and its past-end reads can hang/crash drivers that don't range-check
+       out-of-bounds blocks (e.g. lide.device).  Only legacy pre-NSD drivers
+       - the ones that actually under-report - reach the probe. */
+    if (bd->rc_total_blocks == 0 && !device_is_modern(bd)) {
         ULONG floor_blocks = (ULONG)(bd->td_total_bytes / 512);
         ULONG probed = probe_last_block(bd, floor_blocks);
         if (probed > 0) {

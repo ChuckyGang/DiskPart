@@ -846,7 +846,16 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
                                     max_hi = rdb->parts[k].low_cyl - 1;
                             }
                             si = (struct StringInfo *)sizemb_gad->SpecialInfo;
-                            if (bytes_per_cyl > 0) {
+                            /* Only recompute geometry when the Size field was
+                               actually edited.  The MB shown is floored from the
+                               true cylinder count (see dialog setup), so blindly
+                               round-tripping an unchanged value MB->cyls (ceil)
+                               shrinks high_cyl by up to a cylinder on a name- or
+                               filesystem-only edit.  Comparing against the value
+                               first placed in the gadget leaves the partition
+                               geometry untouched unless the user changed it. */
+                            if (bytes_per_cyl > 0 &&
+                                strcmp((char *)si->Buffer, sizemb_str) != 0) {
                                 /* current size in MB - base for relative "+/-" entries */
                                 ULONG cur_cyls   = (pi->high_cyl >= pi->low_cyl)
                                                    ? (pi->high_cyl - pi->low_cyl + 1) : 1;

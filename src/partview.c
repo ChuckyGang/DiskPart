@@ -242,10 +242,13 @@ static ULONG lv_render(void)
     /* Selection marker */
     if (sel) { tmp[0] = '>'; LV_TEXT(LVCOL_MARK, tmp, 1); }
 
-    /* Drive name */
+    /* Drive name - clip to the column so a long name never runs into Lo Cyl. */
     {
         const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
-        LV_TEXT(LVCOL_DRIVE, nm, strlen(nm));
+        UWORD len = (UWORD)strlen(nm);
+        UWORD cw  = lv_cols[LVCOL_DRIVE].w;
+        while (len > 0 && (UWORD)TextLength(rp, nm, len) > cw) len--;
+        LV_TEXT(LVCOL_DRIVE, nm, len);
     }
 
     /* Lo Cyl */
@@ -1219,35 +1222,53 @@ static BOOL build_gadgets(APTR vi,
     (TextLength(&rp,(a),(al)) > TextLength(&rp,(b),(bl)) \
      ? (UWORD)TextLength(&rp,(a),(al)) : (UWORD)TextLength(&rp,(b),(bl)))
 
+            UWORD markw, drivew, locylw, hicylw, fsw, sizew, bootw;
+            UWORD fixed, avail, drive_min;
+
             InitRastPort(&rp);
             SetFont(&rp, tf);
 
-            lv_cols[LVCOL_MARK].x = cx;
-            lv_cols[LVCOL_MARK].w = (UWORD)TextLength(&rp, ">", 1);
-            cx += lv_cols[LVCOL_MARK].w + gap;
+            markw  = (UWORD)TextLength(&rp, ">", 1);
+            locylw = MAXW("9999999", 7, "Lo Cyl", 6);
+            hicylw = MAXW("9999999", 7, "Hi Cyl", 6);
+            fsw    = MAXW("FFS+IntlOFS ", 12, "FileSystem", 10);
+            sizew  = MAXW("1000.0 MB", 9, "Size", 4);
+            bootw  = MAXW("* -128", 6, "Boot", 4);
 
-            lv_cols[LVCOL_DRIVE].x = cx;
-            lv_cols[LVCOL_DRIVE].w = MAXW("DH10    ", 8, "Drive", 5);
-            cx += lv_cols[LVCOL_DRIVE].w + gap;
+            /* The Drive (partition name) column fills the slack between the
+               fixed-width columns and the right edge of the listview, so long
+               names get as much room as the window allows and stop overlapping
+               the cylinder columns.  build_gadgets() re-runs on IDCMP_NEWSIZE,
+               so widening the window widens this column.  Clamped to a sensible
+               minimum (old fixed width) when the window is narrow; lv_render()
+               additionally truncates names that still don't fit. */
+            drive_min = MAXW("DH10    ", 8, "Drive", 5);
+            avail = (UWORD)(inner_w - pad * 2);     /* listview gadget width   */
+            avail = (avail > 8) ? (UWORD)(avail - 8) : avail; /* frame margin  */
+            fixed = (UWORD)(cx + markw + locylw + hicylw + fsw + sizew + bootw
+                            + gap * 6 + 8);
+            drivew = (avail > (UWORD)(fixed + drive_min))
+                     ? (UWORD)(avail - fixed) : drive_min;
 
-            lv_cols[LVCOL_LOCYL].x = cx;
-            lv_cols[LVCOL_LOCYL].w = MAXW("9999999", 7, "Lo Cyl", 6);
-            cx += lv_cols[LVCOL_LOCYL].w + gap;
+            lv_cols[LVCOL_MARK].x = cx;  lv_cols[LVCOL_MARK].w = markw;
+            cx += markw + gap;
 
-            lv_cols[LVCOL_HICYL].x = cx;
-            lv_cols[LVCOL_HICYL].w = MAXW("9999999", 7, "Hi Cyl", 6);
-            cx += lv_cols[LVCOL_HICYL].w + gap;
+            lv_cols[LVCOL_DRIVE].x = cx; lv_cols[LVCOL_DRIVE].w = drivew;
+            cx += drivew + gap;
 
-            lv_cols[LVCOL_FS].x = cx;
-            lv_cols[LVCOL_FS].w = MAXW("FFS+IntlOFS ", 12, "FileSystem", 10);
-            cx += lv_cols[LVCOL_FS].w + gap;
+            lv_cols[LVCOL_LOCYL].x = cx; lv_cols[LVCOL_LOCYL].w = locylw;
+            cx += locylw + gap;
 
-            lv_cols[LVCOL_SIZE].x = cx;
-            lv_cols[LVCOL_SIZE].w = MAXW("1000.0 MB", 9, "Size", 4);
-            cx += lv_cols[LVCOL_SIZE].w + gap + 8;
+            lv_cols[LVCOL_HICYL].x = cx; lv_cols[LVCOL_HICYL].w = hicylw;
+            cx += hicylw + gap;
 
-            lv_cols[LVCOL_BOOT].x = cx;
-            lv_cols[LVCOL_BOOT].w = MAXW("* -128", 6, "Boot", 4);
+            lv_cols[LVCOL_FS].x = cx;    lv_cols[LVCOL_FS].w = fsw;
+            cx += fsw + gap;
+
+            lv_cols[LVCOL_SIZE].x = cx;  lv_cols[LVCOL_SIZE].w = sizew;
+            cx += sizew + gap + 8;
+
+            lv_cols[LVCOL_BOOT].x = cx;  lv_cols[LVCOL_BOOT].w = bootw;
 
 #undef MAXW
             CloseFont(tf);
