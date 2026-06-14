@@ -74,6 +74,8 @@ void  rdb_integrity_check(struct Window *win, struct BlockDev *bd,
 void  rdb_verify_block   (struct Window *win, struct BlockDev *bd,
                           const struct RDBInfo *rdb);
 void  rdb_verify_extended(struct Window *win, struct BlockDev *bd);
+void  pv_export_mountlist(struct Window *win, struct BlockDev *bd,
+                          struct RDBInfo *rdb);
 
 /* ------------------------------------------------------------------ */
 /* partview_image.c                                                     */

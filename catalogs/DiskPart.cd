@@ -3235,3 +3235,42 @@ PFS filesystem on %s grown successfully.\nRDB written automatically.\nREBOOT NOW
 MSG_MOVE_PFS_OK_RDB_FAILED_FMT
 PFS filesystem on %s grown successfully.\nWARNING: RDB write FAILED.\nClick Write to save the RDB before rebooting.\n\nDiagnostic: %s
 ;
+;==========================================================================
+; MountList export (GUI menu + CLI MOUNTLIST= + script MOUNTLIST FILE=)
+;==========================================================================
+MSG_PV_MENU_EXPORT_ML
+Export MountList...
+;
+MSG_ML_TITLE
+Export MountList
+;
+MSG_ML_ASL_SAVE
+Save MountList As...
+;
+MSG_ML_NO_PARTS
+No RDB partitions to export.
+;
+MSG_ML_CANT_CREATE
+Could not create the MountList file.
+;
+MSG_ML_WRITE_ERR
+Error writing the MountList file.
+;
+MSG_ML_SAVED
+MountList saved.\n%lu partition(s) written.
+;
+MSG_SCR_MOUNTLIST_NEED_FILE
+MOUNTLIST requires FILE=<path>.
+;
+MSG_SCR_MOUNTLIST_DRYRUN_FMT
+DRYRUN: would write MountList to %s
+;
+MSG_SCR_MOUNTLIST_WRITING_FMT
+Writing MountList to %s...
+;
+MSG_SCR_MOUNTLIST_CANT_OPEN
+MOUNTLIST: cannot create %s.
+;
+MSG_SCR_MOUNTLIST_WRITE_ERR
+MOUNTLIST: write error.
+;

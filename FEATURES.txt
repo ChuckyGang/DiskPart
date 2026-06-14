@@ -82,6 +82,10 @@ scripting interface.
    filesystems that support it.
  * Large files (>2 GB) require a host filesystem that can handle them; the
    dos.library Seek limit otherwise caps image files at ~2 GB.
+ * Export an AmigaDOS MountList from the selected drive's RDB (GUI menu
+   "Export MountList...", CLI MOUNTLIST=<path>, script MOUNTLIST FILE=<path>).
+   One entry per partition with the full DosEnvVec; a FileSystem line is
+   emitted when the RDB carries a matching handler path.  Read-only.
 
 
 --------------------------------------------------------------------------------

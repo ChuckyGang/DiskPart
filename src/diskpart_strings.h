@@ -1053,8 +1053,20 @@
 #define MSG_SCR_ADDFS_TOO_BIG        1047
 #define MSG_MOVE_PFS_OK_RDB_WRITTEN_FMT 1048
 #define MSG_MOVE_PFS_OK_RDB_FAILED_FMT 1049
+#define MSG_PV_MENU_EXPORT_ML        1050
+#define MSG_ML_TITLE                 1051
+#define MSG_ML_ASL_SAVE              1052
+#define MSG_ML_NO_PARTS              1053
+#define MSG_ML_CANT_CREATE           1054
+#define MSG_ML_WRITE_ERR             1055
+#define MSG_ML_SAVED                 1056
+#define MSG_SCR_MOUNTLIST_NEED_FILE  1057
+#define MSG_SCR_MOUNTLIST_DRYRUN_FMT 1058
+#define MSG_SCR_MOUNTLIST_WRITING_FMT 1059
+#define MSG_SCR_MOUNTLIST_CANT_OPEN  1060
+#define MSG_SCR_MOUNTLIST_WRITE_ERR  1061
 
-#define MSG_COUNT 1050
+#define MSG_COUNT 1062
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2116,5 +2128,17 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1047 MSG_SCR_ADDFS_TOO_BIG */ "ADDFS: filesystem driver file too large (limit 1 MB).",
     /* 1048 MSG_MOVE_PFS_OK_RDB_WRITTEN_FMT */ "PFS filesystem on %s grown successfully.\nRDB written automatically.\nREBOOT NOW to use the new space.\n\nDiagnostic: %s",
     /* 1049 MSG_MOVE_PFS_OK_RDB_FAILED_FMT */ "PFS filesystem on %s grown successfully.\nWARNING: RDB write FAILED.\nClick Write to save the RDB before rebooting.\n\nDiagnostic: %s",
+    /* 1050 MSG_PV_MENU_EXPORT_ML */ "Export MountList...",
+    /* 1051 MSG_ML_TITLE */ "Export MountList",
+    /* 1052 MSG_ML_ASL_SAVE */ "Save MountList As...",
+    /* 1053 MSG_ML_NO_PARTS */ "No RDB partitions to export.",
+    /* 1054 MSG_ML_CANT_CREATE */ "Could not create the MountList file.",
+    /* 1055 MSG_ML_WRITE_ERR */ "Error writing the MountList file.",
+    /* 1056 MSG_ML_SAVED */ "MountList saved.\n%lu partition(s) written.",
+    /* 1057 MSG_SCR_MOUNTLIST_NEED_FILE */ "MOUNTLIST requires FILE=<path>.",
+    /* 1058 MSG_SCR_MOUNTLIST_DRYRUN_FMT */ "DRYRUN: would write MountList to %s",
+    /* 1059 MSG_SCR_MOUNTLIST_WRITING_FMT */ "Writing MountList to %s...",
+    /* 1060 MSG_SCR_MOUNTLIST_CANT_OPEN */ "MOUNTLIST: cannot create %s.",
+    /* 1061 MSG_SCR_MOUNTLIST_WRITE_ERR */ "MOUNTLIST: write error.",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

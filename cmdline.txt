@@ -114,6 +114,16 @@ IMAGEIN <path>
 
   Example:  DiskPart DEV uaehf.device:0 IMAGEIN=ram:disk.hdf FORCE
 
+MOUNTLIST <path>
+  Write an AmigaDOS MountList text file at <path> describing every
+  partition in the open target's RDB (one entry per partition, with the
+  full DosEnvVec: Surfaces, BlocksPerTrack, LowCyl/HighCyl, DosType,
+  Mask, MaxTransfer, BootPri, ...).  Read-only - the disk is not changed.
+  Where the RDB carries a matching filesystem handler path, a FileSystem
+  line is added so C:Mount can load it.  Existing file is overwritten.
+
+  Example:  DiskPart DEV scsi.device:0 MOUNTLIST=ram:MountList
+
 INIT NEW
   Create a fresh RDB on the specified device, auto-detecting geometry
   from TD_GETGEOMETRY.  Writes immediately (no separate WRITE step
@@ -300,6 +310,13 @@ IMAGEIN FILE=<path>
   Re-reads the RDB after the restore so subsequent INFO is accurate.
   Honours DRYRUN.
   Example:  IMAGEIN FILE=ram:disk.hdf
+
+MOUNTLIST FILE=<path>
+  Write an AmigaDOS MountList text file describing every partition in the
+  currently-open RDB (full DosEnvVec per partition; FileSystem line added
+  when the RDB carries a matching handler path).  Read-only.
+  Honours DRYRUN (no file is created).
+  Example:  MOUNTLIST FILE=ram:MountList
 
 INFO
   Read and display the RDB and partition table.  Read-only.

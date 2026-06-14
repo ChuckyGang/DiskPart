@@ -33,6 +33,7 @@
 #include "rdb.h"
 #include "devices.h"
 #include "version.h"
+#include "mountlist.h"
 #include "partview_internal.h"
 
 extern struct ExecBase      *SysBase;
@@ -130,6 +131,77 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
         }
     }
     FreeVec(buf);
+}
+
+/* Export an AmigaDOS MountList describing every RDB partition to a text file
+   chosen via an ASL save requester.  Read-only with respect to the disk. */
+void pv_export_mountlist(struct Window *win, struct BlockDev *bd,
+                         struct RDBInfo *rdb)
+{
+    struct EasyStruct es;
+    static char save_path[256];
+    static char msg[128];
+
+    es.es_StructSize = sizeof(es); es.es_Flags = 0;
+    es.es_Title      = (UBYTE *)GS(MSG_ML_TITLE);
+    es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+
+    if (!rdb || !rdb->valid || rdb->num_parts == 0) {
+        es.es_TextFormat = (UBYTE *)GS(MSG_ML_NO_PARTS);
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+    if (!AslBase) {
+        es.es_TextFormat = (UBYTE *)GS(MSG_RDB_ASL_UNAVAIL);
+        EasyRequest(win, &es, NULL);
+        return;
+    }
+
+    {
+        struct FileRequester *fr;
+        BOOL chosen = FALSE;
+        { struct TagItem asl_tags[] = {
+              { ASLFR_TitleText,    (ULONG)GS(MSG_ML_ASL_SAVE) },
+              { ASLFR_DoSaveMode,   TRUE },
+              { ASLFR_InitialDrawer,(ULONG)"RAM:" },
+              { ASLFR_InitialFile,  (ULONG)"MountList" },
+              { TAG_DONE, 0 } };
+          fr = (struct FileRequester *)AllocAslRequest(ASL_FileRequest, asl_tags); }
+        if (fr) {
+            if (AslRequest(fr, NULL)) {
+                strncpy(save_path, fr->fr_Drawer, sizeof(save_path)-1);
+                save_path[sizeof(save_path)-1] = '\0';
+                AddPart((UBYTE *)save_path, (UBYTE *)fr->fr_File, sizeof(save_path));
+                chosen = TRUE;
+            }
+            FreeAslRequest(fr);
+        }
+        if (!chosen) return;
+    }
+
+    {
+        BPTR fh = Open((UBYTE *)save_path, MODE_NEWFILE);
+        if (!fh) {
+            es.es_TextFormat = (UBYTE *)GS(MSG_ML_CANT_CREATE);
+            EasyRequest(win, &es, NULL);
+            return;
+        } else {
+            UWORD n = 0;
+            /* Image files have no exec device - pass NULL so the formatter
+               writes a placeholder Device/Unit with a warning comment. */
+            const char *dn = (bd && bd->backend == BD_DEVICE) ? bd->devname : NULL;
+            ULONG       un = bd ? bd->unit : 0;
+            BOOL ok = MountList_Write(fh, rdb, dn, un, &n);
+            Close(fh);
+            if (!ok) {
+                es.es_TextFormat = (UBYTE *)GS(MSG_ML_WRITE_ERR);
+            } else {
+                DP_SNPRINTF(msg, GS(MSG_ML_SAVED), (ULONG)n);
+                es.es_TextFormat = (UBYTE *)msg;
+            }
+            EasyRequest(win, &es, NULL);
+        }
+    }
 }
 
 void rdb_restore_block(struct Window *win, struct BlockDev *bd)

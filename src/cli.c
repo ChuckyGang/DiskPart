@@ -24,6 +24,7 @@
 #include "devices.h"
 #include "rdb.h"
 #include "imagecopy.h"
+#include "mountlist.h"
 #include "script.h"
 #include "quickformat.h"
 #include "ffsresize.h"
@@ -53,7 +54,7 @@ extern struct DosLibrary *DOSBase;
     "FILE/K,VERSION/K,STACKSIZE/K,"                               \
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
     "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K,"               \
-    "NOUNMOUNT/S,"                                                \
+    "NOUNMOUNT/S,MOUNTLIST/K,"                                    \
     "GROW/M"
 
 enum {
@@ -95,6 +96,7 @@ enum {
     ARG_NOWARNING,
     ARG_VOLNAME,
     ARG_NOUNMOUNT,
+    ARG_MOUNTLIST,
     ARG_GROW,
     ARG_COUNT
 };
@@ -814,6 +816,52 @@ static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
 
 backup_done:
     FreeVec(buf);
+    RDB_FreeCode(&s_rdb);
+    BlockDev_Close(bd);
+    return rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* MOUNTLIST - write an AmigaDOS MountList describing the RDB partitions */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_mountlist(const char *devname, ULONG unit, const char *path)
+{
+    struct BlockDev *bd;
+    BPTR   fh;
+    LONG   rc = RETURN_ERROR;
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_FOUND));
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_SAVING_TO), path);
+    cli_puts(outbuf);
+    fh = Open((STRPTR)path, MODE_NEWFILE);
+    if (!fh) {
+        cli_puts(GS(MSG_CLI_FAILED_CREATE_FILE));
+    } else {
+        const char *dn = (bd->backend == BD_DEVICE) ? bd->devname : NULL;
+        if (MountList_Write(fh, &s_rdb, dn, bd->unit, NULL))
+            { cli_puts(GS(MSG_CLI_OK)); rc = RETURN_OK; }
+        else
+            cli_puts(GS(MSG_CLI_FAILED_WRITE_ERROR));
+        Close(fh);
+    }
+
     RDB_FreeCode(&s_rdb);
     BlockDev_Close(bd);
     return rc;
@@ -2344,6 +2392,10 @@ LONG cli_run(void)
             if (rc == RETURN_OK && args[ARG_IMAGEIN])
                 rc = cmd_imagein(devname, unit,
                                  (const char *)args[ARG_IMAGEIN], force);
+
+            if (rc == RETURN_OK && args[ARG_MOUNTLIST])
+                rc = cmd_mountlist(devname, unit,
+                                   (const char *)args[ARG_MOUNTLIST]);
         }
     }
 

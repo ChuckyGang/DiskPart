@@ -34,6 +34,7 @@
 #include "locale_support.h"
 #include "rdb.h"
 #include "imagecopy.h"
+#include "mountlist.h"
 #include "quickformat.h"
 #include "ffsresize.h"
 #include "sfsresize.h"
@@ -1663,6 +1664,46 @@ static LONG do_reboot(ULONG ln)
     return RETURN_OK;   /* not reached */
 }
 
+/* MOUNTLIST FILE=<path> - export an AmigaDOS MountList from the open RDB. */
+static LONG do_mountlist(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *path;
+    BPTR  fh;
+    const char *dn;
+
+    if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid) {
+        sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN)); return RETURN_ERROR;
+    }
+    path = kwarg(tok, ntok, "FILE");
+    if (!path) { sc_err(ln, GS(MSG_SCR_MOUNTLIST_NEED_FILE)); return RETURN_ERROR; }
+
+    if (s_st.dryrun) {
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_MOUNTLIST_DRYRUN_FMT), path);
+        sc_puts(s_msg);
+        return RETURN_OK;
+    }
+
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_MOUNTLIST_WRITING_FMT), path);
+    sc_puts(s_msg);
+
+    fh = Open((STRPTR)path, MODE_NEWFILE);
+    if (!fh) {
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_MOUNTLIST_CANT_OPEN), path);
+        sc_err(ln, s_msg);
+        return RETURN_ERROR;
+    }
+    dn = (s_st.bd->backend == BD_DEVICE) ? s_st.bd->devname : NULL;
+    if (!MountList_Write(fh, &s_st.rdb, dn, s_st.bd->unit, NULL)) {
+        Close(fh);
+        sc_err(ln, GS(MSG_SCR_MOUNTLIST_WRITE_ERR));
+        return RETURN_ERROR;
+    }
+    Close(fh);
+    sc_puts(GS(MSG_SCR_DONE));
+    return RETURN_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* Line dispatcher                                                     */
 /* ------------------------------------------------------------------ */
@@ -1687,6 +1728,7 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "INFO"))    return do_info(ln);
     if (ci_eq(tok[0], "IMAGEOUT"))return do_imageout(ln, tok, ntok);
     if (ci_eq(tok[0], "IMAGEIN")) return do_imagein(ln, tok, ntok);
+    if (ci_eq(tok[0], "MOUNTLIST")) return do_mountlist(ln, tok, ntok);
     if (ci_eq(tok[0], "CLOSE"))   return do_close(ln);
     if (ci_eq(tok[0], "REBOOT"))  return do_reboot(ln);
 
