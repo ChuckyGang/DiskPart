@@ -7,11 +7,15 @@
  *
  * Commands:
  *   OPEN <device> <unit>
- *   INIT NEW | NEWGEO
+ *   INIT NEW [MBR] | NEWGEO
  *   ADDPART NAME=<n> LOW=<cyl|size> HIGH=<cyl> [TYPE=<t>] [BOOTPRI=<n>] [BOOTABLE]
  *           [VOLNAME=<label>]   ; VOLNAME quick-formats the partition after
  *                               ; WRITE (device only); omit/empty = no format
  *   DELPART NAME=<n>
+ *   ADDMBR TYPE=<t> START=<cyl> END=<cyl|+size> [ACTIVE]
+ *           ; Types: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP
+ *           ; MBR writes are immediate (no separate WRITE needed).
+ *   DELMBR NAME=<MBR1..MBR4>
  *   CHECKRDB
  *   VERIFYRDB FILE=<path>
  *   VERIFYEXT FILE=<path>
@@ -33,6 +37,8 @@
 #include "clib.h"
 #include "locale_support.h"
 #include "rdb.h"
+#include "mbr.h"
+#include "partmove.h"
 #include "imagecopy.h"
 #include "mountlist.h"
 #include "quickformat.h"
@@ -58,6 +64,7 @@ struct ScriptState {
     /* Names of partitions deleted since the last WRITE, to unmount after it. */
     char             unmount_names[MAX_PARTITIONS][32];
     UWORD            unmount_count;
+    struct MBRInfo   s_mbr;          /* in-memory MBR (block 0)              */
 };
 
 static struct ScriptState s_st;      /* ~9 KB in BSS                    */
@@ -387,6 +394,9 @@ static void open_finish(ULONG ln)
 
     s_st.rdb_ready = TRUE;
     s_st.dirty     = FALSE;
+
+    memset(&s_st.s_mbr, 0, sizeof(s_st.s_mbr));
+    MBR_Read(s_st.bd, &s_st.s_mbr);
 }
 
 /* Close any currently-open device before a fresh OPEN/CREATE. */
@@ -398,6 +408,7 @@ static void open_close_existing(ULONG ln)
         RDB_FreeCode(&s_st.rdb);
         BlockDev_Close(s_st.bd);
         s_st.bd = NULL; s_st.rdb_ready = FALSE; s_st.dirty = FALSE;
+        memset(&s_st.s_mbr, 0, sizeof(s_st.s_mbr));
     }
 }
 
@@ -532,6 +543,23 @@ static LONG do_init(ULONG ln, char **tok, UWORD ntok)
                     cyls, heads, sects, szbuf);
         }
         sc_puts(s_msg);
+
+        /* INIT NEW MBR: place RDB at block 1, write empty MBR at block 0. */
+        if (has_flag(tok, ntok, "MBR")) {
+            s_st.rdb.rdb_block_lo = 1;
+            s_st.rdb.block_num    = 1;
+            if (s_st.dryrun) {
+                sc_puts(GS(MSG_SCR_INIT_MBR_DRYRUN));
+            } else {
+                if (!MBR_WriteEmpty(s_st.bd)) {
+                    sc_err(ln, GS(MSG_SCR_ADDMBR_WRITE_FAIL));
+                    return RETURN_ERROR;
+                }
+                memset(&s_st.s_mbr, 0, sizeof(s_st.s_mbr));
+                s_st.s_mbr.valid = TRUE;
+                sc_puts(GS(MSG_SCR_INIT_MBR_WRITTEN));
+            }
+        }
         return RETURN_OK;
     }
 
@@ -1344,6 +1372,78 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
+/* ZEROPART - overwrite every block in a partition with zeros         */
+/*   ZEROPART NAME=<drive>                                            */
+/* ------------------------------------------------------------------ */
+
+static LONG do_zeropart(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *v;
+    char  name[32], err_buf[256];
+    UWORD nlen, i;
+    ULONG heads, sectors, total_blocks;
+    struct PartInfo *pi = NULL;
+    BOOL ok;
+
+    if (!s_st.bd)
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
+
+    v = kwarg(tok, ntok, "NAME");
+    if (!v || !v[0]) {
+        sc_err(ln, GS(MSG_SCR_ZEROPART_NEED_NAME));
+        return RETURN_ERROR;
+    }
+    strncpy(name, v, 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) {
+        sc_err(ln, GS(MSG_SCR_ZEROPART_NEED_NAME));
+        return RETURN_ERROR;
+    }
+
+    for (i = 0; i < s_st.rdb.num_parts; i++) {
+        if (ci_eq(s_st.rdb.parts[i].drive_name, name)) {
+            pi = &s_st.rdb.parts[i]; break;
+        }
+    }
+    if (!pi) {
+        snprintf(s_msg, sizeof(s_msg),
+                 GS(MSG_SCR_ZEROPART_NOT_FOUND_FMT), name);
+        sc_err(ln, s_msg);
+        return RETURN_ERROR;
+    }
+
+    heads   = pi->heads   > 0 ? pi->heads   : s_st.rdb.heads;
+    sectors = pi->sectors > 0 ? pi->sectors : s_st.rdb.sectors;
+    total_blocks = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
+
+    if (s_st.dryrun) {
+        snprintf(s_msg, sizeof(s_msg),
+                 GS(MSG_SCR_ZEROPART_OK_FMT),
+                 pi->drive_name, (unsigned long)total_blocks);
+        sc_puts(s_msg);
+        return RETURN_OK;
+    }
+
+    ok = PART_Zero(s_st.bd, &s_st.rdb, pi, err_buf, NULL, NULL);
+
+    if (ok) {
+        snprintf(s_msg, sizeof(s_msg),
+                 GS(MSG_SCR_ZEROPART_OK_FMT),
+                 pi->drive_name, (unsigned long)total_blocks);
+        sc_puts(s_msg);
+    } else {
+        snprintf(s_msg, sizeof(s_msg),
+                 GS(MSG_SCR_ZEROPART_FAIL_FMT), err_buf);
+        sc_err(ln, s_msg);
+        return RETURN_ERROR;
+    }
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* WRITE                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -1542,6 +1642,159 @@ static LONG do_imagein(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
+/* ADDMBR TYPE=<t> START=<cyl> END=<cyl|+size> [ACTIVE]              */
+/* ------------------------------------------------------------------ */
+
+static LONG do_addmbr(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *v;
+    UBYTE       mtype;
+    ULONG       lo_cyl, hi_cyl;
+    UBYTE       slot;
+    ULONG       cyl_secs, lba_start, lba_size;
+    BOOL        active = FALSE;
+    char        typebuf[12];
+
+    if (!s_st.bd)
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_INIT)); return RETURN_ERROR; }
+    if (!s_st.s_mbr.valid)
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_NO_MBR)); return RETURN_ERROR; }
+    if (s_st.rdb.heads == 0 || s_st.rdb.sectors == 0)
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_GEO_ZERO)); return RETURN_ERROR; }
+
+    /* TYPE= (required) */
+    v = kwarg(tok, ntok, "TYPE");
+    if (!v || !v[0]) { sc_err(ln, GS(MSG_SCR_ADDMBR_USAGE)); return RETURN_ERROR; }
+    mtype = MBR_ParseType(v);
+    if (mtype == MBRT_EMPTY) { sc_err(ln, GS(MSG_SCR_ADDMBR_BAD_TYPE)); return RETURN_ERROR; }
+
+    /* START= (required) */
+    v = kwarg(tok, ntok, "START");
+    if (!v || !parse_dec_strict(v, &lo_cyl))
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_BAD_START)); return RETURN_ERROR; }
+
+    /* END= (required) - cylinder or +size */
+    v = kwarg(tok, ntok, "END");
+    if (!v || !parse_high(v, lo_cyl, s_st.rdb.hi_cyl,
+                          s_st.rdb.heads, s_st.rdb.sectors, &hi_cyl))
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_BAD_END)); return RETURN_ERROR; }
+    if (hi_cyl < lo_cyl)
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_BAD_END)); return RETURN_ERROR; }
+
+    /* ACTIVE flag */
+    active = has_flag(tok, ntok, "ACTIVE");
+
+    /* Find a free MBR slot */
+    for (slot = 0; slot < MBR_MAX_PARTS; slot++)
+        if (!s_st.s_mbr.parts[slot].present) break;
+    if (slot >= MBR_MAX_PARTS)
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_FULL)); return RETURN_ERROR; }
+
+    /* Overlap check */
+    {
+        UBYTE ki;
+        for (ki = 0; ki < MBR_MAX_PARTS; ki++) {
+            ULONG elo, ehi;
+            if (!s_st.s_mbr.parts[ki].present) continue;
+            elo = MBR_LBAToCyl(s_st.s_mbr.parts[ki].lba_start,
+                                s_st.rdb.heads, s_st.rdb.sectors);
+            ehi = MBR_LBAToCyl(s_st.s_mbr.parts[ki].lba_start +
+                                s_st.s_mbr.parts[ki].lba_size - 1,
+                                s_st.rdb.heads, s_st.rdb.sectors);
+            if (lo_cyl <= ehi && hi_cyl >= elo)
+                { sc_err(ln, GS(MSG_SCR_ADDMBR_OVERLAP)); return RETURN_ERROR; }
+        }
+    }
+
+    /* Compute LBA */
+    cyl_secs  = s_st.rdb.heads * s_st.rdb.sectors;
+    lba_start = lo_cyl * cyl_secs;
+    lba_size  = (hi_cyl - lo_cyl + 1) * cyl_secs;
+
+    /* Fill the slot */
+    s_st.s_mbr.parts[slot].present   = TRUE;
+    s_st.s_mbr.parts[slot].type      = mtype;
+    s_st.s_mbr.parts[slot].active    = active;
+    s_st.s_mbr.parts[slot].lba_start = lba_start;
+    s_st.s_mbr.parts[slot].lba_size  = lba_size;
+    snprintf(s_st.s_mbr.parts[slot].name, 8, "MBR%u", (unsigned)(slot + 1));
+
+    if (s_st.dryrun) {
+        MBR_TypeName(mtype, typebuf);
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDMBR_DRYRUN_FMT),
+                s_st.s_mbr.parts[slot].name, typebuf, lo_cyl, hi_cyl);
+        sc_puts(s_msg);
+        /* Undo the slot fill so state stays consistent in dryrun */
+        memset(&s_st.s_mbr.parts[slot], 0, sizeof(s_st.s_mbr.parts[slot]));
+        snprintf(s_st.s_mbr.parts[slot].name, 8, "MBR%u", (unsigned)(slot + 1));
+        return RETURN_OK;
+    }
+
+    if (!MBR_Write(s_st.bd, &s_st.s_mbr))
+        { sc_err(ln, GS(MSG_SCR_ADDMBR_WRITE_FAIL)); return RETURN_ERROR; }
+
+    MBR_TypeName(mtype, typebuf);
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_ADDMBR_ADDED_FMT),
+            s_st.s_mbr.parts[slot].name, lo_cyl, hi_cyl,
+            typebuf, active ? "Active" : "");
+    sc_puts(s_msg);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* DELMBR NAME=<MBR1..MBR4>                                           */
+/* ------------------------------------------------------------------ */
+
+static LONG do_delmbr(ULONG ln, char **tok, UWORD ntok)
+{
+    const char *v;
+    UBYTE slot;
+
+    if (!s_st.bd)
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.s_mbr.valid)
+        { sc_err(ln, GS(MSG_SCR_DELMBR_NO_MBR)); return RETURN_ERROR; }
+
+    v = kwarg(tok, ntok, "NAME");
+    if (!v || !v[0]) { sc_err(ln, GS(MSG_SCR_DELMBR_USAGE)); return RETURN_ERROR; }
+
+    /* Find the named slot */
+    slot = 0xFF;
+    {
+        UBYTE i;
+        for (i = 0; i < MBR_MAX_PARTS; i++) {
+            if (ci_eq(v, s_st.s_mbr.parts[i].name)) { slot = i; break; }
+        }
+    }
+    if (slot == 0xFF || !s_st.s_mbr.parts[slot].present) {
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_DELMBR_NOT_FOUND_FMT), v);
+        sc_err(ln, s_msg);
+        return RETURN_ERROR;
+    }
+
+    if (s_st.dryrun) {
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_DELMBR_DRYRUN_FMT), v);
+        sc_puts(s_msg);
+        return RETURN_OK;
+    }
+
+    /* Clear the slot and write */
+    memset(&s_st.s_mbr.parts[slot], 0, sizeof(s_st.s_mbr.parts[slot]));
+    snprintf(s_st.s_mbr.parts[slot].name, 8, "MBR%u", (unsigned)(slot + 1));
+
+    if (!MBR_Write(s_st.bd, &s_st.s_mbr)) {
+        sc_err(ln, GS(MSG_SCR_DELMBR_WRITE_FAIL));
+        return RETURN_ERROR;
+    }
+
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_DELMBR_DELETED_FMT), v);
+    sc_puts(s_msg);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* INFO                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1615,6 +1868,29 @@ static LONG do_info(ULONG ln)
                 DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_FS_FMT), i, dtbuf);
         }
         sc_puts(s_msg);
+    }
+
+    /* MBR partitions (if present) */
+    if (s_st.s_mbr.valid) {
+        UBYTE mi;
+        UBYTE mcount = MBR_Count(&s_st.s_mbr);
+        char  typebuf[12];
+        DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_MBR_HDR_FMT), (unsigned)mcount);
+        sc_puts(s_msg);
+        for (mi = 0; mi < MBR_MAX_PARTS; mi++) {
+            struct MBRPart *mp = &s_st.s_mbr.parts[mi];
+            ULONG mlo, mhi;
+            if (!mp->present) continue;
+            MBR_TypeName(mp->type, typebuf);
+            mlo = MBR_LBAToCyl(mp->lba_start,
+                                s_st.rdb.heads, s_st.rdb.sectors);
+            mhi = MBR_LBAToCyl(mp->lba_start + mp->lba_size - 1,
+                                s_st.rdb.heads, s_st.rdb.sectors);
+            DP_SNPRINTF(s_msg, GS(MSG_SCR_INFO_MBR_ROW_FMT),
+                    mp->name, mlo, mhi, typebuf,
+                    mp->active ? "Active" : "");
+            sc_puts(s_msg);
+        }
     }
 
     return RETURN_OK;
@@ -1718,12 +1994,15 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "CREATE"))  return do_create(ln, tok, ntok);
     if (ci_eq(tok[0], "INIT"))    return do_init(ln, tok, ntok);
     if (ci_eq(tok[0], "ADDPART")) return do_addpart(ln, tok, ntok);
-    if (ci_eq(tok[0], "DELPART"))   return do_delpart(ln, tok, ntok);
+    if (ci_eq(tok[0], "DELPART")) return do_delpart(ln, tok, ntok);
+    if (ci_eq(tok[0], "ADDMBR"))  return do_addmbr(ln, tok, ntok);
+    if (ci_eq(tok[0], "DELMBR"))  return do_delmbr(ln, tok, ntok);
     if (ci_eq(tok[0], "CHECKRDB")) return do_checkrdb(ln);
     if (ci_eq(tok[0], "VERIFYRDB")) return do_verifyrdb(ln, tok, ntok);
     if (ci_eq(tok[0], "VERIFYEXT")) return do_verifyext(ln, tok, ntok);
     if (ci_eq(tok[0], "ADDFS"))    return do_addfs(ln, tok, ntok);
-    if (ci_eq(tok[0], "GROW"))    return do_grow(ln, tok, ntok);
+    if (ci_eq(tok[0], "GROW"))     return do_grow(ln, tok, ntok);
+    if (ci_eq(tok[0], "ZEROPART")) return do_zeropart(ln, tok, ntok);
     if (ci_eq(tok[0], "WRITE"))   return do_write(ln);
     if (ci_eq(tok[0], "INFO"))    return do_info(ln);
     if (ci_eq(tok[0], "IMAGEOUT"))return do_imageout(ln, tok, ntok);

@@ -1065,8 +1065,88 @@
 #define MSG_SCR_MOUNTLIST_WRITING_FMT 1059
 #define MSG_SCR_MOUNTLIST_CANT_OPEN  1060
 #define MSG_SCR_MOUNTLIST_WRITE_ERR  1061
+#define MSG_PV_MENU_ZERO_PART        1062
+#define MSG_ZERO_CONFIRM_TITLE       1063
+#define MSG_ZERO_CONFIRM_BODY_FMT    1064
+#define MSG_ZERO_CONFIRM_GADGETS     1065
+#define MSG_ZERO_PROG_TITLE          1066
+#define MSG_ZERO_WRITING             1067
+#define MSG_ZERO_OK_FMT              1068
+#define MSG_ZERO_OK_TITLE            1069
+#define MSG_ZERO_FAIL_TITLE          1070
+#define MSG_ZERO_NO_PART_SEL         1071
+#define MSG_CLI_ZEROPART_NEED_NAME   1072
+#define MSG_CLI_ZEROPART_NOT_FOUND_FMT 1073
+#define MSG_CLI_ZEROPART_CONFIRM_FMT 1074
+#define MSG_CLI_ZEROPART_WRITING_FMT 1075
+#define MSG_CLI_ZEROPART_OK_FMT      1076
+#define MSG_CLI_ZEROPART_FAIL_FMT    1077
+#define MSG_SCR_ZEROPART_NEED_NAME   1078
+#define MSG_SCR_ZEROPART_NOT_FOUND_FMT 1079
+#define MSG_SCR_ZEROPART_OK_FMT      1080
+#define MSG_SCR_ZEROPART_FAIL_FMT    1081
+#define MSG_MBR_SHARED_TITLE         1082
+#define MSG_MBR_SHARED_BODY          1083
+#define MSG_MBR_SHARED_GADGETS       1084
+#define MSG_PV_MENU_MBR_ADD          1085
+#define MSG_MBR_DLG_ADD_TITLE        1086
+#define MSG_MBR_DLG_EDIT_TITLE       1087
+#define MSG_MBR_DLG_TYPE             1088
+#define MSG_MBR_DLG_ACTIVE           1089
+#define MSG_MBR_DLG_STARTCYL         1090
+#define MSG_MBR_DLG_ENDCYL           1091
+#define MSG_MBR_NO_MBR               1092
+#define MSG_MBR_FULL                 1093
+#define MSG_MBR_OVERLAP              1094
+#define MSG_MBR_GEOM_ZERO            1095
+#define MSG_MBR_WRITE_FAIL           1096
+#define MSG_MBR_DEL_BODY_FMT         1097
+#define MSG_MBR_DEL_TITLE            1098
+#define MSG_WRITE                    1099
+#define MSG_MBR_INIT_CHK             1100
+#define MSG_SCR_ADDMBR_USAGE         1101
+#define MSG_SCR_ADDMBR_NO_MBR        1102
+#define MSG_SCR_ADDMBR_FULL          1103
+#define MSG_SCR_ADDMBR_BAD_TYPE      1104
+#define MSG_SCR_ADDMBR_BAD_START     1105
+#define MSG_SCR_ADDMBR_BAD_END       1106
+#define MSG_SCR_ADDMBR_OVERLAP       1107
+#define MSG_SCR_ADDMBR_GEO_ZERO      1108
+#define MSG_SCR_ADDMBR_WRITE_FAIL    1109
+#define MSG_SCR_ADDMBR_ADDED_FMT     1110
+#define MSG_SCR_ADDMBR_DRYRUN_FMT    1111
+#define MSG_SCR_DELMBR_USAGE         1112
+#define MSG_SCR_DELMBR_NO_MBR        1113
+#define MSG_SCR_DELMBR_NOT_FOUND_FMT 1114
+#define MSG_SCR_DELMBR_WRITE_FAIL    1115
+#define MSG_SCR_DELMBR_DELETED_FMT   1116
+#define MSG_SCR_DELMBR_DRYRUN_FMT    1117
+#define MSG_SCR_INFO_MBR_HDR_FMT     1118
+#define MSG_SCR_INFO_MBR_ROW_FMT     1119
+#define MSG_SCR_INIT_MBR_WRITTEN     1120
+#define MSG_SCR_INIT_MBR_DRYRUN      1121
+#define MSG_CLI_ADDMBR_NEED_TYPE     1122
+#define MSG_CLI_ADDMBR_NEED_START    1123
+#define MSG_CLI_ADDMBR_NEED_END      1124
+#define MSG_CLI_ADDMBR_NO_MBR        1125
+#define MSG_CLI_ADDMBR_FULL          1126
+#define MSG_CLI_ADDMBR_BAD_TYPE      1127
+#define MSG_CLI_ADDMBR_BAD_START     1128
+#define MSG_CLI_ADDMBR_BAD_END       1129
+#define MSG_CLI_ADDMBR_OVERLAP       1130
+#define MSG_CLI_ADDMBR_GEO_ZERO      1131
+#define MSG_CLI_ADDMBR_WRITE_FAIL    1132
+#define MSG_CLI_ADDMBR_ADDED_FMT     1133
+#define MSG_CLI_DELMBR_NEED_NAME     1134
+#define MSG_CLI_DELMBR_NO_MBR        1135
+#define MSG_CLI_DELMBR_NOT_FOUND_FMT 1136
+#define MSG_CLI_DELMBR_WRITE_FAIL    1137
+#define MSG_CLI_DELMBR_DELETED_FMT   1138
+#define MSG_CLI_INIT_MBR_WRITTEN     1139
+#define MSG_CLI_INFO_MBR_HDR_FMT     1140
+#define MSG_CLI_INFO_MBR_ROW_FMT     1141
 
-#define MSG_COUNT 1062
+#define MSG_COUNT 1142
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2140,5 +2220,85 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1059 MSG_SCR_MOUNTLIST_WRITING_FMT */ "Writing MountList to %s...",
     /* 1060 MSG_SCR_MOUNTLIST_CANT_OPEN */ "MOUNTLIST: cannot create %s.",
     /* 1061 MSG_SCR_MOUNTLIST_WRITE_ERR */ "MOUNTLIST: write error.",
+    /* 1062 MSG_PV_MENU_ZERO_PART */ "Zero Partition...",
+    /* 1063 MSG_ZERO_CONFIRM_TITLE */ "Zero Partition",
+    /* 1064 MSG_ZERO_CONFIRM_BODY_FMT */ "Zero ALL data on partition %s (cyl %lu-%lu)?\n\nEvery block will be overwritten with zeros.\nUseful before imaging a disk - zeros compress well.\n\nALL DATA WILL BE PERMANENTLY DESTROYED!",
+    /* 1065 MSG_ZERO_CONFIRM_GADGETS */ "Zero ALL data|Cancel",
+    /* 1066 MSG_ZERO_PROG_TITLE */ "Zeroing Partition...",
+    /* 1067 MSG_ZERO_WRITING */ "Writing zeros...",
+    /* 1068 MSG_ZERO_OK_FMT */ "Partition %s zeroed (%lu blocks written).\nReady to image the disk.",
+    /* 1069 MSG_ZERO_OK_TITLE */ "Done",
+    /* 1070 MSG_ZERO_FAIL_TITLE */ "Zero Failed",
+    /* 1071 MSG_ZERO_NO_PART_SEL */ "Select a partition first.",
+    /* 1072 MSG_CLI_ZEROPART_NEED_NAME */ "ZEROPART requires NAME=<drivename>.\n",
+    /* 1073 MSG_CLI_ZEROPART_NOT_FOUND_FMT */ "ZEROPART: partition \"%s\" not found.\n",
+    /* 1074 MSG_CLI_ZEROPART_CONFIRM_FMT */ "Zero ALL data on %s (cyl %lu-%lu)?\nThis PERMANENTLY DESTROYS all data on the partition.",
+    /* 1075 MSG_CLI_ZEROPART_WRITING_FMT */ "Zeroing %s (%lu blocks)...\n",
+    /* 1076 MSG_CLI_ZEROPART_OK_FMT */ "Partition %s zeroed (%lu blocks).\n",
+    /* 1077 MSG_CLI_ZEROPART_FAIL_FMT */ "ZEROPART: failed: %s\n",
+    /* 1078 MSG_SCR_ZEROPART_NEED_NAME */ "ZEROPART: NAME= required.",
+    /* 1079 MSG_SCR_ZEROPART_NOT_FOUND_FMT */ "ZEROPART: partition \"%s\" not found.",
+    /* 1080 MSG_SCR_ZEROPART_OK_FMT */ "  Zeroed:  %-6s  %lu blocks\n",
+    /* 1081 MSG_SCR_ZEROPART_FAIL_FMT */ "ZEROPART: failed: %s",
+    /* 1082 MSG_MBR_SHARED_TITLE */ "Shared Disk",
+    /* 1083 MSG_MBR_SHARED_BODY */ "Write an MBR at block 0 for shared disk access?\n(RDB will be placed at block 1 so the Amiga still finds it.)\n\nUseful for PiStorm, bridgeboards and other setups that\nneed to see a PC-style partition table on the same disk.",
+    /* 1084 MSG_MBR_SHARED_GADGETS */ "Yes (MBR+RDB)|RDB only",
+    /* 1085 MSG_PV_MENU_MBR_ADD */ "Add MBR Partition...",
+    /* 1086 MSG_MBR_DLG_ADD_TITLE */ "Add MBR Partition",
+    /* 1087 MSG_MBR_DLG_EDIT_TITLE */ "Edit MBR Partition",
+    /* 1088 MSG_MBR_DLG_TYPE */ "Type",
+    /* 1089 MSG_MBR_DLG_ACTIVE */ "Active (bootable)",
+    /* 1090 MSG_MBR_DLG_STARTCYL */ "Start Cylinder",
+    /* 1091 MSG_MBR_DLG_ENDCYL */ "End Cylinder",
+    /* 1092 MSG_MBR_NO_MBR */ "No MBR found on this disk.\n\nUse Init RDB and choose \"Yes (MBR+RDB)\" to initialise\nboth the MBR and the RDB at the same time.",
+    /* 1093 MSG_MBR_FULL */ "MBR already has 4 partitions (maximum).",
+    /* 1094 MSG_MBR_OVERLAP */ "Cylinder range overlaps an existing partition.",
+    /* 1095 MSG_MBR_GEOM_ZERO */ "Cannot add MBR partition: disk geometry is unknown.\nInitialise the RDB first.",
+    /* 1096 MSG_MBR_WRITE_FAIL */ "Failed to write MBR to disk.",
+    /* 1097 MSG_MBR_DEL_BODY_FMT */ "Delete MBR partition %s?",
+    /* 1098 MSG_MBR_DEL_TITLE */ "Delete MBR Partition",
+    /* 1099 MSG_WRITE */ "Write",
+    /* 1100 MSG_MBR_INIT_CHK */ "Add MBR at block 0",
+    /* 1101 MSG_SCR_ADDMBR_USAGE */ "ADDMBR: usage: ADDMBR TYPE=<type> START=<cyl> END=<cyl|+size> [ACTIVE]\n  Valid types: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP",
+    /* 1102 MSG_SCR_ADDMBR_NO_MBR */ "ADDMBR: no MBR on this disk. Use INIT NEW MBR first.",
+    /* 1103 MSG_SCR_ADDMBR_FULL */ "ADDMBR: MBR already has 4 partitions (maximum).",
+    /* 1104 MSG_SCR_ADDMBR_BAD_TYPE */ "ADDMBR: unknown partition type. Valid: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP",
+    /* 1105 MSG_SCR_ADDMBR_BAD_START */ "ADDMBR: START value invalid.",
+    /* 1106 MSG_SCR_ADDMBR_BAD_END */ "ADDMBR: END value invalid or size too small for 1 cylinder.",
+    /* 1107 MSG_SCR_ADDMBR_OVERLAP */ "ADDMBR: cylinder range overlaps an existing partition.",
+    /* 1108 MSG_SCR_ADDMBR_GEO_ZERO */ "ADDMBR: disk geometry not set. Initialise the RDB first.",
+    /* 1109 MSG_SCR_ADDMBR_WRITE_FAIL */ "ADDMBR: failed to write MBR to disk.",
+    /* 1110 MSG_SCR_ADDMBR_ADDED_FMT */ "  Added: %-5s  cyls %4lu-%4lu  %-12s  %s\n",
+    /* 1111 MSG_SCR_ADDMBR_DRYRUN_FMT */ "DRYRUN: would add MBR partition %s (%s) at cyls %lu-%lu.\n",
+    /* 1112 MSG_SCR_DELMBR_USAGE */ "DELMBR: usage: DELMBR NAME=<MBR1..MBR4>",
+    /* 1113 MSG_SCR_DELMBR_NO_MBR */ "DELMBR: no MBR on this disk.",
+    /* 1114 MSG_SCR_DELMBR_NOT_FOUND_FMT */ "DELMBR: partition \"%s\" not found.",
+    /* 1115 MSG_SCR_DELMBR_WRITE_FAIL */ "DELMBR: failed to write MBR to disk.",
+    /* 1116 MSG_SCR_DELMBR_DELETED_FMT */ "  Deleted: %s\n",
+    /* 1117 MSG_SCR_DELMBR_DRYRUN_FMT */ "DRYRUN: would delete MBR partition %s.\n",
+    /* 1118 MSG_SCR_INFO_MBR_HDR_FMT */ "MBR partitions: %u\n",
+    /* 1119 MSG_SCR_INFO_MBR_ROW_FMT */ "  %-5s  cyls %4lu-%4lu  %-12s  %s\n",
+    /* 1120 MSG_SCR_INIT_MBR_WRITTEN */ "  MBR written at block 0 (RDB at block 1).\n",
+    /* 1121 MSG_SCR_INIT_MBR_DRYRUN */ "DRYRUN: would write MBR at block 0 and place RDB at block 1.\n",
+    /* 1122 MSG_CLI_ADDMBR_NEED_TYPE */ "ADDMBR requires MBRTYPE=<type>.\n  Valid types: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP\n",
+    /* 1123 MSG_CLI_ADDMBR_NEED_START */ "ADDMBR requires STARTCYL=<cylinder>.\n",
+    /* 1124 MSG_CLI_ADDMBR_NEED_END */ "ADDMBR requires ENDCYL=<cylinder|+size>.\n",
+    /* 1125 MSG_CLI_ADDMBR_NO_MBR */ "ADDMBR: disk has no MBR. Use INIT=NEWMBR to initialise MBR+RDB.\n",
+    /* 1126 MSG_CLI_ADDMBR_FULL */ "ADDMBR: MBR already has 4 partitions (maximum).\n",
+    /* 1127 MSG_CLI_ADDMBR_BAD_TYPE */ "ADDMBR: unknown partition type. Valid: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP\n",
+    /* 1128 MSG_CLI_ADDMBR_BAD_START */ "ADDMBR: STARTCYL value invalid.\n",
+    /* 1129 MSG_CLI_ADDMBR_BAD_END */ "ADDMBR: ENDCYL value invalid or size too small for 1 cylinder.\n",
+    /* 1130 MSG_CLI_ADDMBR_OVERLAP */ "ADDMBR: cylinder range overlaps an existing partition.\n",
+    /* 1131 MSG_CLI_ADDMBR_GEO_ZERO */ "ADDMBR: disk geometry not set. Run INIT first.\n",
+    /* 1132 MSG_CLI_ADDMBR_WRITE_FAIL */ "ADDMBR: failed to write MBR to disk.\n",
+    /* 1133 MSG_CLI_ADDMBR_ADDED_FMT */ "  Added: %-5s  cyls %4lu-%4lu  %-12s  %s\n",
+    /* 1134 MSG_CLI_DELMBR_NEED_NAME */ "DELMBR requires NAME=<MBR1..MBR4>.\n",
+    /* 1135 MSG_CLI_DELMBR_NO_MBR */ "DELMBR: disk has no MBR.\n",
+    /* 1136 MSG_CLI_DELMBR_NOT_FOUND_FMT */ "DELMBR: partition \"%s\" not found.\n",
+    /* 1137 MSG_CLI_DELMBR_WRITE_FAIL */ "DELMBR: failed to write MBR to disk.\n",
+    /* 1138 MSG_CLI_DELMBR_DELETED_FMT */ "  Deleted: %s\n",
+    /* 1139 MSG_CLI_INIT_MBR_WRITTEN */ "  MBR written at block 0 (RDB at block 1).\n",
+    /* 1140 MSG_CLI_INFO_MBR_HDR_FMT */ "MBR partitions: %u\n",
+    /* 1141 MSG_CLI_INFO_MBR_ROW_FMT */ "  %-5s  cyls %4lu-%4lu  %-12s  %s\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

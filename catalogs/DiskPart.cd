@@ -3274,3 +3274,245 @@ MOUNTLIST: cannot create %s.
 MSG_SCR_MOUNTLIST_WRITE_ERR
 MOUNTLIST: write error.
 ;
+MSG_PV_MENU_ZERO_PART
+Zero Partition...
+;
+MSG_ZERO_CONFIRM_TITLE
+Zero Partition
+;
+MSG_ZERO_CONFIRM_BODY_FMT
+Zero ALL data on partition %s (cyl %lu-%lu)?\n\nEvery block will be overwritten with zeros.\nUseful before imaging a disk - zeros compress well.\n\nALL DATA WILL BE PERMANENTLY DESTROYED!
+;
+MSG_ZERO_CONFIRM_GADGETS
+Zero ALL data|Cancel
+;
+MSG_ZERO_PROG_TITLE
+Zeroing Partition...
+;
+MSG_ZERO_WRITING
+Writing zeros...
+;
+MSG_ZERO_OK_FMT
+Partition %s zeroed (%lu blocks written).\nReady to image the disk.
+;
+MSG_ZERO_OK_TITLE
+Done
+;
+MSG_ZERO_FAIL_TITLE
+Zero Failed
+;
+MSG_ZERO_NO_PART_SEL
+Select a partition first.
+;
+MSG_CLI_ZEROPART_NEED_NAME
+ZEROPART requires NAME=<drivename>.\n
+;
+MSG_CLI_ZEROPART_NOT_FOUND_FMT
+ZEROPART: partition "%s" not found.\n
+;
+MSG_CLI_ZEROPART_CONFIRM_FMT
+Zero ALL data on %s (cyl %lu-%lu)?\nThis PERMANENTLY DESTROYS all data on the partition.
+;
+MSG_CLI_ZEROPART_WRITING_FMT
+Zeroing %s (%lu blocks)...\n
+;
+MSG_CLI_ZEROPART_OK_FMT
+Partition %s zeroed (%lu blocks).\n
+;
+MSG_CLI_ZEROPART_FAIL_FMT
+ZEROPART: failed: %s\n
+;
+MSG_SCR_ZEROPART_NEED_NAME
+ZEROPART: NAME= required.
+;
+MSG_SCR_ZEROPART_NOT_FOUND_FMT
+ZEROPART: partition "%s" not found.
+;
+MSG_SCR_ZEROPART_OK_FMT
+  Zeroed:  %-6s  %lu blocks\n
+;
+MSG_SCR_ZEROPART_FAIL_FMT
+ZEROPART: failed: %s
+;
+MSG_MBR_SHARED_TITLE
+Shared Disk
+;
+MSG_MBR_SHARED_BODY
+Write an MBR at block 0 for shared disk access?\n(RDB will be placed at block 1 so the Amiga still finds it.)\n\nUseful for PiStorm, bridgeboards and other setups that\nneed to see a PC-style partition table on the same disk.
+;
+MSG_MBR_SHARED_GADGETS
+Yes (MBR+RDB)|RDB only
+;
+MSG_PV_MENU_MBR_ADD
+Add MBR Partition...
+;
+MSG_MBR_DLG_ADD_TITLE
+Add MBR Partition
+;
+MSG_MBR_DLG_EDIT_TITLE
+Edit MBR Partition
+;
+MSG_MBR_DLG_TYPE
+Type
+;
+MSG_MBR_DLG_ACTIVE
+Active (bootable)
+;
+MSG_MBR_DLG_STARTCYL
+Start Cylinder
+;
+MSG_MBR_DLG_ENDCYL
+End Cylinder
+;
+MSG_MBR_NO_MBR
+No MBR found on this disk.\n\nUse Init RDB and choose "Yes (MBR+RDB)" to initialise\nboth the MBR and the RDB at the same time.
+;
+MSG_MBR_FULL
+MBR already has 4 partitions (maximum).
+;
+MSG_MBR_OVERLAP
+Cylinder range overlaps an existing partition.
+;
+MSG_MBR_GEOM_ZERO
+Cannot add MBR partition: disk geometry is unknown.\nInitialise the RDB first.
+;
+MSG_MBR_WRITE_FAIL
+Failed to write MBR to disk.
+;
+MSG_MBR_DEL_BODY_FMT
+Delete MBR partition %s?
+;
+MSG_MBR_DEL_TITLE
+Delete MBR Partition
+;
+
+MSG_WRITE
+Write
+;
+MSG_MBR_INIT_CHK
+Add MBR at block 0
+;
+
+MSG_SCR_ADDMBR_USAGE
+ADDMBR: usage: ADDMBR TYPE=<type> START=<cyl> END=<cyl|+size> [ACTIVE]\n  Valid types: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP
+;
+MSG_SCR_ADDMBR_NO_MBR
+ADDMBR: no MBR on this disk. Use INIT NEW MBR first.
+;
+MSG_SCR_ADDMBR_FULL
+ADDMBR: MBR already has 4 partitions (maximum).
+;
+MSG_SCR_ADDMBR_BAD_TYPE
+ADDMBR: unknown partition type. Valid: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP
+;
+MSG_SCR_ADDMBR_BAD_START
+ADDMBR: START value invalid.
+;
+MSG_SCR_ADDMBR_BAD_END
+ADDMBR: END value invalid or size too small for 1 cylinder.
+;
+MSG_SCR_ADDMBR_OVERLAP
+ADDMBR: cylinder range overlaps an existing partition.
+;
+MSG_SCR_ADDMBR_GEO_ZERO
+ADDMBR: disk geometry not set. Initialise the RDB first.
+;
+MSG_SCR_ADDMBR_WRITE_FAIL
+ADDMBR: failed to write MBR to disk.
+;
+MSG_SCR_ADDMBR_ADDED_FMT
+  Added: %-5s  cyls %4lu-%4lu  %-12s  %s\n
+;
+MSG_SCR_ADDMBR_DRYRUN_FMT
+DRYRUN: would add MBR partition %s (%s) at cyls %lu-%lu.\n
+;
+MSG_SCR_DELMBR_USAGE
+DELMBR: usage: DELMBR NAME=<MBR1..MBR4>
+;
+MSG_SCR_DELMBR_NO_MBR
+DELMBR: no MBR on this disk.
+;
+MSG_SCR_DELMBR_NOT_FOUND_FMT
+DELMBR: partition "%s" not found.
+;
+MSG_SCR_DELMBR_WRITE_FAIL
+DELMBR: failed to write MBR to disk.
+;
+MSG_SCR_DELMBR_DELETED_FMT
+  Deleted: %s\n
+;
+MSG_SCR_DELMBR_DRYRUN_FMT
+DRYRUN: would delete MBR partition %s.\n
+;
+MSG_SCR_INFO_MBR_HDR_FMT
+MBR partitions: %u\n
+;
+MSG_SCR_INFO_MBR_ROW_FMT
+  %-5s  cyls %4lu-%4lu  %-12s  %s\n
+;
+MSG_SCR_INIT_MBR_WRITTEN
+  MBR written at block 0 (RDB at block 1).\n
+;
+MSG_SCR_INIT_MBR_DRYRUN
+DRYRUN: would write MBR at block 0 and place RDB at block 1.\n
+;
+MSG_CLI_ADDMBR_NEED_TYPE
+ADDMBR requires MBRTYPE=<type>.\n  Valid types: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP\n
+;
+MSG_CLI_ADDMBR_NEED_START
+ADDMBR requires STARTCYL=<cylinder>.\n
+;
+MSG_CLI_ADDMBR_NEED_END
+ADDMBR requires ENDCYL=<cylinder|+size>.\n
+;
+MSG_CLI_ADDMBR_NO_MBR
+ADDMBR: disk has no MBR. Use INIT=NEWMBR to initialise MBR+RDB.\n
+;
+MSG_CLI_ADDMBR_FULL
+ADDMBR: MBR already has 4 partitions (maximum).\n
+;
+MSG_CLI_ADDMBR_BAD_TYPE
+ADDMBR: unknown partition type. Valid: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP\n
+;
+MSG_CLI_ADDMBR_BAD_START
+ADDMBR: STARTCYL value invalid.\n
+;
+MSG_CLI_ADDMBR_BAD_END
+ADDMBR: ENDCYL value invalid or size too small for 1 cylinder.\n
+;
+MSG_CLI_ADDMBR_OVERLAP
+ADDMBR: cylinder range overlaps an existing partition.\n
+;
+MSG_CLI_ADDMBR_GEO_ZERO
+ADDMBR: disk geometry not set. Run INIT first.\n
+;
+MSG_CLI_ADDMBR_WRITE_FAIL
+ADDMBR: failed to write MBR to disk.\n
+;
+MSG_CLI_ADDMBR_ADDED_FMT
+  Added: %-5s  cyls %4lu-%4lu  %-12s  %s\n
+;
+MSG_CLI_DELMBR_NEED_NAME
+DELMBR requires NAME=<MBR1..MBR4>.\n
+;
+MSG_CLI_DELMBR_NO_MBR
+DELMBR: disk has no MBR.\n
+;
+MSG_CLI_DELMBR_NOT_FOUND_FMT
+DELMBR: partition "%s" not found.\n
+;
+MSG_CLI_DELMBR_WRITE_FAIL
+DELMBR: failed to write MBR to disk.\n
+;
+MSG_CLI_DELMBR_DELETED_FMT
+  Deleted: %s\n
+;
+MSG_CLI_INIT_MBR_WRITTEN
+  MBR written at block 0 (RDB at block 1).\n
+;
+MSG_CLI_INFO_MBR_HDR_FMT
+MBR partitions: %u\n
+;
+MSG_CLI_INFO_MBR_ROW_FMT
+  %-5s  cyls %4lu-%4lu  %-12s  %s\n
+;

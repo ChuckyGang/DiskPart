@@ -54,4 +54,14 @@ BOOL PART_Move(struct BlockDev *bd, const struct RDBInfo *rdb,
                char *err_buf,
                MoveProgressFn progress_fn, void *progress_ud);
 
+/*
+ * Zero out all blocks in a partition (overwrite with zeros).
+ * Useful before disk imaging so unused space compresses well.
+ * err_buf must be at least 128 bytes.
+ */
+BOOL PART_Zero(struct BlockDev *bd, const struct RDBInfo *rdb,
+               const struct PartInfo *pi,
+               char *err_buf,
+               MoveProgressFn progress_fn, void *progress_ud);
+
 #endif /* PARTMOVE_H */

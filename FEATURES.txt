@@ -24,6 +24,28 @@ scripting interface.
  * If an RDB already exists, the geometry (cylinder count) can be updated while
    keeping existing partition data (NEWGEO).
  * PC partition table (MBR) detection on block 0, with an option to erase it.
+ * Option to initialise a combined MBR+RDB disk: writes an empty MBR at block 0
+   and places the RDB at block 1 (the Amiga driver scans blocks 0-15 for "RDSK"
+   so it still finds it).  Intended for shared disks used by PiStorm, Vampire,
+   bridgeboards, or other PC-compatible hardware alongside an Amiga.
+
+
+--------------------------------------------------------------------------------
+ MBR PARTITIONS
+--------------------------------------------------------------------------------
+ * Add up to 4 MBR (PC-style) partitions on a combined MBR+RDB disk.
+ * Supported types: FAT32, FAT32 LBA, FAT16, Linux, Linux Swap.
+ * Each slot is labelled MBR1..MBR4; the type appears in the filesystem column.
+ * The boot-active flag is shown as '*' in the boot-priority column.
+ * MBR partitions are shown in the partition list and disk map (hatched bars)
+   alongside the RDB partitions.
+ * Overlap checking prevents MBR partitions from clashing with each other, with
+   the RDB reserved area, or with any RDB partition.
+ * Edit or delete an MBR partition via the Edit / Delete buttons.
+ * Zero-out an MBR partition the same way as an RDB partition.
+ * MBR writes are immediate (no separate "Write" step).
+ * No formatting: use OS tools (Windows, Linux, or other Amiga PFS/FFS helpers)
+   to format the new partition.
 
 
 --------------------------------------------------------------------------------
@@ -86,6 +108,10 @@ scripting interface.
    "Export MountList...", CLI MOUNTLIST=<path>, script MOUNTLIST FILE=<path>).
    One entry per partition with the full DosEnvVec; a FileSystem line is
    emitted when the RDB carries a matching handler path.  Read-only.
+ * Zero out a partition: overwrite every data block with zeros without
+   touching the RDB.  Makes disk images far more compressible (zeroed blocks
+   shrink well with zip/lha).  Available in the GUI (Advanced > Zero
+   Partition...), CLI (ZEROPART NAME=<drive>), and scripts (ZEROPART NAME=).
 
 
 --------------------------------------------------------------------------------
@@ -102,9 +128,21 @@ scripting interface.
 --------------------------------------------------------------------------------
  * Full command-line operation in addition to the GUI.
  * Script files with comments (# or ;) and blank lines.
- * Script commands: OPEN / CREATE / CLOSE, INIT NEW / NEWGEO, ADDPART, DELPART,
-   ADDFS, WRITE, INFO, CHECKRDB, VERIFYRDB / VERIFYEXT, IMAGEOUT / IMAGEIN,
-   REBOOT.
+ * Script commands: OPEN / CREATE / CLOSE, INIT NEW [MBR] / NEWGEO, ADDPART,
+   DELPART, ADDMBR, DELMBR, ADDFS, GROW, ZEROPART, WRITE, INFO, CHECKRDB,
+   VERIFYRDB / VERIFYEXT, IMAGEOUT / IMAGEIN, MOUNTLIST, REBOOT.
+   - INIT NEW MBR: writes empty MBR at block 0, places RDB at block 1.
+   - ADDMBR TYPE=<t> START=<cyl> END=<cyl|+size> [ACTIVE]: adds an MBR
+     partition (types: FAT32 FAT32LBA FAT16 LINUX LINUXSWAP).  Writes
+     immediately; no WRITE needed.  +size notation (e.g. END=+8G) converts
+     a byte-size to an end cylinder relative to START.
+   - DELMBR NAME=<MBR1..MBR4>: clears an MBR slot and writes immediately.
+ * CLI commands: INIT=NEWMBR, ADDMBR, DELMBR.
+   - INIT=NEWMBR DEV=<dev>/<unit>: same as script INIT NEW MBR.
+   - ADDMBR MBRTYPE=<t> STARTCYL=<cyl> ENDCYL=<cyl|+size> [ACTIVE]: adds
+     an MBR partition (device must already have an MBR from INIT=NEWMBR).
+   - DELMBR NAME=<MBR1..MBR4>: removes an MBR partition.
+ * INFO (CLI and script) now includes MBR partition table when present.
  * ADDPART VOLNAME=<label> (CLI and script) quick-formats the new partition.
  * DRYRUN mode previews actions without writing.
  * FORCE option suppresses confirmation prompts for unattended runs.

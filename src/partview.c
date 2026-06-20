@@ -42,6 +42,7 @@
 #include "clib.h"
 #include "locale_support.h"
 #include "rdb.h"
+#include "mbr.h"
 #include "partview.h"
 #include "version.h"
 #include "ffsresize.h"
@@ -146,18 +147,29 @@ static const LONG lv_hdr[LVCOL_COUNT] = {
     MSG_PV_COL_FILESYSTEM, MSG_PV_COL_SIZE, MSG_PV_COL_BOOT
 };
 
-/* Pointer to current RDB (set whenever rdb is live) - used by render hook */
+/* Pointer to current RDB and MBR (set by build_part_list) - used by render hook */
 static const struct RDBInfo *lv_rdb;
+static const struct MBRInfo *lv_mbr;
+
+/* Total list entries = RDB partitions + up to 4 MBR slots */
+#define MAX_LIST_ENTRIES (MAX_PARTITIONS + MBR_MAX_PARTS)
 
 /* Forward declarations needed by lv_render (defined later in file) */
-static char        part_strs[MAX_PARTITIONS][80];
-static struct Node part_nodes[MAX_PARTITIONS];
+static char        part_strs[MAX_LIST_ENTRIES][80];
+static struct Node part_nodes[MAX_LIST_ENTRIES];
+/* Set by build_part_list: TRUE if the list entry is an MBR partition,
+   and which MBR slot (0-3) it corresponds to. */
+static BOOL  part_is_mbr  [MAX_LIST_ENTRIES];
+static UBYTE part_mbr_slot[MAX_LIST_ENTRIES];
 
 /* Names of partitions deleted this session, pending an unmount after the next
    RDB write (kept here rather than on the stack - see s_unmount_count reset in
    partview_run). */
 static char  s_unmount_names[MAX_PARTITIONS][32];
 static UWORD s_unmount_count;
+
+/* Current MBR (updated whenever MBR is read/written this session). */
+static struct MBRInfo *s_mbr;
 
 
 /* Render hook - AmigaOS calls h_Entry with a0=hook, a1=msg, a2=node.
@@ -190,10 +202,14 @@ static ULONG lv_render(void)
     if (msg->lvdm_MethodID != LV_DRAW) return LVCB_OK;
 
     idx = (WORD)(node - part_nodes);
-    if (!lv_rdb || idx < 0 || idx >= (WORD)lv_rdb->num_parts)
-        return LVCB_OK;
+    /* Guard: must be within the valid range of list entries */
+    {
+        WORD max_idx = lv_rdb ? (WORD)lv_rdb->num_parts : 0;
+        if (lv_mbr && lv_mbr->valid) max_idx += (WORD)MBR_MAX_PARTS;
+        if (!lv_rdb || idx < 0 || idx >= max_idx)
+            return LVCB_OK;
+    }
 
-    pi  = &lv_rdb->parts[idx];
     rp  = msg->lvdm_RastPort;
     b   = &msg->lvdm_Bounds;
     sel = (msg->lvdm_State == LVR_SELECTED ||
@@ -242,46 +258,89 @@ static ULONG lv_render(void)
     /* Selection marker */
     if (sel) { tmp[0] = '>'; LV_TEXT(LVCOL_MARK, tmp, 1); }
 
-    /* Drive name - clip to the column so a long name never runs into Lo Cyl. */
-    {
-        const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
-        UWORD len = (UWORD)strlen(nm);
-        UWORD cw  = lv_cols[LVCOL_DRIVE].w;
-        while (len > 0 && (UWORD)TextLength(rp, nm, len) > cw) len--;
-        LV_TEXT(LVCOL_DRIVE, nm, len);
-    }
+    if (part_is_mbr[idx]) {
+        /* MBR entry */
+        UBYTE slot = part_mbr_slot[idx];
+        const struct MBRPart *mp = lv_mbr ? &lv_mbr->parts[slot] : NULL;
+        char  tn[12];
+        ULONG heads   = lv_rdb ? lv_rdb->heads   : 1;
+        ULONG sectors = lv_rdb ? lv_rdb->sectors : 1;
+        ULONG lo_cyl  = 0, hi_cyl = 0;
+        char  sz[16];
+        UQUAD bytes;
 
-    /* Lo Cyl */
-    DP_SNPRINTF(tmp, "%lu", (unsigned long)pi->low_cyl);
-    LV_RIGHT(LVCOL_LOCYL, tmp, strlen(tmp));
+        if (!mp) goto lv_done;
 
-    /* Hi Cyl */
-    DP_SNPRINTF(tmp, "%lu", (unsigned long)pi->high_cyl);
-    LV_RIGHT(LVCOL_HICYL, tmp, strlen(tmp));
+        if (heads == 0) heads = 1;
+        if (sectors == 0) sectors = 1;
+        lo_cyl = MBR_LBAToCyl(mp->lba_start, heads, sectors);
+        hi_cyl = MBR_LBAToCyl(mp->lba_start + mp->lba_size - 1, heads, sectors);
+        bytes  = (UQUAD)mp->lba_size * 512UL;
 
-    /* Filesystem */
-    {
-        char dt[16];
-        FriendlyDosType(pi->dos_type, dt);
-        LV_TEXT(LVCOL_FS, dt, strlen(dt));
-    }
+        /* Drive name: "MBR1".."MBR4" */
+        LV_TEXT(LVCOL_DRIVE, mp->name, strlen(mp->name));
 
-    /* Size (right-aligned) */
-    {
-        char sz[16];
-        ULONG cyls  = (pi->high_cyl >= pi->low_cyl)
-                      ? pi->high_cyl - pi->low_cyl + 1 : 0;
-        ULONG heads = pi->heads   > 0 ? pi->heads   : (lv_rdb ? lv_rdb->heads   : 1);
-        ULONG secs  = pi->sectors > 0 ? pi->sectors : (lv_rdb ? lv_rdb->sectors : 1);
-        ULONG bsz   = pi->block_size > 0 ? pi->block_size : 512;
-        UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
+        DP_SNPRINTF(tmp, "%lu", (unsigned long)lo_cyl);
+        LV_RIGHT(LVCOL_LOCYL, tmp, strlen(tmp));
+
+        DP_SNPRINTF(tmp, "%lu", (unsigned long)hi_cyl);
+        LV_RIGHT(LVCOL_HICYL, tmp, strlen(tmp));
+
+        MBR_TypeName(mp->type, tn);
+        LV_TEXT(LVCOL_FS, tn, strlen(tn));
+
         FormatSize(bytes, sz);
         LV_RIGHT(LVCOL_SIZE, sz, strlen(sz));
+
+        /* Boot column: "*" if active flag set (no numeric priority for MBR) */
+        if (mp->active) { tmp[0] = '*'; LV_TEXT(LVCOL_BOOT, tmp, 1); }
+    } else {
+        /* RDB entry */
+        pi = &lv_rdb->parts[idx];
+
+        /* Drive name - clip to the column so a long name never runs into Lo Cyl. */
+        {
+            const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
+            UWORD len = (UWORD)strlen(nm);
+            UWORD cw  = lv_cols[LVCOL_DRIVE].w;
+            while (len > 0 && (UWORD)TextLength(rp, nm, len) > cw) len--;
+            LV_TEXT(LVCOL_DRIVE, nm, len);
+        }
+
+        /* Lo Cyl */
+        DP_SNPRINTF(tmp, "%lu", (unsigned long)pi->low_cyl);
+        LV_RIGHT(LVCOL_LOCYL, tmp, strlen(tmp));
+
+        /* Hi Cyl */
+        DP_SNPRINTF(tmp, "%lu", (unsigned long)pi->high_cyl);
+        LV_RIGHT(LVCOL_HICYL, tmp, strlen(tmp));
+
+        /* Filesystem */
+        {
+            char dt[16];
+            FriendlyDosType(pi->dos_type, dt);
+            LV_TEXT(LVCOL_FS, dt, strlen(dt));
+        }
+
+        /* Size (right-aligned) */
+        {
+            char sz[16];
+            ULONG cyls  = (pi->high_cyl >= pi->low_cyl)
+                          ? pi->high_cyl - pi->low_cyl + 1 : 0;
+            ULONG heads = pi->heads   > 0 ? pi->heads   : (lv_rdb ? lv_rdb->heads   : 1);
+            ULONG secs  = pi->sectors > 0 ? pi->sectors : (lv_rdb ? lv_rdb->sectors : 1);
+            ULONG bsz   = pi->block_size > 0 ? pi->block_size : 512;
+            UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
+            FormatSize(bytes, sz);
+            LV_RIGHT(LVCOL_SIZE, sz, strlen(sz));
+        }
+
+        /* Boot priority - prefix "* " when the partition is bootable. */
+        DP_SNPRINTF(tmp, "%s%ld", (pi->flags & 1) ? "* " : "", (long)pi->boot_pri);
+        LV_TEXT(LVCOL_BOOT, tmp, strlen(tmp));
     }
 
-    /* Boot priority - prefix "* " when the partition is bootable. */
-    DP_SNPRINTF(tmp, "%s%ld", (pi->flags & 1) ? "* " : "", (long)pi->boot_pri);
-    LV_TEXT(LVCOL_BOOT, tmp, strlen(tmp));
+lv_done:
 
 #undef LV_TEXT
 #undef LV_RIGHT
@@ -350,41 +409,82 @@ static void offer_reboot(struct Window *win, const char *msg)
 static void build_part_list(struct RDBInfo *rdb, WORD sel)
 {
     UWORD i;
-    lv_rdb = rdb;   /* render hook needs access to partition data */
+    UWORD n = 0;   /* running count of list entries added */
+
+    lv_rdb = rdb;
+    lv_mbr = s_mbr;
     list_init(&part_list);
-    if (!rdb || !rdb->valid || rdb->num_parts == 0) return;
+    memset(part_is_mbr,   0, sizeof(part_is_mbr));
+    memset(part_mbr_slot, 0, sizeof(part_mbr_slot));
 
-    for (i = 0; i < rdb->num_parts; i++) {
-        struct PartInfo *pi = &rdb->parts[i];
-        char dt[16], sz[16], boot[12];
-        ULONG cyls  = (pi->high_cyl >= pi->low_cyl)
-                      ? pi->high_cyl - pi->low_cyl + 1 : 0;
-        ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
-        ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
-        ULONG bsz   = pi->block_size > 0 ? pi->block_size : 512;
-        UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
-        const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
+    /* RDB partitions */
+    if (rdb && rdb->valid) {
+        for (i = 0; i < rdb->num_parts && n < MAX_LIST_ENTRIES; i++, n++) {
+            struct PartInfo *pi = &rdb->parts[i];
+            char dt[16], sz[16], boot[12];
+            ULONG cyls  = (pi->high_cyl >= pi->low_cyl)
+                          ? pi->high_cyl - pi->low_cyl + 1 : 0;
+            ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
+            ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+            ULONG bsz   = pi->block_size > 0 ? pi->block_size : 512;
+            UQUAD bytes = (UQUAD)cyls * heads * secs * bsz;
+            const char *nm = pi->drive_name[0] ? pi->drive_name : GS(MSG_PV_NONE);
 
-        FriendlyDosType(pi->dos_type, dt);
-        FormatSize(bytes, sz);
+            FriendlyDosType(pi->dos_type, dt);
+            FormatSize(bytes, sz);
+            DP_SNPRINTF(boot, "%s%ld", (pi->flags & 1) ? "*" : "", (long)pi->boot_pri);
 
-        /* Boot column: "*" before the priority when the partition is bootable. */
-        DP_SNPRINTF(boot, "%s%ld", (pi->flags & 1) ? "*" : "", (long)pi->boot_pri);
+            snprintf(part_strs[n], sizeof(part_strs[n]),
+                    "%c %-7s %9lu %9lu  %-12s  %9s   %4s",
+                    ((WORD)n == sel) ? '>' : ' ',
+                    nm,
+                    (unsigned long)pi->low_cyl,
+                    (unsigned long)pi->high_cyl,
+                    dt, sz, boot);
 
-        /* ">" marker for selected row, space otherwise */
-        snprintf(part_strs[i], sizeof(part_strs[i]),
-                "%c %-7s %9lu %9lu  %-12s  %9s   %4s",
-                ((WORD)i == sel) ? '>' : ' ',
-                nm,
-                (unsigned long)pi->low_cyl,
-                (unsigned long)pi->high_cyl,
-                dt, sz,
-                boot);   /* boot = "*<pri>" if bootable, "<pri>" otherwise */
+            part_is_mbr[n]    = FALSE;
+            part_mbr_slot[n]  = 0;
+            part_nodes[n].ln_Name = part_strs[n];
+            part_nodes[n].ln_Type = NT_USER;
+            part_nodes[n].ln_Pri  = 0;
+            AddTail(&part_list, &part_nodes[n]);
+        }
+    }
 
-        part_nodes[i].ln_Name = part_strs[i];
-        part_nodes[i].ln_Type = NT_USER;
-        part_nodes[i].ln_Pri  = 0;
-        AddTail(&part_list, &part_nodes[i]);
+    /* MBR partitions (if MBR is valid) */
+    if (s_mbr && s_mbr->valid) {
+        ULONG heads   = (rdb && rdb->valid && rdb->heads   > 0) ? rdb->heads   : 1;
+        ULONG sectors = (rdb && rdb->valid && rdb->sectors > 0) ? rdb->sectors : 1;
+        for (i = 0; i < MBR_MAX_PARTS && n < MAX_LIST_ENTRIES; i++) {
+            const struct MBRPart *mp = &s_mbr->parts[i];
+            char tn[12], sz[16], boot[4];
+            ULONG lo_cyl, hi_cyl;
+            UQUAD bytes;
+            if (!mp->present) continue;
+
+            lo_cyl = MBR_LBAToCyl(mp->lba_start, heads, sectors);
+            hi_cyl = MBR_LBAToCyl(mp->lba_start + mp->lba_size - 1, heads, sectors);
+            bytes  = (UQUAD)mp->lba_size * 512UL;
+            MBR_TypeName(mp->type, tn);
+            FormatSize(bytes, sz);
+            boot[0] = mp->active ? '*' : ' '; boot[1] = '\0';
+
+            snprintf(part_strs[n], sizeof(part_strs[n]),
+                    "%c %-7s %9lu %9lu  %-12s  %9s   %s",
+                    ((WORD)n == sel) ? '>' : ' ',
+                    mp->name,
+                    (unsigned long)lo_cyl,
+                    (unsigned long)hi_cyl,
+                    tn, sz, boot);
+
+            part_is_mbr[n]   = TRUE;
+            part_mbr_slot[n] = (UBYTE)i;
+            part_nodes[n].ln_Name = part_strs[n];
+            part_nodes[n].ln_Type = NT_USER;
+            part_nodes[n].ln_Pri  = 0;
+            AddTail(&part_list, &part_nodes[n]);
+            n++;
+        }
     }
 }
 
@@ -395,6 +495,7 @@ static void build_part_list(struct RDBInfo *rdb, WORD sel)
 static LONG part_pens[NUM_PART_COLORS];
 static LONG bg_pen;      /* dark navy background for the map  */
 static LONG rdb_pen;     /* muted gray for RDB reserved area  */
+static LONG mbr_pen;     /* warm orange/tan for MBR partitions */
 
 /* Fallback pen indices used on graphics.library < V39, where ObtainBestPenA
  * does not exist (it was added in V39 / KS 3.0).  These are well-known
@@ -403,6 +504,7 @@ static const UBYTE FALLBACK_PART_PENS[NUM_PART_COLORS] =
     { 1, 2, 3, 4, 5, 6, 7, 1 };
 #define FALLBACK_BG_PEN  0
 #define FALLBACK_RDB_PEN 2
+#define FALLBACK_MBR_PEN 6
 
 static BOOL gfx_has_obtainbestpen(void)
 {
@@ -420,12 +522,14 @@ static void alloc_pens(struct Screen *scr)
                 C32(PART_R[i]), C32(PART_G[i]), C32(PART_B[i]), nt);
         bg_pen  = ObtainBestPenA(cm, C32(0x2a), C32(0x2a), C32(0x3a), nt);
         rdb_pen = ObtainBestPenA(cm, C32(0x55), C32(0x55), C32(0x66), nt);
+        mbr_pen = ObtainBestPenA(cm, C32(0xC8), C32(0x82), C32(0x00), nt);
     } else {
         /* V37/V38 - use fixed Workbench palette pens. No allocation needed. */
         for (i = 0; i < NUM_PART_COLORS; i++)
             part_pens[i] = (LONG)FALLBACK_PART_PENS[i];
         bg_pen  = FALLBACK_BG_PEN;
         rdb_pen = FALLBACK_RDB_PEN;
+        mbr_pen = FALLBACK_MBR_PEN;
     }
 }
 
@@ -438,9 +542,10 @@ static void free_pens(struct Screen *scr)
             if (part_pens[i] >= 0) { ReleasePen(cm,(ULONG)part_pens[i]); part_pens[i]=-1; }
         if (bg_pen  >= 0) { ReleasePen(cm,(ULONG)bg_pen);  bg_pen  = -1; }
         if (rdb_pen >= 0) { ReleasePen(cm,(ULONG)rdb_pen); rdb_pen = -1; }
+        if (mbr_pen >= 0) { ReleasePen(cm,(ULONG)mbr_pen); mbr_pen = -1; }
     } else {
         for (i = 0; i < NUM_PART_COLORS; i++) part_pens[i] = -1;
-        bg_pen = rdb_pen = -1;
+        bg_pen = rdb_pen = mbr_pen = -1;
     }
 }
 
@@ -585,35 +690,126 @@ static void draw_map(struct Window *win, struct RDBInfo *rdb, WORD sel,
             }
         }
 
-        /* Selection highlight: 3-px bright frame + dark shadow frame */
-        if (sel >= 0 && sel < (WORD)rdb->num_parts) {
-            struct PartInfo *sp  = &rdb->parts[sel];
-            WORD sx1 = MAP_X(sp->low_cyl);
-            WORD sx2 = MAP_X(sp->high_cyl + 1);
-            WORD bsz = 3;   /* frame thickness in pixels */
-            if (sx2 < sx1 + 2) sx2 = sx1 + 2;
+        /* MBR partitions */
+        if (s_mbr && s_mbr->valid) {
+            ULONG mheads   = rdb->heads   > 0 ? rdb->heads   : 1;
+            ULONG msectors = rdb->sectors > 0 ? rdb->sectors : 1;
+            UWORD mi;
+            LONG  mfill = (mbr_pen >= 0) ? mbr_pen : (LONG)FALLBACK_MBR_PEN;
 
-            /* Dark shadow frame 1px outside the bright frame for contrast */
-            SetAPen(rp, 2);
-            SetDrMd(rp, JAM2);
-            if (sx1 > mx) {
-                RectFill(rp, sx1-1, my,           sx1-1, my+(WORD)mh-1);
-            }
-            if (sx2 < mx+(WORD)mw) {
-                RectFill(rp, sx2,   my,           sx2,   my+(WORD)mh-1);
-            }
-            RectFill(rp, sx1, my-1 > my ? my-1 : my, sx2-1, my-1 > my ? my-1 : my);
+            for (mi = 0; mi < MBR_MAX_PARTS; mi++) {
+                const struct MBRPart *mp = &s_mbr->parts[mi];
+                WORD map_right = mx + (WORD)mw;
+                WORD px1, px2, pw;
+                char tn[12];
+                WORD txw = rp->TxWidth ? (WORD)rp->TxWidth : 8;
+                WORD max_c, block_top;
 
-            /* Bright (pen 1) 3-px thick inner frame via four strips */
-            SetAPen(rp, 1);
-            /* Top */
-            RectFill(rp, sx1,        my,              sx2-1,        my+bsz-1);
-            /* Bottom */
-            RectFill(rp, sx1,        my+(WORD)mh-bsz, sx2-1,        my+(WORD)mh-1);
-            /* Left */
-            RectFill(rp, sx1,        my+bsz,          sx1+bsz-1,    my+(WORD)mh-bsz-1);
-            /* Right */
-            RectFill(rp, sx2-bsz,    my+bsz,          sx2-1,        my+(WORD)mh-bsz-1);
+                if (!mp->present) continue;
+
+                {
+                    ULONG lo_cyl = MBR_LBAToCyl(mp->lba_start, mheads, msectors);
+                    ULONG hi_cyl = MBR_LBAToCyl(mp->lba_start + mp->lba_size - 1,
+                                                 mheads, msectors);
+                    px1 = MAP_X(lo_cyl);
+                    px2 = MAP_X(hi_cyl + 1);
+                }
+
+                if (px1 < mx) px1 = mx;
+                if (px1 > map_right) px1 = map_right;
+                if (px2 < mx) px2 = mx;
+                if (px2 > map_right) px2 = map_right;
+                if (px2 < px1 + 2) px2 = (px1 + 2 > map_right) ? map_right : px1 + 2;
+
+                /* Fill with MBR pen, then hatch every 2nd line with background */
+                SetAPen(rp, mfill);
+                SetDrMd(rp, JAM2);
+                RectFill(rp, px1, my, px2-1, my+(WORD)mh-1);
+                {
+                    LONG hpen = (bg_pen >= 0) ? bg_pen : 0;
+                    WORD yy;
+                    SetAPen(rp, hpen);
+                    SetDrMd(rp, JAM1);
+                    for (yy = my; yy <= my+(WORD)mh-1; yy += 2) {
+                        Move(rp, px1, yy);
+                        Draw(rp, px2-1, yy);
+                    }
+                }
+
+                /* Border */
+                SetAPen(rp, 2);
+                SetDrMd(rp, JAM1);
+                Move(rp, px1, my);             Draw(rp, px2-1, my);
+                Move(rp, px1, my+(WORD)mh-1);  Draw(rp, px2-1, my+(WORD)mh-1);
+                Move(rp, px1, my);             Draw(rp, px1,   my+(WORD)mh-1);
+                Move(rp, px2-1, my);           Draw(rp, px2-1, my+(WORD)mh-1);
+
+                /* Type name label */
+                pw = px2 - px1;
+                if (pw > 12) {
+                    MBR_TypeName(mp->type, tn);
+                    max_c = (pw - 4) / txw;
+                    {
+                        UWORD nlen = strlen(tn);
+                        if ((WORD)nlen > max_c) nlen = (UWORD)max_c;
+                        block_top = my + ((WORD)mh - fh) / 2;
+                        SetAPen(rp, 1);
+                        SetDrMd(rp, JAM1);
+                        if (nlen > 0) {
+                            WORD tw = (WORD)(nlen * (UWORD)txw);
+                            Move(rp, px1 + (pw - tw) / 2, block_top + fb);
+                            Text(rp, tn, nlen);
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Selection highlight: 3-px bright frame + dark shadow frame.
+           Works for both RDB and MBR selections. */
+        {
+            WORD sx1 = -1, sx2 = -1;
+            WORD bsz = 3;
+
+            if (sel >= 0 && sel < (WORD)rdb->num_parts) {
+                struct PartInfo *sp = &rdb->parts[sel];
+                sx1 = MAP_X(sp->low_cyl);
+                sx2 = MAP_X(sp->high_cyl + 1);
+            } else if (sel >= (WORD)rdb->num_parts && s_mbr && s_mbr->valid) {
+                /* Find which MBR entry this list position corresponds to */
+                WORD list_pos = (WORD)rdb->num_parts;
+                UWORD mi;
+                ULONG mheads   = rdb->heads   > 0 ? rdb->heads   : 1;
+                ULONG msectors = rdb->sectors > 0 ? rdb->sectors : 1;
+                for (mi = 0; mi < MBR_MAX_PARTS; mi++) {
+                    if (!s_mbr->parts[mi].present) continue;
+                    if (list_pos == sel) {
+                        ULONG lo = MBR_LBAToCyl(s_mbr->parts[mi].lba_start,
+                                                 mheads, msectors);
+                        ULONG hi = MBR_LBAToCyl(s_mbr->parts[mi].lba_start +
+                                                 s_mbr->parts[mi].lba_size - 1,
+                                                 mheads, msectors);
+                        sx1 = MAP_X(lo);
+                        sx2 = MAP_X(hi + 1);
+                        break;
+                    }
+                    list_pos++;
+                }
+            }
+
+            if (sx1 >= 0 && sx2 > sx1) {
+                if (sx2 < sx1 + 2) sx2 = sx1 + 2;
+                SetAPen(rp, 2);
+                SetDrMd(rp, JAM2);
+                if (sx1 > mx) RectFill(rp, sx1-1, my, sx1-1, my+(WORD)mh-1);
+                if (sx2 < mx+(WORD)mw) RectFill(rp, sx2, my, sx2, my+(WORD)mh-1);
+                RectFill(rp, sx1, my-1 > my ? my-1 : my, sx2-1, my-1 > my ? my-1 : my);
+                SetAPen(rp, 1);
+                RectFill(rp, sx1,        my,              sx2-1,        my+bsz-1);
+                RectFill(rp, sx1,        my+(WORD)mh-bsz, sx2-1,        my+(WORD)mh-1);
+                RectFill(rp, sx1,        my+bsz,          sx1+bsz-1,    my+(WORD)mh-bsz-1);
+                RectFill(rp, sx2-bsz,    my+bsz,          sx2-1,        my+(WORD)mh-bsz-1);
+            }
         }
 
 #undef MAP_X
@@ -1068,17 +1264,35 @@ static void recommend_new_part_defaults(const struct RDBInfo *rdb,
 static void find_free_range(const struct RDBInfo *rdb, ULONG *lo, ULONG *hi)
 {
     /* Sort partition ranges by low_cyl (insertion sort - n is small),
-       then scan for the first gap including holes left by deleted partitions. */
-    ULONG  starts[MAX_PARTITIONS];
-    ULONG  ends[MAX_PARTITIONS];
+       then scan for the first gap including holes left by deleted partitions.
+       MBR partitions are also included so their cylinder range is not
+       offered as free space for new RDB partitions. */
+    ULONG  starts[MAX_PARTITIONS + MBR_MAX_PARTS];
+    ULONG  ends  [MAX_PARTITIONS + MBR_MAX_PARTS];
     UWORD  n = rdb->num_parts;
     UWORD  i, j;
     ULONG  cursor;
 
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < rdb->num_parts; i++) {
         starts[i] = rdb->parts[i].low_cyl;
         ends[i]   = rdb->parts[i].high_cyl;
     }
+
+    if (s_mbr && s_mbr->valid) {
+        ULONG heads   = (rdb->heads   > 0) ? rdb->heads   : 1;
+        ULONG sectors = (rdb->sectors > 0) ? rdb->sectors : 1;
+        UWORD k;
+        for (k = 0; k < MBR_MAX_PARTS; k++) {
+            if (!s_mbr->parts[k].present) continue;
+            starts[n] = MBR_LBAToCyl(s_mbr->parts[k].lba_start,
+                                      heads, sectors);
+            ends[n]   = MBR_LBAToCyl(s_mbr->parts[k].lba_start
+                                      + s_mbr->parts[k].lba_size - 1,
+                                      heads, sectors);
+            n++;
+        }
+    }
+
     for (i = 0; i < n; i++) {
         for (j = i + 1; j < n; j++) {
             if (starts[j] < starts[i]) {
@@ -1118,6 +1332,33 @@ static WORD hit_test_partition(const struct RDBInfo *rdb,
         WORD lx = (WORD)(mx + (WORD)((UQUAD)rdb->parts[i].low_cyl      * mw / total));
         WORD rx = (WORD)(mx + (WORD)((UQUAD)(rdb->parts[i].high_cyl+1) * mw / total));
         if (mouse_x >= lx && mouse_x < rx) return (WORD)i;
+    }
+    return -1;
+}
+
+/* Hit-test: which MBR partition bar contains map x-coordinate.
+   Returns listview index (rdb->num_parts + ordinal-of-present-slot) or -1. */
+static WORD hit_test_mbr_partition(const struct RDBInfo *rdb,
+                                    WORD mx, UWORD mw, ULONG total,
+                                    WORD mouse_x)
+{
+    UWORD i, n;
+    if (!s_mbr || !s_mbr->valid || !rdb || rdb->heads == 0 || rdb->sectors == 0)
+        return -1;
+    n = rdb->num_parts;
+    for (i = 0; i < MBR_MAX_PARTS; i++) {
+        if (!s_mbr->parts[i].present) continue;
+        {
+            ULONG lo = MBR_LBAToCyl(s_mbr->parts[i].lba_start,
+                                     rdb->heads, rdb->sectors);
+            ULONG hi = MBR_LBAToCyl(s_mbr->parts[i].lba_start +
+                                     s_mbr->parts[i].lba_size - 1,
+                                     rdb->heads, rdb->sectors);
+            WORD  lx = (WORD)(mx + (WORD)((UQUAD)lo       * mw / total));
+            WORD  rx = (WORD)(mx + (WORD)((UQUAD)(hi + 1) * mw / total));
+            if (mouse_x >= lx && mouse_x < rx) return (WORD)n;
+        }
+        n++;
     }
     return -1;
 }
@@ -1402,6 +1643,10 @@ static struct NewMenu partview_menu_def[] = {
     { NM_ITEM,  "Restore Image to Disk...",NULL,       0, 0, NULL },  /* ITEM 12 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 13 */
     { NM_ITEM,  "Export MountList...",   NULL,         0, 0, NULL },  /* ITEM 14 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 15 */
+    { NM_ITEM,  "Zero Partition...",     NULL,         0, 0, NULL },  /* ITEM 16 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 17 */
+    { NM_ITEM,  "Add MBR Partition...", NULL,         0, 0, NULL },  /* ITEM 18 */
     /* Menu 2 - Health: disk diagnostics */
     { NM_TITLE, "Health",                NULL,         0, 0, NULL },
     { NM_ITEM,  "SMART Status",          NULL,         0, 0, NULL },  /* ITEM 0 */
@@ -1443,6 +1688,10 @@ static void localize_partview_menu(void)
         MSG_PV_MENU_RESTORE_IMAGE,
         -1,                          /* NM_BARLABEL */
         MSG_PV_MENU_EXPORT_ML,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_ZERO_PART,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_MBR_ADD,
         MSG_PV_MENU_HEALTH,
         MSG_PV_MENU_SMART,
         MSG_PV_MENU_BADBLOCK,
@@ -1623,8 +1872,10 @@ BOOL partview_run(const char *devname, ULONG unit)
     BOOL              needs_reboot = FALSE;  /* partition layout changed */
     BOOL              exit_req     = FALSE;
     WORD              i;
+    static struct MBRInfo mbr_store;        /* MBR data for this session */
 
     s_unmount_count = 0;     /* no deletes pending unmount yet this session */
+    s_mbr = NULL;            /* no MBR loaded yet */
     static char       wfmt[512];            /* formatted write-fail message - static: off stack */
     static char       win_title[80];
 
@@ -1640,10 +1891,15 @@ BOOL partview_run(const char *devname, ULONG unit)
     ULONG drag_orig_lo = 0;   /* saved low_cyl  before drag */
     ULONG drag_orig_hi = 0;   /* saved high_cyl before drag */
 
-    /* Double-click detection in map */
+    /* Double-click detection in map - RDB partitions */
     ULONG dbl_sec   = 0;
     ULONG dbl_mic   = 0;
     WORD  dbl_part  = -1;   /* partition clicked last time */
+
+    /* Double-click detection in map - MBR partitions */
+    ULONG dbl_mbr_sec = 0;
+    ULONG dbl_mbr_mic = 0;
+    WORD  dbl_mbr_idx = -1; /* listview index of last-clicked MBR bar */
 
     /* Drag-move state (move whole partition by dragging its body) */
     WORD  drag_move_part   = -1;   /* -1 = not active */
@@ -1669,7 +1925,7 @@ BOOL partview_run(const char *devname, ULONG unit)
     WORD  hx = 0, hy = 0;  UWORD hw = 0;            /* col header    */
 
     for (i = 0; i < NUM_PART_COLORS; i++) part_pens[i] = -1;
-    bg_pen = rdb_pen = -1;
+    bg_pen = rdb_pen = mbr_pen = -1;
 
     /* ---- Open device, read RDB, get geometry if needed ---- */
     bd = BlockDev_Open(devname, unit);
@@ -1679,10 +1935,6 @@ BOOL partview_run(const char *devname, ULONG unit)
 
     if (bd) {
         RDB_Read(bd, rdb);
-        /* Fill in any missing partition names from the AmigaDOS DosList.
-           Some disks have pb_DriveName[0]=0 (no BSTR name on disk);
-           the OS names the partition at boot time and we can recover
-           that name by matching device+unit+lo_cyl+hi_cyl in the list. */
         /* nothing extra - names and DosTypes come from disk (PART/FSHD blocks) */
         if (!rdb->valid && bd) {
             ULONG cyls = 0, heads = 0, secs = 0;
@@ -1692,6 +1944,9 @@ BOOL partview_run(const char *devname, ULONG unit)
                 rdb->sectors   = secs;
             }
         }
+        /* Read MBR (non-fatal - just leaves mbr_store.valid = FALSE). */
+        if (MBR_Read(bd, &mbr_store))
+            s_mbr = &mbr_store;
     }
 
     build_part_list(rdb, sel);
@@ -1876,6 +2131,30 @@ BOOL partview_run(const char *devname, ULONG unit)
                             image_restore_disk(win, bd);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 14)
                             pv_export_mountlist(win, bd, rdb);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 16) {
+                            if (sel >= 0 && bd && rdb && sel < (WORD)rdb->num_parts)
+                                offer_zero_partition(win, bd, rdb, &rdb->parts[sel]);
+                            else if (sel >= (WORD)rdb->num_parts && bd && rdb &&
+                                     s_mbr && s_mbr->valid)
+                                offer_zero_mbr_part(win, bd, rdb, s_mbr,
+                                                    part_mbr_slot[sel]);
+                            else {
+                                struct EasyStruct es;
+                                es.es_StructSize   = sizeof(es);
+                                es.es_Flags        = 0;
+                                es.es_Title        = (UBYTE *)GS(MSG_ZERO_CONFIRM_TITLE);
+                                es.es_TextFormat   = (UBYTE *)GS(MSG_ZERO_NO_PART_SEL);
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+                                EasyRequest(win, &es, NULL);
+                            }
+                        }
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 18) {
+                            offer_add_mbr_part(win, bd, s_mbr, rdb);
+                            refresh_listview(win, lv_gad, rdb, sel);
+                            draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                        ix, iy, iw, bx, by, bw, bh,
+                                        hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                        }
                         /* Health menu */
                         else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 0)
                             smart_status(win, bd);
@@ -1962,6 +2241,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                             WORD resize_part = -1;
                             WORD left_dlg_part = -1;
                             WORD move_blk   = -1;
+                            WORD mbr_blk    = -1;
 
                             if (blk_in >= 0) {
                                 WORD lx_p = (WORD)(mx2 + (WORD)((UQUAD)rdb->parts[blk_in].low_cyl       * mw2 / total));
@@ -1976,12 +2256,12 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 else if (d_left  <= ezone) left_dlg_part = blk_in;
                                 else                       move_blk      = blk_in;
                             } else {
-                                /* Outside any partition - only honour right-edge proximity for resize.
-                                 * Left-edge proximity here usually means the click landed in adjacent
-                                 * partition territory, which is already handled by the inside path. */
+                                /* Outside any RDB partition - check RDB edge then MBR bar */
                                 WORD ee = 0;
                                 WORD ep = hit_test_edge(rdb, mx2, mw2, total, mouse_x, &ee);
                                 if (ep >= 0 && ee == 1) resize_part = ep;
+                                else mbr_blk = hit_test_mbr_partition(rdb, mx2, mw2,
+                                                                       total, mouse_x);
                             }
 
                             if (resize_part >= 0) {
@@ -2090,9 +2370,31 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     drag_move_anchor_x   = mouse_x;
                                     drag_move_anchor_cyl = rdb->parts[blk].low_cyl;
                                 }
+                            } else if (mbr_blk >= 0 && s_mbr && s_mbr->valid) {
+                                /* Click inside an MBR partition bar: select + double-click to edit */
+                                sel = mbr_blk;
+                                refresh_listview(win, lv_gad, rdb, sel);
+                                draw_map(win, rdb, sel, bx, by, bw, bh);
+                                if (mbr_blk == dbl_mbr_idx &&
+                                    DoubleClick(dbl_mbr_sec, dbl_mbr_mic, ev_sec, ev_mic)) {
+                                    dbl_mbr_idx = -1;
+                                    offer_edit_mbr_part(win, bd, s_mbr, rdb,
+                                                        part_mbr_slot[mbr_blk]);
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    draw_static(win, devname, unit, rdb,
+                                                (bd ? bd->disk_brand : ""),
+                                                ix, iy, iw, bx, by, bw, bh,
+                                                hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                } else {
+                                    dbl_mbr_idx = mbr_blk;
+                                    dbl_mbr_sec = ev_sec;
+                                    dbl_mbr_mic = ev_mic;
+                                    dbl_part    = -1;
+                                }
                             } else if (rdb->num_parts < MAX_PARTITIONS &&
                                        rdb->heads > 0 && rdb->sectors > 0) {
-                                /* Empty space - start new-partition drag */
+                                /* Empty space (not inside any RDB or MBR bar) -
+                                   start new-partition drag */
                                 LONG  dx = (LONG)(mouse_x - (WORD)mx2);
                                 ULONG start_cyl;
                                 UWORD kk;
@@ -2111,6 +2413,24 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     if (rdb->parts[kk].low_cyl > start_cyl &&
                                         rdb->parts[kk].low_cyl - 1 < drag_new_max)
                                         drag_new_max = rdb->parts[kk].low_cyl - 1;
+                                }
+                                /* Exclude MBR cylinder ranges from drag bounds */
+                                if (s_mbr && s_mbr->valid) {
+                                    UWORD kmb;
+                                    for (kmb = 0; kmb < MBR_MAX_PARTS; kmb++) {
+                                        if (!s_mbr->parts[kmb].present) continue;
+                                        {
+                                            ULONG mlo = MBR_LBAToCyl(s_mbr->parts[kmb].lba_start,
+                                                                       rdb->heads, rdb->sectors);
+                                            ULONG mhi = MBR_LBAToCyl(s_mbr->parts[kmb].lba_start +
+                                                                       s_mbr->parts[kmb].lba_size - 1,
+                                                                       rdb->heads, rdb->sectors);
+                                            if (mhi < start_cyl && mhi + 1 > drag_new_min)
+                                                drag_new_min = mhi + 1;
+                                            if (mlo > start_cyl && mlo - 1 < drag_new_max)
+                                                drag_new_max = mlo - 1;
+                                        }
+                                    }
                                 }
                                 if (drag_new_min <= drag_new_max) {
                                     ULONG ini_hi = start_cyl;
@@ -2389,23 +2709,31 @@ BOOL partview_run(const char *devname, ULONG unit)
                         sel = (WORD)code;
                         draw_map(win, rdb, sel, bx, by, bw, bh);
                         /* double-click -> open Edit dialog */
-                        if ((qual & IEQUALIFIER_DOUBLECLICK) &&
-                            sel >= 0 && sel < (WORD)rdb->num_parts) {
-                            ULONG old_hi = rdb->parts[sel].high_cyl;
-                            if (partition_dialog(&rdb->parts[sel],
-                                                 GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
-                                {
-                                int g = offer_ffs_grow(win, bd, rdb,
-                                               &rdb->parts[sel], old_hi);
-                                if (g == GROW_NONE) g = offer_pfs_grow(win, bd, rdb,
-                                               &rdb->parts[sel], old_hi);
-                                if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
-                                               &rdb->parts[sel], old_hi);
-                                dirty        = TRUE;
-                                /* Clean FFS grow remounts live; else reboot. */
-                                if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
-                                            if (g != GROW_NONE) refresh_all_gadgets(win, glist);
+                        if ((qual & IEQUALIFIER_DOUBLECLICK) && sel >= 0) {
+                            if (sel < (WORD)rdb->num_parts && !part_is_mbr[sel]) {
+                                ULONG old_hi = rdb->parts[sel].high_cyl;
+                                if (partition_dialog(&rdb->parts[sel],
+                                                     GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
+                                    {
+                                    int g = offer_ffs_grow(win, bd, rdb,
+                                                   &rdb->parts[sel], old_hi);
+                                    if (g == GROW_NONE) g = offer_pfs_grow(win, bd, rdb,
+                                                   &rdb->parts[sel], old_hi);
+                                    if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
+                                                   &rdb->parts[sel], old_hi);
+                                    dirty        = TRUE;
+                                    if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
+                                    if (g != GROW_NONE) refresh_all_gadgets(win, glist);
+                                    }
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                                ix, iy, iw, bx, by, bw, bh,
+                                                hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
                                 }
+                            } else if (sel < MAX_LIST_ENTRIES && part_is_mbr[sel] &&
+                                       s_mbr && s_mbr->valid) {
+                                UBYTE mslot = part_mbr_slot[sel];
+                                offer_edit_mbr_part(win, bd, s_mbr, rdb, mslot);
                                 refresh_listview(win, lv_gad, rdb, sel);
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,
@@ -2481,20 +2809,23 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     (unsigned long)rdb->sectors,
                                     driver_warn);
 
-                                es.es_StructSize   = sizeof(es);
-                                es.es_Flags        = 0;
-                                es.es_Title        = (UBYTE *)GS(MSG_PV_INIT_TITLE);
-                                es.es_TextFormat   = (UBYTE *)msg;
-                                es.es_GadgetFormat =
-                                    (UBYTE *)GS(MSG_PV_INIT_HAS_RDB_GADGETS);
-                                choice = EasyRequest(win, &es, NULL);
-
+                                { BOOL add_mbr = FALSE;
+                                  choice = init_rdb_dialog(win, msg, TRUE, &add_mbr);
                                 if (choice == 1) {
                                     /* Re-init */
                                     RDB_InitFresh(rdb, real_cyls, real_heads, real_secs);
                                     { struct TagItem st[]={{GTCB_Checked,0},{TAG_DONE,0}};
                                       if (lastdisk_gad) { st[0].ti_Data=(rdb->flags&RDBFF_LAST)?1:0;    GT_SetGadgetAttrsA(lastdisk_gad,win,NULL,st); }
                                       if (lastlun_gad)  { st[0].ti_Data=(rdb->flags&RDBFF_LASTLUN)?1:0; GT_SetGadgetAttrsA(lastlun_gad, win,NULL,st); } }
+                                    if (add_mbr && bd) {
+                                        rdb->rdb_block_lo = 1;
+                                        rdb->block_num    = 1;
+                                        memset(&mbr_store, 0, sizeof(mbr_store));
+                                        if (MBR_WriteEmpty(bd)) {
+                                            mbr_store.valid = TRUE;
+                                            s_mbr = &mbr_store;
+                                        }
+                                    }
                                     sel   = -1;
                                     dirty = TRUE;
                                     refresh_listview(win, lv_gad, rdb, sel);
@@ -2544,6 +2875,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                         &real_cyls, &real_heads, &real_secs))
                                         geom_retry = TRUE;
                                 }
+                                } /* add_mbr scope */
                                 /* choice == 0: Cancel - exit loop */
                             }
                         } else {
@@ -2557,19 +2889,23 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 DP_SNPRINTF(msg_nordb, GS(MSG_PV_INIT_NO_RDB_BODY),
                                     driver_warn);
 
-                                es.es_StructSize   = sizeof(es);
-                                es.es_Flags        = 0;
-                                es.es_Title        = (UBYTE *)GS(MSG_PV_INIT_TITLE);
-                                es.es_TextFormat   = (UBYTE *)msg_nordb;
-                                es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_INIT_NO_RDB_GADGETS);
-                                choice = EasyRequest(win, &es, NULL);
-
+                                { BOOL add_mbr2 = FALSE;
+                                  choice = init_rdb_dialog(win, msg_nordb, FALSE, &add_mbr2);
                                 if (choice == 1) {
                                     /* Yes */
                                     RDB_InitFresh(rdb, real_cyls, real_heads, real_secs);
                                     { struct TagItem st[]={{GTCB_Checked,0},{TAG_DONE,0}};
                                       if (lastdisk_gad) { st[0].ti_Data=(rdb->flags&RDBFF_LAST)?1:0;    GT_SetGadgetAttrsA(lastdisk_gad,win,NULL,st); }
                                       if (lastlun_gad)  { st[0].ti_Data=(rdb->flags&RDBFF_LASTLUN)?1:0; GT_SetGadgetAttrsA(lastlun_gad, win,NULL,st); } }
+                                    if (add_mbr2 && bd) {
+                                        rdb->rdb_block_lo = 1;
+                                        rdb->block_num    = 1;
+                                        memset(&mbr_store, 0, sizeof(mbr_store));
+                                        if (MBR_WriteEmpty(bd)) {
+                                            mbr_store.valid = TRUE;
+                                            s_mbr = &mbr_store;
+                                        }
+                                    }
                                     sel   = -1;
                                     dirty = TRUE;
                                     refresh_listview(win, lv_gad, rdb, sel);
@@ -2582,6 +2918,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                         &real_cyls, &real_heads, &real_secs))
                                         geom_retry = TRUE;
                                 }
+                                } /* add_mbr2 scope */
                                 /* choice == 0 (No): exit loop */
                             }
                         }
@@ -2661,6 +2998,14 @@ BOOL partview_run(const char *devname, ULONG unit)
                                             ix, iy, iw, bx, by, bw, bh,
                                             hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
                             }
+                        } else if (sel >= (WORD)rdb->num_parts && s_mbr && s_mbr->valid) {
+                            /* Edit MBR partition */
+                            UBYTE mslot = part_mbr_slot[sel];
+                            offer_edit_mbr_part(win, bd, s_mbr, rdb, mslot);
+                            refresh_listview(win, lv_gad, rdb, sel);
+                            draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                        ix, iy, iw, bx, by, bw, bh,
+                                        hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
                         }
                         break;
 
@@ -2696,6 +3041,33 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,
                                             hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                            }
+                        } else if (sel >= (WORD)rdb->num_parts && s_mbr && s_mbr->valid && bd) {
+                            /* Delete MBR partition */
+                            UBYTE mslot = part_mbr_slot[sel];
+                            if (s_mbr->parts[mslot].present) {
+                                struct EasyStruct es;
+                                char msg[64];
+                                sprintf(msg, GS(MSG_MBR_DEL_BODY_FMT),
+                                        s_mbr->parts[mslot].name);
+                                es.es_StructSize   = sizeof(es);
+                                es.es_Flags        = 0;
+                                es.es_Title        = (UBYTE *)GS(MSG_MBR_DEL_TITLE);
+                                es.es_TextFormat   = (UBYTE *)msg;
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_YES_NO);
+                                if (EasyRequest(win, &es, NULL) == 1) {
+                                    s_mbr->parts[mslot].present = FALSE;
+                                    if (MBR_Write(bd, s_mbr)) {
+                                        sel = (WORD)rdb->num_parts - 1;
+                                    } else {
+                                        /* Roll back on write failure */
+                                        s_mbr->parts[mslot].present = TRUE;
+                                    }
+                                    refresh_listview(win, lv_gad, rdb, sel);
+                                    draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                                ix, iy, iw, bx, by, bw, bh,
+                                                hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                }
                             }
                         }
                         break;
@@ -2818,7 +3190,9 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 needs_reboot = TRUE;
                             if (unmount_deleted_partitions(win, rdb))
                                 needs_reboot = TRUE;
-                            if (BlockDev_HasMBR(bd)) {
+                            /* Only offer to erase an MBR that we didn't put there
+                               ourselves (s_mbr->valid means we wrote/read it). */
+                            if (!(s_mbr && s_mbr->valid) && BlockDev_HasMBR(bd)) {
                                 es.es_TextFormat   = (UBYTE *)GS(MSG_PV_MBR_FOUND_BODY);
                                 es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_MBR_ERASE_KEEP);
                                 if (EasyRequest(win, &es, NULL) == 1)

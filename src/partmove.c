@@ -448,3 +448,58 @@ done_label:
 
 #undef MOVE_PROGRESS
 }
+
+/* ------------------------------------------------------------------ */
+/* PART_Zero - overwrite every block in a partition with zeros.        */
+/* ------------------------------------------------------------------ */
+BOOL PART_Zero(struct BlockDev *bd, const struct RDBInfo *rdb,
+               const struct PartInfo *pi,
+               char *err_buf,
+               MoveProgressFn progress_fn, void *progress_ud)
+{
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG phys_base, phys_count, written;
+    UBYTE *zbuf = NULL;
+
+    err_buf[0] = '\0';
+
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_PM_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+
+    phys_base  = pi->low_cyl * heads * sectors;
+    phys_count = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
+
+    zbuf = (UBYTE *)AllocVec((ULONG)MOVE_CHUNK * bd->block_size,
+                              MEMF_PUBLIC | MEMF_CLEAR);
+    if (!zbuf) {
+        sprintf(err_buf, GS(MSG_PM_OUT_OF_MEMORY_BYTES),
+                (unsigned long)((ULONG)MOVE_CHUNK * bd->block_size));
+        return FALSE;
+    }
+
+    if (progress_fn)
+        progress_fn(progress_ud, 0, phys_count, GS(MSG_ZERO_WRITING));
+
+    for (written = 0; written < phys_count; ) {
+        ULONG chunk = phys_count - written;
+        if (chunk > MOVE_CHUNK) chunk = MOVE_CHUNK;
+
+        if (!move_write_blocks(bd, phys_base + written, chunk, zbuf)) {
+            sprintf(err_buf, GS(MSG_PM_WRITE_ERROR_AT_BLOCK),
+                    (unsigned long)(phys_base + written),
+                    (unsigned long)written);
+            FreeVec(zbuf);
+            return FALSE;
+        }
+        written += chunk;
+        if (progress_fn)
+            progress_fn(progress_ud, written, phys_count, GS(MSG_ZERO_WRITING));
+    }
+
+    FreeVec(zbuf);
+    return TRUE;
+}

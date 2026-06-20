@@ -85,6 +85,41 @@ void  image_dump_disk    (struct Window *win, struct BlockDev *bd);
 void  image_restore_disk (struct Window *win, struct BlockDev *bd);
 
 /* ------------------------------------------------------------------ */
+/* partview_zero.c                                                      */
+/* ------------------------------------------------------------------ */
+
+void  offer_zero_partition(struct Window *win, struct BlockDev *bd,
+                           const struct RDBInfo *rdb, struct PartInfo *pi);
+
+/* ------------------------------------------------------------------ */
+/* partview_mbr.c                                                       */
+/* ------------------------------------------------------------------ */
+
+#include "mbr.h"
+
+/* Init-RDB GadTools dialog with "Add MBR at block 0" checkbox.
+   has_rdb=TRUE  → Re-init/Update Geo/Manual.../Cancel (returns 1/2/3/0)
+   has_rdb=FALSE → Yes/Manual.../No                   (returns 1/2/0)
+   *out_add_mbr set only when return value is 1. */
+LONG  init_rdb_dialog    (struct Window *parent, const char *body,
+                          BOOL has_rdb, BOOL *out_add_mbr);
+
+/* Add a new MBR partition (writes MBR immediately on OK). */
+void  offer_add_mbr_part (struct Window *win, struct BlockDev *bd,
+                          struct MBRInfo *mbr, const struct RDBInfo *rdb);
+
+/* Edit an existing MBR partition (writes MBR immediately on OK).
+   slot = 0..MBR_MAX_PARTS-1 */
+void  offer_edit_mbr_part(struct Window *win, struct BlockDev *bd,
+                          struct MBRInfo *mbr, const struct RDBInfo *rdb,
+                          UBYTE slot);
+
+/* Zero-out an MBR partition (converts LBA to approximate cyl range). */
+void  offer_zero_mbr_part(struct Window *win, struct BlockDev *bd,
+                          const struct RDBInfo *rdb, const struct MBRInfo *mbr,
+                          UBYTE slot);
+
+/* ------------------------------------------------------------------ */
 /* partview_move.c                                                      */
 /* ------------------------------------------------------------------ */
 

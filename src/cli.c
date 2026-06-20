@@ -23,6 +23,8 @@
 #include "clib.h"
 #include "devices.h"
 #include "rdb.h"
+#include "mbr.h"
+#include "partmove.h"
 #include "imagecopy.h"
 #include "mountlist.h"
 #include "script.h"
@@ -55,7 +57,9 @@ extern struct DosLibrary *DOSBase;
     "IMAGE/K,CREATE/S,SIZE/K,"                                    \
     "IMAGEOUT/K,IMAGEIN/K,NOWARNING/S,VOLNAME/K,"               \
     "NOUNMOUNT/S,MOUNTLIST/K,"                                    \
-    "GROW/M"
+    "GROW/M,"                                                     \
+    "ZEROPART/S,"                                                  \
+    "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S"
 
 enum {
     ARG_LISTDEV = 0,
@@ -98,6 +102,13 @@ enum {
     ARG_NOUNMOUNT,
     ARG_MOUNTLIST,
     ARG_GROW,
+    ARG_ZEROPART,
+    ARG_ADDMBR,
+    ARG_DELMBR,
+    ARG_MBRTYPE,
+    ARG_STARTCYL,
+    ARG_ENDCYL,
+    ARG_ACTIVE,
     ARG_COUNT
 };
 
@@ -758,6 +769,32 @@ static LONG cmd_info(const char *devname, ULONG unit)
                 DP_SNPRINTF(outbuf, "  %2u: %-8s\n", (unsigned)i, dtbuf);
         }
         cli_puts(outbuf);
+    }
+
+    /* MBR partitions (if present) */
+    {
+        struct MBRInfo mbr;
+        memset(&mbr, 0, sizeof(mbr));
+        if (MBR_Read(bd, &mbr) && mbr.valid) {
+            UBYTE mi;
+            char  typebuf[12];
+            DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_MBR_HDR_FMT),
+                    (unsigned)MBR_Count(&mbr));
+            cli_puts(outbuf);
+            for (mi = 0; mi < MBR_MAX_PARTS; mi++) {
+                struct MBRPart *mp = &mbr.parts[mi];
+                ULONG mlo, mhi;
+                if (!mp->present) continue;
+                MBR_TypeName(mp->type, typebuf);
+                mlo = MBR_LBAToCyl(mp->lba_start, s_rdb.heads, s_rdb.sectors);
+                mhi = MBR_LBAToCyl(mp->lba_start + mp->lba_size - 1,
+                                    s_rdb.heads, s_rdb.sectors);
+                DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_MBR_ROW_FMT),
+                        mp->name, mlo, mhi, typebuf,
+                        mp->active ? "Active" : "");
+                cli_puts(outbuf);
+            }
+        }
     }
 
     RDB_FreeCode(&s_rdb);
@@ -1865,6 +1902,85 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
 }
 
 /* ------------------------------------------------------------------ */
+/* ZEROPART - overwrite every block in a partition with zeros         */
+/*   ZEROPART NAME=<drive> [FORCE]                                    */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_zeropart(const char *devname, ULONG unit, BOOL force,
+                         const char *name_s)
+{
+    struct BlockDev *bd;
+    struct PartInfo *pi = NULL;
+    char   name[32], err_buf[256];
+    UWORD  nlen, i;
+    ULONG  heads, sectors, total_blocks;
+    BOOL   ok;
+
+    if (!name_s || !name_s[0])
+        { cli_puts(GS(MSG_CLI_ZEROPART_NEED_NAME)); return RETURN_WARN; }
+    strncpy(name, name_s, 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0)
+        { cli_puts(GS(MSG_CLI_ZEROPART_NEED_NAME)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        cli_puts(outbuf); return RETURN_ERROR;
+    }
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_ERR_NO_RDB_FOUND));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    for (i = 0; i < s_rdb.num_parts; i++)
+        if (str_eq_ci(s_rdb.parts[i].drive_name, name)) { pi = &s_rdb.parts[i]; break; }
+
+    if (!pi) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_ZEROPART_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_ZEROPART_CONFIRM_FMT),
+                pi->drive_name,
+                (unsigned long)pi->low_cyl,
+                (unsigned long)pi->high_cyl);
+    if (!ask_yn(outbuf, force)) {
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    }
+
+    heads   = pi->heads   > 0 ? pi->heads   : s_rdb.heads;
+    sectors = pi->sectors > 0 ? pi->sectors : s_rdb.sectors;
+    total_blocks = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_ZEROPART_WRITING_FMT),
+                pi->drive_name, (unsigned long)total_blocks);
+    cli_puts(outbuf);
+
+    ok = PART_Zero(bd, &s_rdb, pi, err_buf, NULL, NULL);
+
+    if (ok) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_ZEROPART_OK_FMT),
+                    pi->drive_name, (unsigned long)total_blocks);
+        cli_puts(outbuf);
+    } else {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_ZEROPART_FAIL_FMT), err_buf);
+        cli_puts(outbuf);
+    }
+
+    RDB_FreeCode(&s_rdb);
+    BlockDev_Close(bd);
+    return ok ? RETURN_OK : RETURN_ERROR;
+}
+
+/* ------------------------------------------------------------------ */
 /* DELPART - delete a partition by name, then write RDB               */
 /* ------------------------------------------------------------------ */
 
@@ -2076,7 +2192,64 @@ static LONG cmd_init_newgeo(struct BlockDev *bd, BOOL force)
 }
 
 /* ------------------------------------------------------------------ */
-/* cmd_init - open device, dispatch NEW / NEWGEO                      */
+/* INIT NEWMBR - init fresh RDB with MBR at block 0, RDB at block 1  */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_init_newmbr(struct BlockDev *bd, BOOL force)
+{
+    ULONG cyls, heads, sects;
+    char  szbuf[20];
+    const char *question;
+
+    print_dev_info(bd);
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (RDB_Read(bd, &s_rdb) && s_rdb.valid) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_INIT_EXISTING_RDB),
+                (ULONG)s_rdb.cylinders, (unsigned)s_rdb.num_parts);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb);
+        question = GS(MSG_CLI_INIT_Q_DESTROY);
+    } else {
+        question = GS(MSG_CLI_INIT_Q_NEW);
+    }
+
+    if (!BlockDev_GetGeometry(bd, &cyls, &heads, &sects)) {
+        cli_puts(GS(MSG_CLI_CANNOT_READ_GEOMETRY));
+        return RETURN_ERROR;
+    }
+
+    {
+        UQUAD total = (UQUAD)cyls * heads * sects * 512UL;
+        FormatSize(total, szbuf);
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_GEOMETRY_LINE),
+                cyls, heads, sects, szbuf);
+        cli_puts(outbuf);
+    }
+
+    if (!ask_yn(question, force))
+        return RETURN_OK;
+
+    RDB_InitFresh(&s_rdb, cyls, heads, sects);
+    s_rdb.rdb_block_lo = 1;
+    s_rdb.block_num    = 1;
+
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
+    if (!RDB_Write(bd, &s_rdb)) {
+        cli_puts(GS(MSG_CLI_FAILED));
+        return RETURN_ERROR;
+    }
+    if (!MBR_WriteEmpty(bd)) {
+        cli_puts(GS(MSG_CLI_FAILED));
+        return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_OK));
+    cli_puts(GS(MSG_CLI_INIT_MBR_WRITTEN));
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* cmd_init - open device, dispatch NEW / NEWGEO / NEWMBR             */
 /* ------------------------------------------------------------------ */
 
 static LONG cmd_init(const char *devname, ULONG unit,
@@ -2085,7 +2258,8 @@ static LONG cmd_init(const char *devname, ULONG unit,
     struct BlockDev *bd;
     LONG rc;
 
-    if (!str_eq_ci(mode, "NEW") && !str_eq_ci(mode, "NEWGEO")) {
+    if (!str_eq_ci(mode, "NEW") && !str_eq_ci(mode, "NEWGEO") &&
+        !str_eq_ci(mode, "NEWMBR")) {
         DP_SNPRINTF(outbuf, GS(MSG_CLI_INIT_UNKNOWN_MODE), mode);
         cli_puts(outbuf);
         return RETURN_WARN;
@@ -2103,6 +2277,8 @@ static LONG cmd_init(const char *devname, ULONG unit,
 
     if (str_eq_ci(mode, "NEW"))
         rc = cmd_init_new(bd, force);
+    else if (str_eq_ci(mode, "NEWMBR"))
+        rc = cmd_init_newmbr(bd, force);
     else
         rc = cmd_init_newgeo(bd, force);
 
@@ -2244,6 +2420,177 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
 }
 
 /* ------------------------------------------------------------------ */
+/* ADDMBR MBRTYPE=<t> STARTCYL=<cyl> ENDCYL=<cyl|+size> [ACTIVE]     */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_addmbr(const char *devname, ULONG unit,
+                       const char *mbrtype, const char *startcyl_s,
+                       const char *endcyl_s, BOOL active)
+{
+    struct BlockDev *bd;
+    struct MBRInfo   mbr;
+    UBYTE  mtype, slot, ki;
+    ULONG  lo_cyl, hi_cyl, cyl_secs, lba_start, lba_size;
+    char   typebuf[12];
+
+    if (!mbrtype)   { cli_puts(GS(MSG_CLI_ADDMBR_NEED_TYPE));  return RETURN_WARN; }
+    if (!startcyl_s){ cli_puts(GS(MSG_CLI_ADDMBR_NEED_START)); return RETURN_WARN; }
+    if (!endcyl_s)  { cli_puts(GS(MSG_CLI_ADDMBR_NEED_END));   return RETURN_WARN; }
+
+    mtype = MBR_ParseType(mbrtype);
+    if (mtype == MBRT_EMPTY) { cli_puts(GS(MSG_CLI_ADDMBR_BAD_TYPE)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_FOUND));
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+    if (s_rdb.heads == 0 || s_rdb.sectors == 0) {
+        cli_puts(GS(MSG_CLI_ADDMBR_GEO_ZERO));
+        RDB_FreeCode(&s_rdb);
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    memset(&mbr, 0, sizeof(mbr));
+    if (!MBR_Read(bd, &mbr) || !mbr.valid) {
+        cli_puts(GS(MSG_CLI_ADDMBR_NO_MBR));
+        RDB_FreeCode(&s_rdb);
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    if (!parse_dec_strict(startcyl_s, &lo_cyl)) {
+        cli_puts(GS(MSG_CLI_ADDMBR_BAD_START));
+        RDB_FreeCode(&s_rdb);
+        BlockDev_Close(bd);
+        return RETURN_WARN;
+    }
+    if (!cli_parse_high(endcyl_s, lo_cyl, s_rdb.hi_cyl,
+                        s_rdb.heads, s_rdb.sectors, &hi_cyl) || hi_cyl < lo_cyl) {
+        cli_puts(GS(MSG_CLI_ADDMBR_BAD_END));
+        RDB_FreeCode(&s_rdb);
+        BlockDev_Close(bd);
+        return RETURN_WARN;
+    }
+
+    for (slot = 0; slot < MBR_MAX_PARTS; slot++)
+        if (!mbr.parts[slot].present) break;
+    if (slot >= MBR_MAX_PARTS) {
+        cli_puts(GS(MSG_CLI_ADDMBR_FULL));
+        RDB_FreeCode(&s_rdb);
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    for (ki = 0; ki < MBR_MAX_PARTS; ki++) {
+        ULONG elo, ehi;
+        if (!mbr.parts[ki].present) continue;
+        elo = MBR_LBAToCyl(mbr.parts[ki].lba_start, s_rdb.heads, s_rdb.sectors);
+        ehi = MBR_LBAToCyl(mbr.parts[ki].lba_start + mbr.parts[ki].lba_size - 1,
+                            s_rdb.heads, s_rdb.sectors);
+        if (lo_cyl <= ehi && hi_cyl >= elo) {
+            cli_puts(GS(MSG_CLI_ADDMBR_OVERLAP));
+            RDB_FreeCode(&s_rdb);
+            BlockDev_Close(bd);
+            return RETURN_ERROR;
+        }
+    }
+
+    cyl_secs  = s_rdb.heads * s_rdb.sectors;
+    lba_start = lo_cyl * cyl_secs;
+    lba_size  = (hi_cyl - lo_cyl + 1) * cyl_secs;
+
+    mbr.parts[slot].present   = TRUE;
+    mbr.parts[slot].type      = mtype;
+    mbr.parts[slot].active    = active;
+    mbr.parts[slot].lba_start = lba_start;
+    mbr.parts[slot].lba_size  = lba_size;
+    snprintf(mbr.parts[slot].name, 8, "MBR%u", (unsigned)(slot + 1));
+
+    if (!MBR_Write(bd, &mbr)) {
+        cli_puts(GS(MSG_CLI_ADDMBR_WRITE_FAIL));
+        RDB_FreeCode(&s_rdb);
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    MBR_TypeName(mtype, typebuf);
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_ADDMBR_ADDED_FMT),
+            mbr.parts[slot].name, lo_cyl, hi_cyl,
+            typebuf, active ? "Active" : "");
+    cli_puts(outbuf);
+
+    RDB_FreeCode(&s_rdb);
+    BlockDev_Close(bd);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* DELMBR NAME=<MBR1..MBR4>                                           */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_delmbr(const char *devname, ULONG unit, const char *name)
+{
+    struct BlockDev *bd;
+    struct MBRInfo   mbr;
+    UBYTE  slot, i;
+
+    if (!name) { cli_puts(GS(MSG_CLI_DELMBR_NEED_NAME)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        cli_puts(outbuf);
+        return RETURN_ERROR;
+    }
+
+    memset(&mbr, 0, sizeof(mbr));
+    if (!MBR_Read(bd, &mbr) || !mbr.valid) {
+        cli_puts(GS(MSG_CLI_DELMBR_NO_MBR));
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    slot = 0xFF;
+    for (i = 0; i < MBR_MAX_PARTS; i++) {
+        if (str_eq_ci(name, mbr.parts[i].name)) { slot = i; break; }
+    }
+    if (slot == 0xFF || !mbr.parts[slot].present) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_DELMBR_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    memset(&mbr.parts[slot], 0, sizeof(mbr.parts[slot]));
+    snprintf(mbr.parts[slot].name, 8, "MBR%u", (unsigned)(slot + 1));
+
+    if (!MBR_Write(bd, &mbr)) {
+        cli_puts(GS(MSG_CLI_DELMBR_WRITE_FAIL));
+        BlockDev_Close(bd);
+        return RETURN_ERROR;
+    }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_DELMBR_DELETED_FMT), name);
+    cli_puts(outbuf);
+    BlockDev_Close(bd);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* cli_run - parse and dispatch                                        */
 /* ------------------------------------------------------------------ */
 
@@ -2272,7 +2619,8 @@ LONG cli_run(void)
         !args[ARG_VERIFY]  && !args[ARG_VERIFYEXT]    &&
         !args[ARG_ADDPART] && !args[ARG_ADDFS] && !args[ARG_DELPART] &&
         !args[ARG_CHECK]   && !args[ARG_CREATE]   &&
-        !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW]) {
+        !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW] &&
+        !args[ARG_ZEROPART] && !args[ARG_ADDMBR] && !args[ARG_DELMBR]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -2310,7 +2658,8 @@ LONG cli_run(void)
          args[ARG_VERIFY]    || args[ARG_VERIFYEXT] ||
          args[ARG_ADDPART]   || args[ARG_ADDFS]   ||
          args[ARG_DELPART]   || args[ARG_CHECK]   ||
-         args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW])) {
+         args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW] ||
+         args[ARG_ZEROPART]  || args[ARG_ADDMBR]  || args[ARG_DELMBR])) {
 
         char  devname[64];
         ULONG unit;
@@ -2376,6 +2725,10 @@ LONG cli_run(void)
                 rc = cmd_delpart(devname, unit, force,
                                  (const char *)args[ARG_NAME]);
 
+            if (rc == RETURN_OK && args[ARG_ZEROPART])
+                rc = cmd_zeropart(devname, unit, force,
+                                  (const char *)args[ARG_NAME]);
+
             if (rc == RETURN_OK && args[ARG_VERIFY])
                 rc = cmd_verify(devname, unit, (const char *)args[ARG_VERIFY]);
 
@@ -2396,6 +2749,17 @@ LONG cli_run(void)
             if (rc == RETURN_OK && args[ARG_MOUNTLIST])
                 rc = cmd_mountlist(devname, unit,
                                    (const char *)args[ARG_MOUNTLIST]);
+
+            if (rc == RETURN_OK && args[ARG_ADDMBR])
+                rc = cmd_addmbr(devname, unit,
+                                (const char *)args[ARG_MBRTYPE],
+                                (const char *)args[ARG_STARTCYL],
+                                (const char *)args[ARG_ENDCYL],
+                                (BOOL)args[ARG_ACTIVE]);
+
+            if (rc == RETURN_OK && args[ARG_DELMBR])
+                rc = cmd_delmbr(devname, unit,
+                                (const char *)args[ARG_NAME]);
         }
     }
 

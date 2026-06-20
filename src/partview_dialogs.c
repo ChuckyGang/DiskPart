@@ -585,7 +585,7 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
         UWORD inner_w = win_w - bor_l - bor_r;
         UWORD pad     = 3;
         UWORD row_h   = font_h + 4;
-        UWORD lbl_w   = 100;
+        UWORD lbl_w   = 110;
         UWORD gad_x   = bor_l + lbl_w;
         UWORD gad_w   = inner_w - lbl_w - pad;
         UWORD win_h   = bor_t + pad
@@ -658,7 +658,16 @@ BOOL partition_dialog(struct PartInfo *pi, const char *title,
               if (!prev) goto cleanup; }
             row++;
 
-            STR_GAD(PDLG_BOOTPRI, GS(MSG_DLG_BOOT_PRIORITY), bootpri_str, 8, &bootpri_gad)
+            /* Boot priority: narrow fixed-width field, 4 chars max ("-999") */
+            ng.ng_LeftEdge=gad_x+8; ng.ng_TopEdge=ROW_Y(row);
+            ng.ng_Width=52;       ng.ng_Height=row_h;
+            ng.ng_GadgetText=GS(MSG_DLG_BOOT_PRIORITY); ng.ng_GadgetID=PDLG_BOOTPRI;
+            ng.ng_Flags=PLACETEXT_LEFT;
+            { struct TagItem bpst[]={ {GTST_String,(ULONG)bootpri_str},
+                                      {GTST_MaxChars,4}, {TAG_DONE,0} };
+              bootpri_gad=CreateGadgetA(STRING_KIND,prev,&ng,bpst);
+              if (!bootpri_gad) goto cleanup; prev=bootpri_gad; }
+            row++;
 
             /* Row 5: Bootable [x]   Automount [x] */
             {

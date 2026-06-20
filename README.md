@@ -71,22 +71,6 @@ This project was developed through AI-assisted ("vibecoded") collaboration — t
 ---
 
 
-## WARNING about fake "forks" of this project.
-Open source projects can be forked etc., and that is all fine. But there are also "fake forks",
-like the one at https://github.com/Dirtyminded-gameequipment9479/DiskPart, which has no real understanding of this project —
-not even what machine it runs on — and claims its page is the official one. This is false.
-
-**This fake fork is now confirmed to contain MALWARE.** Antivirus detections on its release binaries include:
-
-- **Huorong:** `Trojan/LUA.Agent.i`
-- **Rising:** `Trojan.Obfus/LUA!1.13DF5 (CLASSIC)`
-
-Do **not** download, run, or build from that repository. Only use the official source below.
-
-The official repository is https://github.com/ChuckyGang/DiskPart.
-
-
-
 ## License
 
 MIT License

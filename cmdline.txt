@@ -249,6 +249,19 @@ GROW <drive> <size[KMG]|END>
     DiskPart DEV uaehf.device:3 GROW DH1 END FORCE
     DiskPart DEV scsi.device:0 GROW DH0 END NOUNMOUNT  ; boot partition
 
+ZEROPART NAME=<drive>
+  Overwrite every block of the named partition with zeros.  Does not change
+  the RDB or partition table — only the partition's data blocks are written.
+  Useful before imaging a disk: zeroed blocks compress far better than
+  stale filesystem data, so the resulting image file will be much smaller.
+
+  FORCE skips the Y/N confirmation prompt.
+  No WRITE is needed; changes take effect immediately.
+
+  Examples:
+    DiskPart DEV scsi.device:0 ZEROPART NAME=DH1
+    DiskPart DEV scsi.device:0 ZEROPART NAME=DH1 FORCE
+
 SCRIPT <file> [DRYRUN] [FORCE]
   Read and execute commands from a text file, one per line.
   Comments start with # or ;.  Blank lines are ignored.
@@ -396,6 +409,17 @@ GROW <drive> <size[KMG]|END> [NOUNMOUNT]
     GROW DH1 100M       ; add 100 MB (clamped to free space if less)
     GROW DH1 END        ; or: use all the free space after DH1
     GROW DH0 END NOUNMOUNT   ; boot partition: grow in place, then reboot
+    CLOSE
+
+ZEROPART NAME=<drive>
+  Overwrite every block of the named partition with zeros.  Writes directly
+  to disk using the open device — no WRITE needed, and the RDB is not
+  modified.  Useful before imaging: zeros compress far better than stale
+  filesystem data.
+  In DRYRUN mode, prints what would be zeroed without writing anything.
+
+    OPEN scsi.device 0
+    ZEROPART NAME=DH1
     CLOSE
 
 WRITE
