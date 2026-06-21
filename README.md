@@ -39,6 +39,13 @@ Run `DiskPart` from the Shell or double-click from Workbench.
 4. Use the buttons along the bottom to manage partitions and filesystem drivers.
 5. Click **Write** when satisfied to commit changes to disk.
 
+### Workbench icon tooltypes
+
+When launched by double-clicking its icon, DiskPart reads these tooltypes from the icon (set them via the icon's **Information** window, or `NOWARNING` on the CLI):
+
+- `NOWARNING` — suppresses the startup disclaimer.
+- `WINDOW=left/top/width/height` — restores the partition editor window to this position and size on open, e.g. `WINDOW=50/30/640/400`. Ignored (falls back to the default centered size) if the saved geometry no longer fits the current screen — for example after switching to a smaller resolution. Not read when DiskPart is run from the Shell.
+
 ---
 
 ## Building

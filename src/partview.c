@@ -32,12 +32,14 @@
 #include <devices/scsidisk.h>
 #include <exec/errors.h>
 #include <libraries/gadtools.h>
+#include <workbench/startup.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/asl.h>
 #include <proto/intuition.h>
 #include <proto/graphics.h>
 #include <proto/gadtools.h>
+#include <proto/icon.h>
 
 #include "clib.h"
 #include "locale_support.h"
@@ -63,6 +65,8 @@ extern struct Library       *AslBase;
 extern struct IntuitionBase *IntuitionBase;
 extern struct GfxBase       *GfxBase;
 extern struct Library       *GadToolsBase;
+extern struct Library       *IconBase;
+extern struct WBStartup     *DiskPart_WBStartup;
 
 /* ------------------------------------------------------------------ */
 /* Mouse button codes (from devices/inputevent.h IECODE_* values)     */
@@ -1850,6 +1854,53 @@ static BOOL unmount_deleted_partitions(struct Window *win, struct RDBInfo *rdb)
 }
 
 /* ------------------------------------------------------------------ */
+/* load_window_geom - read a "WINDOW=left/top/width/height" tooltype   */
+/* from the program's own Workbench icon, if launched from Workbench   */
+/* and the tooltype is present and well-formed.  Read-only - the user  */
+/* sets this by hand via the icon's Information window (same as        */
+/* NOWARNING).  Returns FALSE (geometry untouched) on any failure.     */
+/* ------------------------------------------------------------------ */
+static BOOL load_window_geom(WORD *x, WORD *y, UWORD *w, UWORD *h)
+{
+    struct DiskObject *dobj;
+    BPTR    prev_dir;
+    STRPTR  val;
+    char   *p, *end;
+    long    vals[4];
+    int     i;
+
+    if (!IconBase || !DiskPart_WBStartup || DiskPart_WBStartup->sm_NumArgs < 1)
+        return FALSE;
+
+    {
+        struct WBArg *wa = &DiskPart_WBStartup->sm_ArgList[0];
+        prev_dir = CurrentDir(wa->wa_Lock);
+        dobj = GetDiskObject((STRPTR)wa->wa_Name);
+        CurrentDir(prev_dir);
+    }
+    if (!dobj) return FALSE;
+
+    val = FindToolType((STRPTR *)dobj->do_ToolTypes, (STRPTR)"WINDOW");
+    if (!val) { FreeDiskObject(dobj); return FALSE; }
+
+    p = (char *)val;
+    for (i = 0; i < 4; i++) {
+        vals[i] = strtol(p, &end, 10);
+        if (end == p) break;
+        p = end;
+        if (*p == '/') p++;
+    }
+    FreeDiskObject(dobj);
+    if (i < 4) return FALSE;
+
+    *x = (WORD)vals[0];
+    *y = (WORD)vals[1];
+    *w = (UWORD)vals[2];
+    *h = (UWORD)vals[3];
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 /* check_ffs_root - show what FFS would find at the expected root      */
 /* block position for the selected partition.  Useful post-reboot to   */
@@ -1986,6 +2037,24 @@ BOOL partview_run(const char *devname, ULONG unit)
         UWORD min_w   = bor_l + bor_r + pad * 2 + 7 * (40 + pad) - pad;
         UWORD min_h   = fixed_est + row_h * 2;
 
+        /* Saved tooltype geometry, if present, well-formed, and it actually
+           fits the current screen - otherwise keep the centered default. */
+        WORD  geom_x, geom_y;
+        UWORD geom_w, geom_h;
+        ULONG win_left = (ULONG)((scr->Width  - win_w) / 2);
+        ULONG win_top  = (ULONG)((scr->Height - win_h) / 2);
+
+        if (load_window_geom(&geom_x, &geom_y, &geom_w, &geom_h) &&
+            geom_x >= 0 && geom_y >= 0 &&
+            geom_w >= min_w && geom_h >= min_h &&
+            (ULONG)geom_x + geom_w <= (ULONG)scr->Width &&
+            (ULONG)geom_y + geom_h <= (ULONG)scr->Height) {
+            win_left = (ULONG)geom_x;
+            win_top  = (ULONG)geom_y;
+            win_w    = geom_w;
+            win_h    = geom_h;
+        }
+
         {
             int n = DP_SNPRINTF(win_title, "%s", DISKPART_VERTITLE);
             sprintf(win_title + n, GS(MSG_PV_TITLE_UNIT_FMT),
@@ -1994,8 +2063,8 @@ BOOL partview_run(const char *devname, ULONG unit)
 
         {
             struct TagItem wt[] = {
-                { WA_Left,      (ULONG)((scr->Width  - win_w) / 2) },
-                { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
+                { WA_Left,      win_left },
+                { WA_Top,       win_top },
                 { WA_Width,     win_w }, { WA_Height, win_h },
                 { WA_Title,     (ULONG)win_title },
                 { WA_Gadgets,   NULL },          /* added after open, see below */
