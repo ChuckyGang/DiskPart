@@ -303,7 +303,7 @@ void partition_advanced_dialog(struct PartInfo *pi)
     bufmem_labels[NUM_BUFMEM_TYPES] = NULL;
 
     DP_SNPRINTF(buffers_str,    "%lu",     (unsigned long)(pi->num_buffer  > 0 ? pi->num_buffer  : 30));
-    DP_SNPRINTF(bootblks_str,   "%lu",     (unsigned long)(pi->boot_blocks > 0 ? pi->boot_blocks :  2));
+    DP_SNPRINTF(bootblks_str,   "%lu",     (unsigned long)pi->boot_blocks);
     DP_SNPRINTF(maxtrans_str,   "0x%08lX", (unsigned long)pi->max_transfer);
     DP_SNPRINTF(mask_str,       "0x%08lX", (unsigned long)pi->mask);
     DP_SNPRINTF(reserved_str,   "%lu",     (unsigned long)(pi->reserved_blks > 0 ? pi->reserved_blks : 2));
