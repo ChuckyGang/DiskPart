@@ -455,6 +455,12 @@ static LONG do_open(ULONG ln, char **tok, UWORD ntok)
 
         s_st.bd = BlockDev_Open(devname, unit);
         if (!s_st.bd) { sc_err(ln, GS(MSG_SCR_CANNOT_OPEN_DEV)); return RETURN_ERROR; }
+        if (!BlockDev_IsHardDisk(s_st.bd)) {
+            BlockDev_Close(s_st.bd);
+            s_st.bd = NULL;
+            sc_err(ln, GS(MSG_SCR_NOT_A_HARDDISK));
+            return RETURN_ERROR;
+        }
         open_finish(ln);
         return RETURN_OK;
     }

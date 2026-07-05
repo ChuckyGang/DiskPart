@@ -3516,3 +3516,15 @@ MBR partitions: %u\n
 MSG_CLI_INFO_MBR_ROW_FMT
   %-5s  cyls %4lu-%4lu  %-12s  %s\n
 ;
+;==========================================================================
+; Non-harddisk device rejection (CD-ROM, tape, etc)
+;==========================================================================
+MSG_PV_NOT_A_HARDDISK
+This device is not a hard disk (CD-ROM, tape, or similar).\nPartitioning is not supported.
+;
+MSG_CLI_NOT_A_HARDDISK
+This device is not a hard disk (CD-ROM, tape, or similar). Partitioning is not supported.\n
+;
+MSG_SCR_NOT_A_HARDDISK
+This device is not a hard disk (CD-ROM, tape, or similar). Partitioning is not supported.
+;

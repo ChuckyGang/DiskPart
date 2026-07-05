@@ -219,6 +219,29 @@ static BOOL resolve_target(LONG *args, char *devname, ULONG *unit)
 }
 
 /* ------------------------------------------------------------------ */
+/* cli_open_target - BlockDev_Open + the "cannot open" / "not a hard  */
+/* disk" checks shared by every cmd_* that takes a DEVICE=/UNIT= (or  */
+/* IMAGE=) target.  Prints an error message itself; caller just needs */
+/* to bail out with RETURN_ERROR when this returns NULL.              */
+/* ------------------------------------------------------------------ */
+
+static struct BlockDev *cli_open_target(const char *devname, ULONG unit)
+{
+    struct BlockDev *bd = BlockDev_Open(devname, unit);
+    if (!bd) {
+        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
+        cli_puts(outbuf);
+        return NULL;
+    }
+    if (!BlockDev_IsHardDisk(bd)) {
+        cli_puts(GS(MSG_CLI_NOT_A_HARDDISK));
+        BlockDev_Close(bd);
+        return NULL;
+    }
+    return bd;
+}
+
+/* ------------------------------------------------------------------ */
 /* maybe_create_image - handle IMAGE=<path> CREATE SIZE=<n> up-front. */
 /* Creates the file, immediately closes it, and prints a status line. */
 /* Subsequent commands open the now-existing file via FILE: dispatch. */
@@ -578,12 +601,8 @@ static LONG cmd_smart(const char *devname, ULONG unit)
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     buf = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
     if (!buf) {
@@ -703,12 +722,8 @@ static LONG cmd_info(const char *devname, ULONG unit)
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     print_dev_info(bd);
 
@@ -816,12 +831,8 @@ static LONG cmd_backup(const char *devname, ULONG unit, const char *path)
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -871,12 +882,8 @@ static LONG cmd_mountlist(const char *devname, ULONG unit, const char *path)
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -923,12 +930,8 @@ static LONG cmd_restore(const char *devname, ULONG unit,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (!fh) {
@@ -992,12 +995,8 @@ static LONG cmd_backupext(const char *devname, ULONG unit, const char *path)
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -1077,12 +1076,8 @@ static LONG cmd_restoreext(const char *devname, ULONG unit,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     fh = Open((STRPTR)path, MODE_OLDFILE);
     if (!fh) {
@@ -1192,11 +1187,8 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -1368,11 +1360,8 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -1580,11 +1569,8 @@ static LONG cmd_addfs(const char *devname, ULONG unit, BOOL force,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -1688,11 +1674,8 @@ static LONG cmd_check(const char *devname, ULONG unit)
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -1725,11 +1708,8 @@ static LONG cmd_verify(const char *devname, ULONG unit, const char *path)
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -1809,11 +1789,8 @@ static LONG cmd_verifyext(const char *devname, ULONG unit, const char *path)
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     fh = Open((UBYTE *)path, MODE_OLDFILE);
     if (!fh) {
@@ -1926,11 +1903,8 @@ static LONG cmd_zeropart(const char *devname, ULONG unit, BOOL force,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -2001,11 +1975,8 @@ static LONG cmd_delpart(const char *devname, ULONG unit, BOOL force,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf); return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -2268,12 +2239,8 @@ static LONG cmd_init(const char *devname, ULONG unit,
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     if (str_eq_ci(mode, "NEW"))
         rc = cmd_init_new(bd, force);
@@ -2338,12 +2305,8 @@ static LONG cmd_imageout(const char *devname, ULONG unit, const char *path)
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
 
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     if (bd->total_bytes > IMAGE_LARGE_THRESHOLD) {
         FormatSize(bd->total_bytes, szbuf);
@@ -2390,12 +2353,8 @@ static LONG cmd_imagein(const char *devname, ULONG unit,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_READING_IMAGE_FROM), path);
     cli_puts(outbuf);
@@ -2442,12 +2401,8 @@ static LONG cmd_addmbr(const char *devname, ULONG unit,
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
@@ -2550,12 +2505,8 @@ static LONG cmd_delmbr(const char *devname, ULONG unit, const char *name)
 
     DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
     cli_puts(outbuf);
-    bd = BlockDev_Open(devname, unit);
-    if (!bd) {
-        DP_SNPRINTF(outbuf, GS(MSG_CLI_CANNOT_OPEN), devname, unit);
-        cli_puts(outbuf);
-        return RETURN_ERROR;
-    }
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
 
     memset(&mbr, 0, sizeof(mbr));
     if (!MBR_Read(bd, &mbr) || !mbr.valid) {

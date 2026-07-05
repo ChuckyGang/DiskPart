@@ -1981,6 +1981,16 @@ BOOL partview_run(const char *devname, ULONG unit)
     /* ---- Open device, read RDB, get geometry if needed ---- */
     bd = BlockDev_Open(devname, unit);
 
+    if (bd && !BlockDev_IsHardDisk(bd)) {
+        struct EasyStruct es;
+        es.es_StructSize=sizeof(es); es.es_Flags=0;
+        es.es_Title=(UBYTE*)DISKPART_VERTITLE;
+        es.es_TextFormat=(UBYTE*)GS(MSG_PV_NOT_A_HARDDISK);
+        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
+        EasyRequest(NULL, &es, NULL);
+        goto cleanup;
+    }
+
     rdb = (struct RDBInfo *)AllocVec(sizeof(*rdb), MEMF_PUBLIC | MEMF_CLEAR);
     if (!rdb) goto cleanup;
 

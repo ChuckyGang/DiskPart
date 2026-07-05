@@ -77,6 +77,9 @@ struct BlockDev {
     ULONG            rc_total_blocks;     /* READ CAPACITY(10) total blocks (0=unavail) */
     ULONG            rc_block_size;       /* READ CAPACITY(10) bytes per block   */
     ULONG            probed_blocks;       /* last-readable-block probe result (0=not probed) */
+    ULONG            device_type;         /* peripheral device type (DG_DIRECT_ACCESS/DG_CDROM/etc),
+                                              from SCSI INQUIRY byte 0 if available, else TD_GETGEOMETRY */
+    BOOL             device_type_known;   /* TRUE once either query above actually succeeded */
     UBYTE            backend;             /* BD_DEVICE or BD_FILE */
     BPTR             fh;                  /* file handle, BD_FILE only (0 otherwise) */
     char             filepath[108];       /* image path,  BD_FILE only */
@@ -114,6 +117,15 @@ BOOL             BlockDev_GetGeometry(struct BlockDev *bd,
 
 /* Returns TRUE if block 0 has a PC MBR signature (0x55AA at offset 510). */
 BOOL             BlockDev_HasMBR(struct BlockDev *bd);
+
+/* Returns TRUE if the device identifies itself as a direct-access disk
+ * (peripheral device type DG_DIRECT_ACCESS, read from the SCSI INQUIRY
+ * response if the device answered HD_SCSICMD, else from TD_GETGEOMETRY's
+ * dg_DeviceType).  FALSE for CD-ROMs, tape drives, and other non-harddisk
+ * peripheral types.  A NULL bd, a BD_FILE (image) backend, or a device
+ * whose driver answered neither query all count as unknown and return
+ * TRUE, so devices nothing could be determined about aren't blocked. */
+BOOL             BlockDev_IsHardDisk(struct BlockDev *bd);
 
 /* Erase MBR partition table entries + boot signature from block 0.
    Leaves boot code area (bytes 0-445) intact. */

@@ -1145,8 +1145,11 @@
 #define MSG_CLI_INIT_MBR_WRITTEN     1139
 #define MSG_CLI_INFO_MBR_HDR_FMT     1140
 #define MSG_CLI_INFO_MBR_ROW_FMT     1141
+#define MSG_PV_NOT_A_HARDDISK        1142
+#define MSG_CLI_NOT_A_HARDDISK       1143
+#define MSG_SCR_NOT_A_HARDDISK       1144
 
-#define MSG_COUNT 1142
+#define MSG_COUNT 1145
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2300,5 +2303,8 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1139 MSG_CLI_INIT_MBR_WRITTEN */ "  MBR written at block 0 (RDB at block 1).\n",
     /* 1140 MSG_CLI_INFO_MBR_HDR_FMT */ "MBR partitions: %u\n",
     /* 1141 MSG_CLI_INFO_MBR_ROW_FMT */ "  %-5s  cyls %4lu-%4lu  %-12s  %s\n",
+    /* 1142 MSG_PV_NOT_A_HARDDISK */ "This device is not a hard disk (CD-ROM, tape, or similar).\nPartitioning is not supported.",
+    /* 1143 MSG_CLI_NOT_A_HARDDISK */ "This device is not a hard disk (CD-ROM, tape, or similar). Partitioning is not supported.\n",
+    /* 1144 MSG_SCR_NOT_A_HARDDISK */ "This device is not a hard disk (CD-ROM, tape, or similar). Partitioning is not supported.",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

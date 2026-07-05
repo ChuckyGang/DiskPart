@@ -391,8 +391,13 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
     bd->iotd.iotd_Req.io_Length  = sizeof(geom);
     bd->iotd.iotd_Req.io_Data    = (APTR)&geom;
     bd->iotd.iotd_Req.io_Flags   = 0;
-    DoIO((struct IORequest *)&bd->iotd);
-    /* ignore error - geometry is informational only */
+    if (DoIO((struct IORequest *)&bd->iotd) == 0) {
+        /* Only trust dg_DeviceType on success - a failed/unsupported call
+           leaves geom zeroed, which reads as DG_DIRECT_ACCESS (0) and would
+           otherwise be mistaken for a real hard disk. */
+        bd->device_type       = geom.dg_DeviceType;
+        bd->device_type_known = TRUE;
+    }
 
     bd->block_size  = 512;   /* RDB format requires 512-byte blocks */
     {
@@ -432,6 +437,15 @@ struct BlockDev *BlockDev_Open(const char *devname, ULONG unit)
                 /* bytes 8-15: vendor (8 chars), 16-31: product (16 chars) */
                 char vendor[9], product[17];
                 WORD last;
+
+                /* Byte 0 bits 0-4: peripheral device type (SCSI-2 spec).
+                   More authoritative than TD_GETGEOMETRY's dg_DeviceType -
+                   some drivers (e.g. emulated CD-ROM units) answer INQUIRY
+                   correctly but don't implement TD_GETGEOMETRY at all, so
+                   this must be allowed to override the geometry-based
+                   guess set above. */
+                bd->device_type       = inq[0] & 0x1F;
+                bd->device_type_known = TRUE;
 
                 memcpy(vendor,  inq + 8,  8);  vendor[8]   = '\0';
                 memcpy(product, inq + 16, 16); product[16] = '\0';
@@ -733,6 +747,18 @@ BOOL BlockDev_HasMBR(struct BlockDev *bd)
         result = (buf[510] == 0x55 && buf[511] == 0xAA) ? TRUE : FALSE;
     FreeVec(buf);
     return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* BlockDev_IsHardDisk                                                 */
+/* ------------------------------------------------------------------ */
+
+BOOL BlockDev_IsHardDisk(struct BlockDev *bd)
+{
+    if (!bd) return TRUE;
+    if (bd->backend == BD_FILE) return TRUE;  /* image files always act as HDs */
+    if (!bd->device_type_known) return TRUE;  /* driver answered neither query */
+    return (BOOL)(bd->device_type == DG_DIRECT_ACCESS);
 }
 
 /* ------------------------------------------------------------------ */
