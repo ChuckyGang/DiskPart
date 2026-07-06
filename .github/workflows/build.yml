@@ -57,8 +57,9 @@ jobs:
 
       - name: Build autoboot ADF
         run: |
+          BARTMAN="$PWD/bartman/extension/bin/linux"
           pip install amitools -q
-          make adf
+          make adf TOOLCHAIN=bartman BARTMAN="$BARTMAN"
 
       - name: Upload binary + icon
         uses: actions/upload-artifact@v4
