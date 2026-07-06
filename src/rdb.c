@@ -1462,6 +1462,15 @@ static void fill_lseg_chain(UBYTE *big_buf, ULONG base_blk, ULONG block_size,
 /* RDB.  Use backup/restore to protect against that.                   */
 /* ------------------------------------------------------------------ */
 
+static RDB_WriteProgressFn s_write_progress_fn = NULL;
+static void               *s_write_progress_ud = NULL;
+
+void RDB_SetWriteProgressHook(RDB_WriteProgressFn fn, void *ud)
+{
+    s_write_progress_fn = fn;
+    s_write_progress_ud = ud;
+}
+
 BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
 {
     struct RigidDiskBlock *rdsk;
@@ -1732,6 +1741,9 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
                 FreeVec(big_buf);
                 return FALSE;
             }
+            if (s_write_progress_fn)
+                s_write_progress_fn(s_write_progress_ud, b + 1, total_blocks,
+                                    "Writing");
         }
     }
 
@@ -1774,6 +1786,9 @@ BOOL RDB_Write(struct BlockDev *bd, struct RDBInfo *rdb)
                     FreeVec(vbuf); FreeVec(big_buf);
                     return FALSE;
                 }
+                if (s_write_progress_fn)
+                    s_write_progress_fn(s_write_progress_ud, b + 1, total_blocks,
+                                        "Verifying");
             }
             FreeVec(vbuf);
         }

@@ -211,6 +211,17 @@ void RDB_InitFresh(struct RDBInfo *rdb,
                    ULONG cylinders, ULONG heads, ULONG sectors);
 void RDB_FreeCode (struct RDBInfo *rdb);  /* free all FSInfo.code buffers */
 
+/* Optional per-block progress hook for RDB_Write's write and verify passes.
+   Most RDB_Write calls only touch a handful of blocks (RDSK/PART/FSHD) and
+   finish instantly; this exists for the ADDFS case where filesystem code
+   is embedded, which can add well over a hundred LSEG blocks written and
+   read back one at a time. Set fn=NULL to disable (the default). The hook
+   stays installed until explicitly cleared - callers that set it must
+   clear it again (fn=NULL) once done, e.g. when their window closes. */
+typedef void (*RDB_WriteProgressFn)(void *ud, ULONG done, ULONG total,
+                                    const char *phase);
+void RDB_SetWriteProgressHook(RDB_WriteProgressFn fn, void *ud);
+
 typedef void (*RDB_CheckFn)(void *ud, const char *line);
 /* Returns number of errors found (0 = PASS). */
 ULONG RDB_IntegrityCheck(struct BlockDev *bd, const struct RDBInfo *rdb,
