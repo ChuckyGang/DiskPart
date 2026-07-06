@@ -96,10 +96,18 @@ CD_FILE   := catalogs/DiskPart.cd
 STRINGS_H := src/diskpart_strings.h
 GENCAT    := support/gencat.py
 
-.PHONY: all clean icon FORCE strings catalog-template catalog
+.PHONY: all clean icon adf FORCE strings catalog-template catalog
 
 # Keep 'all' the default goal (rules below would otherwise grab it).
 all: $(program) $(program).info
+
+# Autoboot ADF that boots straight into DiskPart, no Workbench required.
+# Needs amitools (`pip install amitools`) for its xdftool.
+adf: $(program).adf
+
+$(program).adf: $(program) support/make_adf.py
+	$(info Building autoboot ADF $@)
+	@python3 support/make_adf.py $@ $(program)
 
 $(STRINGS_H): $(CD_FILE) $(GENCAT)
 	$(info Generating $@ from $<)

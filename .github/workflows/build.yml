@@ -55,6 +55,11 @@ jobs:
                -type f -exec chmod +x {} +
           make TOOLCHAIN=bartman BARTMAN="$BARTMAN"
 
+      - name: Build autoboot ADF
+        run: |
+          pip install amitools -q
+          make adf
+
       - name: Upload binary + icon
         uses: actions/upload-artifact@v4
         with:
@@ -62,6 +67,7 @@ jobs:
           path: |
             out/DiskPart
             out/DiskPart.info
+            out/DiskPart.adf
           if-no-files-found: error
 
   release:
@@ -112,4 +118,5 @@ jobs:
             --title "DiskPart ${{ steps.date.outputs.DATE }} PROTO" \
             --notes "Automated prototype build from commit \`${{ github.sha }}\`." \
             --prerelease \
-            "DiskPart-${{ steps.date.outputs.DATE }}-PROTO.lha"
+            "DiskPart-${{ steps.date.outputs.DATE }}-PROTO.lha" \
+            "out/DiskPart.adf#DiskPart-autoboot.adf"

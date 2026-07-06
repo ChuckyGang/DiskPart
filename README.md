@@ -67,6 +67,10 @@ Or build with the Bebbo toolchain via Docker (no host install required):
 ./docker.sh
 ```
 
+`make adf` builds `out/DiskPart.adf`, an autoboot floppy image that boots
+straight into DiskPart (no Workbench needed). Requires amitools
+(`pip install amitools`) for its xdftool.
+
 Output: `out/DiskPart`
 
 ---
