@@ -1791,6 +1791,21 @@ static void set_title_dirty(struct Window *win, const char *devname, ULONG unit,
     SetWindowTitles(win, (UBYTE *)t, (UBYTE *)~0UL);  /* leave screen title */
 }
 
+/* RDB_Write progress hook: shows "Writing/Verifying block N/M" in the
+   titlebar while a write is in progress. Installed for the lifetime of the
+   window (see partview_run) so a long ADDFS write - which can touch well
+   over a hundred LSEG blocks on real hardware - is visible rather than
+   looking like a hang, and so the last block shown pinpoints a stall. */
+static void write_progress_title(void *ud, ULONG done, ULONG total,
+                                 const char *phase)
+{
+    struct Window *win = (struct Window *)ud;
+    static char t[96];
+    DP_SNPRINTF(t, "%s block %lu/%lu...", phase,
+                (unsigned long)done, (unsigned long)total);
+    SetWindowTitles(win, (UBYTE *)t, (UBYTE *)~0UL);
+}
+
 /* Case-insensitive equality for drive names. */
 static BOOL name_eq_ci(const char *a, const char *b)
 {
@@ -2099,6 +2114,7 @@ BOOL partview_run(const char *devname, ULONG unit)
 
     UnlockPubScreen(NULL, scr); scr = NULL;
     if (!win) goto cleanup;
+    RDB_SetWriteProgressHook(write_progress_title, win);
 
     /* ---- Build gadgets from the window's actual border sizes ---- */
     {
@@ -3415,6 +3431,7 @@ BOOL partview_run(const char *devname, ULONG unit)
     }
 
 cleanup:
+    RDB_SetWriteProgressHook(NULL, NULL);
     if (win) {
         if (ptr_custom) ClearPointer(win);
         ClearMenuStrip(win);
