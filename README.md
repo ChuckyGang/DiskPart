@@ -4,7 +4,7 @@ A native AmigaOS 2.x hard disk partition editor with full RDB (Rigid Disk Block)
 
 ## Download
 
-**[Latest build](https://github.com/ChuckyGang/DiskPart/releases/latest)**
+**[Latest build](https://github.com/ChuckyGang/DiskPart/releases/latest)** — including the executable and an autoboot ADF. Click **Assets** on that page to see the downloadable files.
 
 ---
 
