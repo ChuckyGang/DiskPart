@@ -1915,6 +1915,24 @@ static BOOL load_window_geom(WORD *x, WORD *y, UWORD *w, UWORD *h)
     return TRUE;
 }
 
+/* Fixed-window double-click test for the partition listview, deliberately
+   NOT using the system's configurable double-click speed (via DoubleClick()
+   or IEQUALIFIER_DOUBLECLICK): on a system set to a slow double-click speed,
+   two clearly separate single clicks on the same row can still fall inside
+   that window and get misread as a double-click, opening the Edit dialog
+   when the user only meant to select. A short, fixed interval avoids that
+   regardless of the user's Preferences setting. */
+#define LIST_DBLCLICK_MAX_US  500000UL   /* 0.5s */
+
+static BOOL quick_double_click(ULONG s_sec, ULONG s_mic, ULONG c_sec, ULONG c_mic)
+{
+    LONG d_sec = (LONG)(c_sec - s_sec);
+    LONG d_mic = (LONG)c_mic - (LONG)s_mic;
+    if (d_mic < 0) { d_mic += 1000000L; d_sec--; }
+    if (d_sec != 0) return FALSE;
+    return d_mic <= (LONG)LIST_DBLCLICK_MAX_US;
+}
+
 /* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 /* check_ffs_root - show what FFS would find at the expected root      */
@@ -1966,6 +1984,13 @@ BOOL partview_run(const char *devname, ULONG unit)
     ULONG dbl_mbr_sec = 0;
     ULONG dbl_mbr_mic = 0;
     WORD  dbl_mbr_idx = -1; /* listview index of last-clicked MBR bar */
+
+    /* Double-click detection for the text listview - own item+timing check
+       (quick_double_click), not Intuition's IEQUALIFIER_DOUBLECLICK. See
+       quick_double_click() above for why. */
+    WORD  dbl_list_sel = -1;
+    ULONG dbl_list_sec  = 0;
+    ULONG dbl_list_mic  = 0;
 
     /* Drag-move state (move whole partition by dragging its body) */
     WORD  drag_move_part   = -1;   /* -1 = not active */
@@ -2188,7 +2213,6 @@ BOOL partview_run(const char *devname, ULONG unit)
             while ((imsg = GT_GetIMsg(win->UserPort)) != NULL) {
                 ULONG          iclass  = imsg->Class;
                 UWORD          code    = imsg->Code;
-                UWORD          qual    = imsg->Qualifier;
                 WORD           mouse_x = imsg->MouseX;
                 WORD           mouse_y = imsg->MouseY;
                 ULONG          ev_sec  = imsg->Seconds;
@@ -2803,8 +2827,13 @@ BOOL partview_run(const char *devname, ULONG unit)
                     case GID_PARTLIST:
                         sel = (WORD)code;
                         draw_map(win, rdb, sel, bx, by, bw, bh);
-                        /* double-click -> open Edit dialog */
-                        if ((qual & IEQUALIFIER_DOUBLECLICK) && sel >= 0) {
+                        /* double-click -> open Edit dialog. See
+                           quick_double_click() above for why this doesn't
+                           use IEQUALIFIER_DOUBLECLICK. */
+                        if (sel >= 0 && sel == dbl_list_sel &&
+                            quick_double_click(dbl_list_sec, dbl_list_mic,
+                                               ev_sec, ev_mic)) {
+                            dbl_list_sel = -1;
                             if (sel < (WORD)rdb->num_parts && !part_is_mbr[sel]) {
                                 ULONG old_hi = rdb->parts[sel].high_cyl;
                                 if (partition_dialog(&rdb->parts[sel],
@@ -2834,6 +2863,10 @@ BOOL partview_run(const char *devname, ULONG unit)
                                             ix, iy, iw, bx, by, bw, bh,
                                             hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
                             }
+                        } else {
+                            dbl_list_sel = sel;
+                            dbl_list_sec = ev_sec;
+                            dbl_list_mic = ev_mic;
                         }
                         break;
 
