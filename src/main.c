@@ -18,6 +18,7 @@
 #include <intuition/intuition.h>
 #include <intuition/screens.h>
 #include <graphics/gfxbase.h>
+#include <graphics/rastport.h>
 #include <graphics/text.h>
 #include <libraries/gadtools.h>
 #include <devices/inputevent.h>
@@ -168,6 +169,76 @@ static UWORD build_name_list(struct List *lst, struct Node *nodes,
 
 #define RESULT_EXIT (-2)   /* close-window confirmed: exit program */
 
+/* Custom listview row renderer shared by the device-select and unit-select
+   windows below. Both just list plain Node->ln_Name strings, but we still
+   need a callback so we control how the selected row is marked: XOR-invert
+   the row (COMPLEMENT draw mode) rather than filling with FILLPEN. FILLPEN
+   can be visually indistinguishable from BACKGROUNDPEN on some real-hardware
+   Workbench palettes, which makes GadTools' own default highlighting (and a
+   naive FILLPEN fill) invisible even though it's technically being drawn.
+   COMPLEMENT mode inverts whatever's there regardless of screen depth or
+   palette, so it's always visible. */
+static ULONG namelist_lv_render(void)
+{
+    register struct Hook      *h    __asm__("a0");
+    register struct LVDrawMsg *msg  __asm__("a1");
+    register struct Node      *node __asm__("a2");
+    struct LVDrawMsg *_msg  = msg;
+    struct Node      *_node = node;
+    (void)h;
+#define msg  _msg
+#define node _node
+
+    struct RastPort  *rp;
+    struct Rectangle *b;
+    BOOL   sel;
+    UWORD  bg_pen, fg_pen;
+    const char *name;
+    UWORD  len;
+
+    if (msg->lvdm_MethodID != LV_DRAW) return LVCB_OK;
+
+    rp  = msg->lvdm_RastPort;
+    b   = &msg->lvdm_Bounds;
+    /* lvdm_State only reports LVR_SELECTED while the mouse button is held
+       down over the row (live click-tracking) - it reverts to LVR_NORMAL
+       the instant the button is released, on every ROM/platform tested,
+       so it can't be used alone to show a persistent "this is the chosen
+       item" mark. node->ln_Pri doubles as that persistent selected-flag:
+       the event loop sets it on the chosen node after GADGETUP and forces
+       a redraw (see GID_LIST handlers below). */
+    sel = (msg->lvdm_State == LVR_SELECTED ||
+           msg->lvdm_State == LVR_SELECTEDDISABLED) ||
+          (node->ln_Pri != 0);
+
+    bg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[BACKGROUNDPEN];
+    fg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[TEXTPEN];
+
+    SetAPen(rp, (LONG)bg_pen);
+    SetDrMd(rp, JAM2);
+    RectFill(rp, b->MinX, b->MinY, b->MaxX, b->MaxY);
+
+    name = node->ln_Name ? node->ln_Name : "";
+    len  = (UWORD)strlen(name);
+
+    SetAPen(rp, (LONG)fg_pen);
+    SetDrMd(rp, JAM1);
+    Move(rp, b->MinX + 2, b->MinY + (WORD)rp->TxBaseline);
+    Text(rp, name, len);
+
+    if (sel) {
+        SetDrMd(rp, COMPLEMENT);
+        RectFill(rp, b->MinX, b->MinY, b->MaxX, b->MaxY);
+        SetDrMd(rp, JAM1);
+    }
+
+    return LVCB_OK;
+#undef msg
+#undef node
+}
+
+static struct Hook namelist_lv_hook;   /* h_Entry set in main() init below */
+
 static BOOL confirm_exit(struct Window *win)
 {
     struct EasyStruct es;
@@ -260,10 +331,15 @@ static WORD run_devname_window(void)
             struct NewGadget ng;
             struct TagItem bt[]      = { { TAG_DONE, 0 } };
             struct TagItem lv_tags[] = {
-                { GTLV_Labels, (ULONG)&name_list },
+                { GTLV_Labels,   (ULONG)&name_list      },
+                { GTLV_CallBack, (ULONG)&namelist_lv_hook },
                 { TAG_DONE,    0                 }
             };
             struct Gadget *prev;
+
+            namelist_lv_hook.h_Entry    = (HOOKFUNC)namelist_lv_render;
+            namelist_lv_hook.h_SubEntry = NULL;
+            namelist_lv_hook.h_Data     = NULL;
 
             memset(&ng, 0, sizeof(ng));
             ng.ng_VisualInfo = vi;
@@ -377,6 +453,27 @@ static WORD run_devname_window(void)
                     switch (gad->GadgetID) {
                     case GID_LIST:
                         sel = (WORD)code;
+                        /* Persist the highlight past GADGETUP - see the
+                           comment on lvdm_State in namelist_lv_render().
+                           GT_SetGadgetAttrsA(GTLV_Selected,...) alone does
+                           NOT bring the row back once the mouse button is
+                           released (confirmed on real KS3.1/3.2 hardware),
+                           so mark the node ourselves and force the listview
+                           to fully detach/rebuild - a plain RefreshGList
+                           isn't enough to make GTLV_CallBack re-render. */
+                        {
+                            UWORD di;
+                            for (di = 0; di < display_count; di++)
+                                name_nodes[di].ln_Pri = 0;
+                            if (sel >= 0 && sel < (WORD)display_count)
+                                name_nodes[sel].ln_Pri = 1;
+                            {
+                                struct TagItem detach[]   = { { GTLV_Labels, ~0UL              }, { TAG_DONE, 0 } };
+                                struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&name_list }, { TAG_DONE, 0 } };
+                                GT_SetGadgetAttrsA(gad, win, NULL, detach);
+                                GT_SetGadgetAttrsA(gad, win, NULL, reattach);
+                            }
+                        }
                         if (qual & IEQUALIFIER_DOUBLECLICK) do_select = TRUE;
                         break;
                     case GID_SELECT:
@@ -715,11 +812,17 @@ static WORD run_unitsel_window(const char *devname)
 
             {
                 struct TagItem lv_tags[] = {
-                    { GTLV_Labels, (ULONG)&ulist },
+                    { GTLV_Labels,   (ULONG)&ulist            },
+                    { GTLV_CallBack, (ULONG)&namelist_lv_hook },
                     { TAG_DONE,    0              }
                 };
-                struct Gadget *lv_gad =
-                    CreateGadgetA(LISTVIEW_KIND, gctx, &ng, lv_tags);
+                struct Gadget *lv_gad;
+
+                namelist_lv_hook.h_Entry    = (HOOKFUNC)namelist_lv_render;
+                namelist_lv_hook.h_SubEntry = NULL;
+                namelist_lv_hook.h_Data     = NULL;
+
+                lv_gad = CreateGadgetA(LISTVIEW_KIND, gctx, &ng, lv_tags);
                 if (!lv_gad) goto cleanup;
 
                 {
@@ -797,6 +900,22 @@ static WORD run_unitsel_window(const char *devname)
                     switch (gad->GadgetID) {
                     case GID_LIST:
                         sel = (WORD)code;
+                        /* Persist the highlight past GADGETUP - see the
+                           comment in run_devname_window()'s GID_LIST
+                           handler and in namelist_lv_render(). */
+                        {
+                            UWORD ui;
+                            for (ui = 0; ui < unit_list.count; ui++)
+                                unit_nodes[ui].ln_Pri = 0;
+                            if (sel >= 0 && sel < (WORD)unit_list.count)
+                                unit_nodes[sel].ln_Pri = 1;
+                            {
+                                struct TagItem detach[]   = { { GTLV_Labels, ~0UL         }, { TAG_DONE, 0 } };
+                                struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&ulist }, { TAG_DONE, 0 } };
+                                GT_SetGadgetAttrsA(gad, win, NULL, detach);
+                                GT_SetGadgetAttrsA(gad, win, NULL, reattach);
+                            }
+                        }
                         if (qual & IEQUALIFIER_DOUBLECLICK) do_select = TRUE;
                         break;
                     case GID_SELECT:

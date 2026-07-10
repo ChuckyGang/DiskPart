@@ -166,6 +166,10 @@ static struct Node part_nodes[MAX_LIST_ENTRIES];
 static BOOL  part_is_mbr  [MAX_LIST_ENTRIES];
 static UBYTE part_mbr_slot[MAX_LIST_ENTRIES];
 
+/* Persistent "currently selected" row index for lv_render() - see the
+   comment on lvdm_State there. Set by refresh_listview(). */
+static WORD g_part_sel = -1;
+
 /* Names of partitions deleted this session, pending an unmount after the next
    RDB write (kept here rather than on the stack - see s_unmount_count reset in
    partview_run). */
@@ -216,13 +220,24 @@ static ULONG lv_render(void)
 
     rp  = msg->lvdm_RastPort;
     b   = &msg->lvdm_Bounds;
+    /* lvdm_State only reports LVR_SELECTED while the mouse button is held
+       down over the row (live click-tracking) - it reverts to LVR_NORMAL
+       the instant the button is released, on every ROM/platform tested, so
+       it can't be used alone to show a persistent "this is the chosen
+       item" mark. g_part_sel is set by the event loop on GADGETUP (see
+       refresh_listview()) to make the mark persist. */
     sel = (msg->lvdm_State == LVR_SELECTED ||
-           msg->lvdm_State == LVR_SELECTEDDISABLED);
+           msg->lvdm_State == LVR_SELECTEDDISABLED) ||
+          (idx == g_part_sel);
 
-    bg_pen = sel ? (UWORD)msg->lvdm_DrawInfo->dri_Pens[FILLPEN]
-                 : (UWORD)msg->lvdm_DrawInfo->dri_Pens[BACKGROUNDPEN];
-    fg_pen = sel ? (UWORD)msg->lvdm_DrawInfo->dri_Pens[FILLTEXTPEN]
-                 : (UWORD)msg->lvdm_DrawInfo->dri_Pens[TEXTPEN];
+    /* Selection is marked by XOR-inverting the whole row at the end of this
+       function (COMPLEMENT draw mode) rather than by filling with FILLPEN.
+       FILLPEN can be visually indistinguishable from BACKGROUNDPEN on some
+       real-hardware Workbench palettes, making pen-based highlighting
+       invisible even though it's technically being drawn - COMPLEMENT mode
+       works on any screen depth/palette. */
+    bg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[BACKGROUNDPEN];
+    fg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[TEXTPEN];
 
     /* Fill background */
     SetAPen(rp, (LONG)bg_pen);
@@ -345,6 +360,14 @@ static ULONG lv_render(void)
     }
 
 lv_done:
+
+    /* XOR-invert the whole row to mark the selection. Palette-independent,
+       unlike filling with FILLPEN (see comment above). */
+    if (sel) {
+        SetDrMd(rp, COMPLEMENT);
+        RectFill(rp, b->MinX, b->MinY, b->MaxX, b->MaxY);
+        SetDrMd(rp, JAM1);
+    }
 
 #undef LV_TEXT
 #undef LV_RIGHT
@@ -1173,6 +1196,7 @@ static void refresh_listview(struct Window *win, struct Gadget *lv_gad,
 {
     struct TagItem detach[]   = { { GTLV_Labels, ~0UL              }, { TAG_DONE, 0 } };
     struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&part_list }, { TAG_DONE, 0 } };
+    g_part_sel = sel;
     GT_SetGadgetAttrsA(lv_gad, win, NULL, detach);
     build_part_list(rdb, sel);
     GT_SetGadgetAttrsA(lv_gad, win, NULL, reattach);
@@ -2826,6 +2850,15 @@ BOOL partview_run(const char *devname, ULONG unit)
                     switch (gad->GadgetID) {
                     case GID_PARTLIST:
                         sel = (WORD)code;
+                        /* Persist the highlight past GADGETUP - see the
+                           comment on lvdm_State in lv_render(). A plain
+                           GT_SetGadgetAttrsA(GTLV_Selected,...) + RefreshGList
+                           does NOT bring the row back once the mouse button
+                           is released (confirmed on real KS3.1/3.2
+                           hardware); refresh_listview()'s detach/rebuild/
+                           reattach is what actually forces GTLV_CallBack to
+                           re-render every row. */
+                        refresh_listview(win, lv_gad, rdb, sel);
                         draw_map(win, rdb, sel, bx, by, bw, bh);
                         /* double-click -> open Edit dialog. See
                            quick_double_click() above for why this doesn't
