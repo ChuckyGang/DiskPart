@@ -205,8 +205,14 @@ static ULONG probe_last_block(struct BlockDev *bd, ULONG floor_blocks)
         else hi = PROBE_MAX_BLOCKS;
     }
 
-    if (lo == 0) { FreeVec(buf); return 0; }       /* only block 0 readable */
-    if (hi == 0) { FreeVec(buf); return lo + 1; }  /* hit ceiling          */
+    /* lo == 0 here does NOT mean failure - block 0 was already confirmed
+       readable above, so lo's initial value of 0 is itself a valid
+       confirmed-good state (it just means the gallop loop's very first
+       probe already failed, e.g. a 1-block device, or floor_blocks was
+       already optimistic). hi is guaranteed non-zero by this point (either
+       set in the gallop loop, or by the ceiling probe above), so the
+       binary search below correctly resolves lo=0 against it. */
+    if (hi == 0) { FreeVec(buf); return lo + 1; }  /* hit ceiling */
 
     /* Binary-search the boundary between lo (good) and hi (bad). */
     while (hi - lo > 1) {

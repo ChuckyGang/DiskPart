@@ -121,11 +121,14 @@ void rdb_backup_block(struct Window *win, struct BlockDev *bd,
             es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
             EasyRequest(win, &es, NULL);
         } else {
-            Write(fh, buf, (LONG)bd->block_size);
+            LONG written = Write(fh, buf, (LONG)bd->block_size);
             Close(fh);
             es.es_StructSize=sizeof(es); es.es_Flags=0;
             es.es_Title=(UBYTE*)GS(MSG_RDB_BACKUP_TITLE);
-            es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCK_SAVED);
+            if (written != (LONG)bd->block_size)
+                es.es_TextFormat=(UBYTE*)GS(MSG_RDB_WRITE_ERR_BLOCKDATA);
+            else
+                es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCK_SAVED);
             es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
             EasyRequest(win, &es, NULL);
         }
@@ -1285,7 +1288,12 @@ void rdb_raw_scan(struct Window *win, struct BlockDev *bd)
 
                 /* Show raw bytes 36-43 so we can see the BSTR regardless of length */
                 { char *p = line;
-                  sprintf(p, GS(MSG_RDB_NAME_RAW_PREFIX)); p += 20;
+                  /* p += sprintf(...) tracks the actual written length -
+                     GS() returns a localized (translatable) string, so a
+                     hardcoded offset here would misalign the hex dump that
+                     follows for any locale whose translation isn't exactly
+                     as long as the English string. */
+                  p += sprintf(p, GS(MSG_RDB_NAME_RAW_PREFIX));
                   for (k = 0; k < 8; k++) {
                       sprintf(p, "%02lX ", (unsigned long)buf[36 + k]); p += 3;
                   }

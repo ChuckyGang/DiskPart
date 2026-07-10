@@ -36,6 +36,7 @@
 #include "cli.h"
 #include "clib.h"
 #include "devices.h"
+#include "guilv.h"
 #include "locale_support.h"
 #include "partview.h"
 #include "rdb.h"
@@ -175,14 +176,21 @@ static UWORD build_name_list(struct List *lst, struct Node *nodes,
    naive FILLPEN fill) invisible even though it's technically being drawn.
    COMPLEMENT mode inverts whatever's there regardless of screen depth or
    palette, so it's always visible. */
+/* Persistent "currently selected" row index, shared by the device-select
+   and unit-select windows below (they're never open at the same time - see
+   namelist_lv_hook.h_Data). Both windows reset this to -1 on entry so a
+   selection from a previous session/window never bleeds into a fresh one. */
+static WORD g_namelist_sel = -1;
+
 static ULONG namelist_lv_render(void)
 {
     register struct Hook      *h    __asm__("a0");
     register struct LVDrawMsg *msg  __asm__("a1");
     register struct Node      *node __asm__("a2");
+    struct Hook      *_h    = h;
     struct LVDrawMsg *_msg  = msg;
     struct Node      *_node = node;
-    (void)h;
+#define h    _h
 #define msg  _msg
 #define node _node
 
@@ -192,6 +200,7 @@ static ULONG namelist_lv_render(void)
     UWORD  bg_pen, fg_pen;
     const char *name;
     UWORD  len;
+    WORD   idx;
 
     if (msg->lvdm_MethodID != LV_DRAW) return LVCB_OK;
 
@@ -201,12 +210,14 @@ static ULONG namelist_lv_render(void)
        down over the row (live click-tracking) - it reverts to LVR_NORMAL
        the instant the button is released, on every ROM/platform tested,
        so it can't be used alone to show a persistent "this is the chosen
-       item" mark. node->ln_Pri doubles as that persistent selected-flag:
-       the event loop sets it on the chosen node after GADGETUP and forces
-       a redraw (see GID_LIST handlers below). */
+       item" mark. h_Data points at whichever node array is currently in
+       use (name_nodes or unit_nodes - set right before the gadget using
+       this hook is created); comparing this row's index against
+       g_namelist_sel is the persistent flag instead. */
+    idx = (WORD)(node - (struct Node *)h->h_Data);
     sel = (msg->lvdm_State == LVR_SELECTED ||
            msg->lvdm_State == LVR_SELECTEDDISABLED) ||
-          (node->ln_Pri != 0);
+          (idx == g_namelist_sel);
 
     bg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[BACKGROUNDPEN];
     fg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[TEXTPEN];
@@ -230,30 +241,12 @@ static ULONG namelist_lv_render(void)
     }
 
     return LVCB_OK;
+#undef h
 #undef msg
 #undef node
 }
 
-static struct Hook namelist_lv_hook;   /* h_Entry set in main() init below */
-
-/* Fixed-window double-click test, deliberately NOT using the system's
-   configurable double-click speed (IEQUALIFIER_DOUBLECLICK / DoubleClick()):
-   on real hardware that qualifier isn't reliably reported, and on a system
-   set to a slow double-click speed two separate single clicks can also get
-   misread as one. A short, fixed interval avoids both. Same approach as
-   quick_double_click() in partview.c (duplicated rather than shared - see
-   list_init() for the existing precedent of small per-file GUI helpers in
-   this codebase). */
-#define LIST_DBLCLICK_MAX_US  500000UL   /* 0.5s */
-
-static BOOL quick_double_click(ULONG s_sec, ULONG s_mic, ULONG c_sec, ULONG c_mic)
-{
-    LONG d_sec = (LONG)(c_sec - s_sec);
-    LONG d_mic = (LONG)c_mic - (LONG)s_mic;
-    if (d_mic < 0) { d_mic += 1000000L; d_sec--; }
-    if (d_sec != 0) return FALSE;
-    return d_mic <= (LONG)LIST_DBLCLICK_MAX_US;
-}
+static struct Hook namelist_lv_hook;   /* h_Entry/h_Data set before each use below */
 
 static BOOL confirm_exit(struct Window *win)
 {
@@ -292,6 +285,11 @@ static WORD run_devname_window(void)
     struct List name_list;
     WORD        sel_map[MAX_DEV_NAMES];
     UWORD       display_count;
+
+    /* g_namelist_sel is a static shared with run_unitsel_window() - reset it
+       so a selection from a previous window/session never shows highlighted
+       here before the user has clicked anything. */
+    g_namelist_sel = -1;
 
     display_count = build_name_list(&name_list, name_nodes, sel_map, show_all);
 
@@ -358,7 +356,7 @@ static WORD run_devname_window(void)
 
             namelist_lv_hook.h_Entry    = (HOOKFUNC)namelist_lv_render;
             namelist_lv_hook.h_SubEntry = NULL;
-            namelist_lv_hook.h_Data     = NULL;
+            namelist_lv_hook.h_Data     = (APTR)name_nodes;
 
             memset(&ng, 0, sizeof(ng));
             ng.ng_VisualInfo = vi;
@@ -478,22 +476,11 @@ static WORD run_devname_window(void)
                            GT_SetGadgetAttrsA(GTLV_Selected,...) alone does
                            NOT bring the row back once the mouse button is
                            released (confirmed on real KS3.1/3.2 hardware),
-                           so mark the node ourselves and force the listview
-                           to fully detach/rebuild - a plain RefreshGList
+                           so gui_force_lv_redraw() forces the listview to
+                           fully detach/reattach - a plain RefreshGList
                            isn't enough to make GTLV_CallBack re-render. */
-                        {
-                            UWORD di;
-                            for (di = 0; di < display_count; di++)
-                                name_nodes[di].ln_Pri = 0;
-                            if (sel >= 0 && sel < (WORD)display_count)
-                                name_nodes[sel].ln_Pri = 1;
-                            {
-                                struct TagItem detach[]   = { { GTLV_Labels, ~0UL              }, { TAG_DONE, 0 } };
-                                struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&name_list }, { TAG_DONE, 0 } };
-                                GT_SetGadgetAttrsA(gad, win, NULL, detach);
-                                GT_SetGadgetAttrsA(gad, win, NULL, reattach);
-                            }
-                        }
+                        g_namelist_sel = sel;
+                        gui_force_lv_redraw(gad, win, &name_list);
                         /* Fixed-window double-click test rather than
                            IEQUALIFIER_DOUBLECLICK - see quick_double_click()
                            comment above; the qualifier isn't reliable on
@@ -530,6 +517,13 @@ static WORD run_devname_window(void)
                         GT_SetGadgetAttrsA(showall_gad, win, NULL, relabel);
                         RefreshGList(showall_gad, win, NULL, 1);
                         sel = -1;
+                        /* The list just got rebuilt/reindexed - drop any
+                           highlight and any in-flight double-click tracking,
+                           otherwise a click landing on the old dbl_list_sel
+                           index within the timing window would misfire a
+                           double-click-select on a re-numbered row. */
+                        g_namelist_sel = -1;
+                        dbl_list_sel   = -1;
                         break;
                     }
                     case GID_USEIMAGE:
@@ -787,6 +781,11 @@ static WORD run_unitsel_window(const char *devname)
     struct List ulist;
     UWORD i;
 
+    /* g_namelist_sel is a static shared with run_devname_window() - reset it
+       so a selection from a previous window/session never shows highlighted
+       here before the user has clicked anything. */
+    g_namelist_sel = -1;
+
     list_init(&ulist);
     for (i = 0; i < unit_list.count; i++) {
         unit_nodes[i].ln_Name = unit_list.entries[i].display;
@@ -856,7 +855,7 @@ static WORD run_unitsel_window(const char *devname)
 
                 namelist_lv_hook.h_Entry    = (HOOKFUNC)namelist_lv_render;
                 namelist_lv_hook.h_SubEntry = NULL;
-                namelist_lv_hook.h_Data     = NULL;
+                namelist_lv_hook.h_Data     = (APTR)unit_nodes;
 
                 lv_gad = CreateGadgetA(LISTVIEW_KIND, gctx, &ng, lv_tags);
                 if (!lv_gad) goto cleanup;
@@ -940,19 +939,8 @@ static WORD run_unitsel_window(const char *devname)
                         /* Persist the highlight past GADGETUP - see the
                            comment in run_devname_window()'s GID_LIST
                            handler and in namelist_lv_render(). */
-                        {
-                            UWORD ui;
-                            for (ui = 0; ui < unit_list.count; ui++)
-                                unit_nodes[ui].ln_Pri = 0;
-                            if (sel >= 0 && sel < (WORD)unit_list.count)
-                                unit_nodes[sel].ln_Pri = 1;
-                            {
-                                struct TagItem detach[]   = { { GTLV_Labels, ~0UL         }, { TAG_DONE, 0 } };
-                                struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&ulist }, { TAG_DONE, 0 } };
-                                GT_SetGadgetAttrsA(gad, win, NULL, detach);
-                                GT_SetGadgetAttrsA(gad, win, NULL, reattach);
-                            }
-                        }
+                        g_namelist_sel = sel;
+                        gui_force_lv_redraw(gad, win, &ulist);
                         /* Fixed-window double-click test rather than
                            IEQUALIFIER_DOUBLECLICK - see quick_double_click()
                            comment above; the qualifier isn't reliable on

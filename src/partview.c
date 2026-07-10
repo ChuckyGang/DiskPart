@@ -42,6 +42,7 @@
 #include <proto/icon.h>
 
 #include "clib.h"
+#include "guilv.h"
 #include "locale_support.h"
 #include "rdb.h"
 #include "mbr.h"
@@ -1194,12 +1195,37 @@ static void draw_static(struct Window *win, const char *devname, ULONG unit,
 static void refresh_listview(struct Window *win, struct Gadget *lv_gad,
                               struct RDBInfo *rdb, WORD sel)
 {
+    ULONG top = 0;
+    struct TagItem get_top[]  = { { GTLV_Top,    (ULONG)&top       }, { TAG_DONE, 0 } };
     struct TagItem detach[]   = { { GTLV_Labels, ~0UL              }, { TAG_DONE, 0 } };
     struct TagItem reattach[] = { { GTLV_Labels, (ULONG)&part_list }, { TAG_DONE, 0 } };
+    struct TagItem restore[]  = { { GTLV_Top,    0                 }, { TAG_DONE, 0 } };
+
     g_part_sel = sel;
+    /* Detaching/reattaching GTLV_Labels (needed to force a redraw of a
+       GTLV_CallBack listview - see gui_force_lv_redraw()) resets the
+       scroll position, so save/restore it around the rebuild. Can't use
+       gui_force_lv_redraw() directly here since build_part_list() needs to
+       run between the detach and reattach. */
+    GT_GetGadgetAttrsA(lv_gad, win, NULL, get_top);
     GT_SetGadgetAttrsA(lv_gad, win, NULL, detach);
     build_part_list(rdb, sel);
     GT_SetGadgetAttrsA(lv_gad, win, NULL, reattach);
+    restore[0].ti_Data = top;
+    GT_SetGadgetAttrsA(lv_gad, win, NULL, restore);
+}
+
+/* Lightweight version of refresh_listview() for a plain click: only moves
+   the persistent highlight, without re-deriving/reformatting every row's
+   display string (build_part_list() calls FriendlyDosType()/FormatSize()/
+   snprintf() per row) - real, visible-on-real-hardware work on this
+   project's m68000 target for a list that can hold up to MAX_LIST_ENTRIES
+   rows. Use refresh_listview() instead whenever the underlying partition
+   data actually changed (add/delete/resize/etc). */
+static void mark_listview_selection(struct Window *win, struct Gadget *lv_gad, WORD sel)
+{
+    g_part_sel = sel;
+    gui_force_lv_redraw(lv_gad, win, &part_list);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1939,23 +1965,8 @@ static BOOL load_window_geom(WORD *x, WORD *y, UWORD *w, UWORD *h)
     return TRUE;
 }
 
-/* Fixed-window double-click test for the partition listview, deliberately
-   NOT using the system's configurable double-click speed (via DoubleClick()
-   or IEQUALIFIER_DOUBLECLICK): on a system set to a slow double-click speed,
-   two clearly separate single clicks on the same row can still fall inside
-   that window and get misread as a double-click, opening the Edit dialog
-   when the user only meant to select. A short, fixed interval avoids that
-   regardless of the user's Preferences setting. */
-#define LIST_DBLCLICK_MAX_US  500000UL   /* 0.5s */
-
-static BOOL quick_double_click(ULONG s_sec, ULONG s_mic, ULONG c_sec, ULONG c_mic)
-{
-    LONG d_sec = (LONG)(c_sec - s_sec);
-    LONG d_mic = (LONG)c_mic - (LONG)s_mic;
-    if (d_mic < 0) { d_mic += 1000000L; d_sec--; }
-    if (d_sec != 0) return FALSE;
-    return d_mic <= (LONG)LIST_DBLCLICK_MAX_US;
-}
+/* quick_double_click() / LIST_DBLCLICK_MAX_US now live in guilv.h/guilv.c,
+   shared with main.c's device-select and unit-select windows. */
 
 /* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
@@ -1984,6 +1995,11 @@ BOOL partview_run(const char *devname, ULONG unit)
 
     s_unmount_count = 0;     /* no deletes pending unmount yet this session */
     s_mbr = NULL;            /* no MBR loaded yet */
+    /* g_part_sel is a static shared across partview_run() sessions (once
+       per device/unit opened) - reset unconditionally, before any
+       early-return path, so a selection from a previous disk never shows
+       highlighted on a freshly-opened one. */
+    g_part_sel = -1;
     static char       wfmt[512];            /* formatted write-fail message - static: off stack */
     static char       win_title[80];
 
@@ -2855,10 +2871,11 @@ BOOL partview_run(const char *devname, ULONG unit)
                            GT_SetGadgetAttrsA(GTLV_Selected,...) + RefreshGList
                            does NOT bring the row back once the mouse button
                            is released (confirmed on real KS3.1/3.2
-                           hardware); refresh_listview()'s detach/rebuild/
-                           reattach is what actually forces GTLV_CallBack to
-                           re-render every row. */
-                        refresh_listview(win, lv_gad, rdb, sel);
+                           hardware). Nothing about the partition data
+                           changed here (just which row is highlighted), so
+                           use the lightweight redraw instead of re-deriving
+                           every row's display string via refresh_listview(). */
+                        mark_listview_selection(win, lv_gad, sel);
                         draw_map(win, rdb, sel, bx, by, bw, bh);
                         /* double-click -> open Edit dialog. See
                            quick_double_click() above for why this doesn't
@@ -3457,14 +3474,19 @@ BOOL partview_run(const char *devname, ULONG unit)
                         RefreshGList(glist, win, NULL, -1);
                         GT_RefreshWindow(win, NULL);
 
-                        /* Restore listview selection */
+                        /* Scroll the selected row back into view. Note:
+                           GTLV_Selected is NOT set here - lv_render()'s
+                           highlight is driven entirely by g_part_sel (see
+                           its comment), which already equals sel and
+                           doesn't need restoring; the gadget's own native
+                           GTLV_Selected attribute is never read by the
+                           render hook, so setting it here would be dead. */
                         if (sel >= 0) {
-                            struct TagItem st[] = {
-                                { GTLV_Selected,    (ULONG)sel },
+                            struct TagItem mv[] = {
                                 { GTLV_MakeVisible, (ULONG)sel },
                                 { TAG_DONE, 0 }
                             };
-                            GT_SetGadgetAttrsA(lv_gad, win, NULL, st);
+                            GT_SetGadgetAttrsA(lv_gad, win, NULL, mv);
                         }
 
                         draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
