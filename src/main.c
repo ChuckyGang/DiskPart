@@ -25,9 +25,6 @@
 #include <libraries/asl.h>
 #include <workbench/startup.h>
 #include <workbench/workbench.h>
-#ifndef IEQUALIFIER_DOUBLECLICK
-#define IEQUALIFIER_DOUBLECLICK 0x8000
-#endif
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <proto/intuition.h>
@@ -239,6 +236,25 @@ static ULONG namelist_lv_render(void)
 
 static struct Hook namelist_lv_hook;   /* h_Entry set in main() init below */
 
+/* Fixed-window double-click test, deliberately NOT using the system's
+   configurable double-click speed (IEQUALIFIER_DOUBLECLICK / DoubleClick()):
+   on real hardware that qualifier isn't reliably reported, and on a system
+   set to a slow double-click speed two separate single clicks can also get
+   misread as one. A short, fixed interval avoids both. Same approach as
+   quick_double_click() in partview.c (duplicated rather than shared - see
+   list_init() for the existing precedent of small per-file GUI helpers in
+   this codebase). */
+#define LIST_DBLCLICK_MAX_US  500000UL   /* 0.5s */
+
+static BOOL quick_double_click(ULONG s_sec, ULONG s_mic, ULONG c_sec, ULONG c_mic)
+{
+    LONG d_sec = (LONG)(c_sec - s_sec);
+    LONG d_mic = (LONG)c_mic - (LONG)s_mic;
+    if (d_mic < 0) { d_mic += 1000000L; d_sec--; }
+    if (d_sec != 0) return FALSE;
+    return d_mic <= (LONG)LIST_DBLCLICK_MAX_US;
+}
+
 static BOOL confirm_exit(struct Window *win)
 {
     struct EasyStruct es;
@@ -262,6 +278,9 @@ static WORD run_devname_window(void)
     struct Window  *win       = NULL;
     WORD            sel       = -1;
     WORD            result    = -1;
+    WORD            dbl_list_sel = -1;
+    ULONG           dbl_list_sec = 0;
+    ULONG           dbl_list_mic = 0;
     static char     dev_title[80];   /* Intuition keeps the pointer */
     /* Sticky across window reopens so a user-enabled Show All survives a
        round-trip through the partition editor.  Otherwise devices outside
@@ -437,7 +456,8 @@ static WORD run_devname_window(void)
             while ((imsg = GT_GetIMsg(win->UserPort)) != NULL) {
                 ULONG          iclass = imsg->Class;
                 UWORD          code   = imsg->Code;
-                UWORD          qual   = imsg->Qualifier;
+                ULONG          ev_sec = imsg->Seconds;
+                ULONG          ev_mic = imsg->Micros;
                 struct Gadget *gad    = (struct Gadget *)imsg->IAddress;
                 GT_ReplyIMsg(imsg);
 
@@ -474,7 +494,20 @@ static WORD run_devname_window(void)
                                 GT_SetGadgetAttrsA(gad, win, NULL, reattach);
                             }
                         }
-                        if (qual & IEQUALIFIER_DOUBLECLICK) do_select = TRUE;
+                        /* Fixed-window double-click test rather than
+                           IEQUALIFIER_DOUBLECLICK - see quick_double_click()
+                           comment above; the qualifier isn't reliable on
+                           real hardware. */
+                        if (sel >= 0 && sel == dbl_list_sel &&
+                            quick_double_click(dbl_list_sec, dbl_list_mic,
+                                               ev_sec, ev_mic)) {
+                            dbl_list_sel = -1;
+                            do_select    = TRUE;
+                        } else {
+                            dbl_list_sel = sel;
+                            dbl_list_sec = ev_sec;
+                            dbl_list_mic = ev_mic;
+                        }
                         break;
                     case GID_SELECT:
                         do_select = TRUE;
@@ -745,6 +778,9 @@ static WORD run_unitsel_window(const char *devname)
     struct Window  *win    = NULL;
     WORD            sel    = -1;
     WORD            result = -1;
+    WORD            dbl_list_sel = -1;
+    ULONG           dbl_list_sec = 0;
+    ULONG           dbl_list_mic = 0;
     static char     win_title[80];
 
     struct Node unit_nodes[MAX_KNOWN_DEVICES];
@@ -884,7 +920,8 @@ static WORD run_unitsel_window(const char *devname)
             while ((imsg = GT_GetIMsg(win->UserPort)) != NULL) {
                 ULONG          iclass = imsg->Class;
                 UWORD          code   = imsg->Code;
-                UWORD          qual   = imsg->Qualifier;
+                ULONG          ev_sec = imsg->Seconds;
+                ULONG          ev_mic = imsg->Micros;
                 struct Gadget *gad    = (struct Gadget *)imsg->IAddress;
                 GT_ReplyIMsg(imsg);
 
@@ -916,7 +953,20 @@ static WORD run_unitsel_window(const char *devname)
                                 GT_SetGadgetAttrsA(gad, win, NULL, reattach);
                             }
                         }
-                        if (qual & IEQUALIFIER_DOUBLECLICK) do_select = TRUE;
+                        /* Fixed-window double-click test rather than
+                           IEQUALIFIER_DOUBLECLICK - see quick_double_click()
+                           comment above; the qualifier isn't reliable on
+                           real hardware. */
+                        if (sel >= 0 && sel == dbl_list_sel &&
+                            quick_double_click(dbl_list_sec, dbl_list_mic,
+                                               ev_sec, ev_mic)) {
+                            dbl_list_sel = -1;
+                            do_select    = TRUE;
+                        } else {
+                            dbl_list_sel = sel;
+                            dbl_list_sec = ev_sec;
+                            dbl_list_mic = ev_mic;
+                        }
                         break;
                     case GID_SELECT:
                         do_select = TRUE;
