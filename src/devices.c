@@ -139,20 +139,6 @@ static BOOL is_skipped(const char *name)
 }
 
 /*
- * Force-include list - added unconditionally by Devices_Scan regardless of
- * whether the driver is mounted or even loaded in RAM.  Covers SCSI/IDE
- * controllers whose drivers may not appear in DosList or exec DeviceList
- * until first opened (e.g. a blank/unformatted disk).
- */
-static const char * const force_devs[] = {
-    "scsi.device",
-    "scs2.device",    /* Vampire V4/V4SA SCSI */
-    "ide.device",
-    "fastide.device",
-    NULL
-};
-
-/*
  * Returns TRUE if name contains the substring "scs" or "ide"
  * (case-insensitive).  Used to bypass the blacklist for SCSI/IDE
  * controllers that AmigaOS may have renamed (e.g. appended a digit).
@@ -209,14 +195,6 @@ void Devices_Scan(struct DevNameList *nl)
     struct Node    *node;
 
     memset(nl, 0, sizeof(*nl));
-
-    /* Phase 0: unconditionally add known SCSI/IDE controller names so they
-       appear even if the driver is not yet loaded or has no mounted partition. */
-    {
-        UWORD i;
-        for (i = 0; force_devs[i] != NULL; i++)
-            add_name(nl, force_devs[i]);
-    }
 
     /* Phase 1: AmigaDOS DosList - finds drivers backing mounted partitions.
        Pure memory walk, no I/O. */
