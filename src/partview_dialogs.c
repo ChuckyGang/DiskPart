@@ -90,13 +90,14 @@ static UWORD bufmem_index(ULONG val)
 /* Numeric parsing helpers                                             */
 /* ------------------------------------------------------------------ */
 
-/* Parse decimal or 0x/0X-prefixed hex string to ULONG */
+/* Parse decimal, 0x/0X-prefixed hex, or $-prefixed hex string to ULONG */
 ULONG parse_num(const char *s)
 {
     ULONG val = 0;
     int   hex = 0;
     while (*s == ' ') s++;
     if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { s += 2; hex = 1; }
+    else if (s[0] == '$') { s += 1; hex = 1; }
     while (*s) {
         char  c = *s++;
         ULONG digit;
@@ -164,8 +165,8 @@ LONG parse_long(const char *s)
 }
 
 /*
- * Parse a DosType from either hex ("0x50465303") or a 4-char string ("PFS\3").
- * String rules: up to 4 chars packed big-endian into a ULONG.
+ * Parse a DosType from hex ("0x50465303" or "$50465303") or a 4-char string
+ * ("PFS\3").  String rules: up to 4 chars packed big-endian into a ULONG.
  *   \N  (backslash + single decimal digit 0-9) -> byte value N (e.g. \3 -> 0x03).
  *   Any other char -> its ASCII value.
  * Examples: "PFS\3" -> 0x50465303, "DOS\0" -> 0x444F5300, "DOS\1" -> 0x444F5301.
@@ -178,8 +179,8 @@ ULONG parse_dostype(const char *s)
 
     while (*s == ' ') s++;
 
-    /* Hex: 0xNNNNNNNN */
-    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+    /* Hex: 0xNNNNNNNN or $NNNNNNNN */
+    if ((s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) || s[0] == '$')
         return parse_num(s);
 
     /*
