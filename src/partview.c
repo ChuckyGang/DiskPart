@@ -2027,6 +2027,8 @@ BOOL partview_run(const char *devname, ULONG unit)
     ULONG drag_max     = 0;
     ULONG drag_orig_lo = 0;   /* saved low_cyl  before drag */
     ULONG drag_orig_hi = 0;   /* saved high_cyl before drag */
+    WORD  drag_anchor_x   = 0; /* pixel x where the resize drag began */
+    ULONG drag_anchor_cyl = 0; /* dragged edge's cylinder at anchor pixel */
 
     /* Double-click detection in map - RDB partitions */
     ULONG dbl_sec   = 0;
@@ -2504,6 +2506,9 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 dbl_part       = -1;
                                 drag_min = rdb->parts[part].low_cyl;
                                 drag_max = right_start > 0 ? right_start - 1 : 0;
+                                drag_anchor_x   = mouse_x;
+                                drag_anchor_cyl = (drag_edge == 0) ? drag_orig_lo
+                                                                    : drag_orig_hi;
                             } else if (left_dlg_part >= 0) {
                                 /* Left-edge drag: not supported - inform user */
                                 struct EasyStruct es;
@@ -2663,11 +2668,37 @@ BOOL partview_run(const char *devname, ULONG unit)
                     } else if (code == SELECTUP) {
                         if (drag_part >= 0) {
                             WORD  confirmed_part = drag_part;
+                            BOOL  visually_changed;
                             drag_part = -1;
 
+                            /* Compare rendered pixel columns, not raw cylinder
+                               numbers: many cylinders share one screen pixel
+                               (MAP_X() in draw_map truncates the same way), so
+                               a drag that visually returns to its starting edge
+                               can still leave a slightly different cylinder
+                               value behind. Snap back to the exact original
+                               whenever the edges round-trip to the same pixel,
+                               so a no-op drag never triggers the destructive
+                               shrink/move confirmation. */
+                            {
+                                WORD  mx2   = bx + 1;
+                                UWORD mw2   = (UWORD)bw - 2;
+                                ULONG total = rdb->hi_cyl + 1;
+                                WORD  lo_px_orig = (WORD)(mx2 + (WORD)((UQUAD)drag_orig_lo * mw2 / total));
+                                WORD  hi_px_orig = (WORD)(mx2 + (WORD)((UQUAD)(drag_orig_hi + 1) * mw2 / total));
+                                WORD  lo_px_new  = (WORD)(mx2 + (WORD)((UQUAD)rdb->parts[confirmed_part].low_cyl * mw2 / total));
+                                WORD  hi_px_new  = (WORD)(mx2 + (WORD)((UQUAD)(rdb->parts[confirmed_part].high_cyl + 1) * mw2 / total));
+
+                                visually_changed = (lo_px_orig != lo_px_new) ||
+                                                   (hi_px_orig != hi_px_new);
+                                if (!visually_changed) {
+                                    rdb->parts[confirmed_part].low_cyl  = drag_orig_lo;
+                                    rdb->parts[confirmed_part].high_cyl = drag_orig_hi;
+                                }
+                            }
+
                             /* Only ask if something actually changed */
-                            if (rdb->parts[confirmed_part].low_cyl  != drag_orig_lo ||
-                                rdb->parts[confirmed_part].high_cyl != drag_orig_hi)
+                            if (visually_changed)
                             {
                                 struct EasyStruct es;
                                 char msg[256];
@@ -2798,15 +2829,29 @@ BOOL partview_run(const char *devname, ULONG unit)
 
                 case IDCMP_MOUSEMOVE:
                     if (drag_part >= 0 && rdb && rdb->valid) {
-                        WORD  mx2   = bx + 1;
                         UWORD mw2   = bw - 2;
                         ULONG total = rdb->hi_cyl + 1;
-                        LONG  dx    = (LONG)(mouse_x - (WORD)mx2);
+                        LONG  dpx   = (LONG)(mouse_x - drag_anchor_x);
+                        LONG  dcyl;
                         ULONG new_cyl;
 
-                        if (dx < 0)          dx = 0;
-                        if (dx >= (LONG)mw2) dx = (LONG)(mw2 - 1);
-                        new_cyl = (ULONG)((UQUAD)(ULONG)dx * total / (ULONG)mw2);
+                        /* Anchor-relative delta, not an absolute pixel->cylinder
+                           mapping: many cylinders share one screen pixel, so an
+                           absolute mapping doesn't round-trip - releasing back at
+                           the exact starting pixel could land on a different
+                           cylinder than drag_orig_hi and falsely report a change.
+                           A delta from the anchor guarantees dpx==0 -> dcyl==0. */
+                        if (mw2 > 0)
+                            dcyl = (LONG)((UQUAD)(ULONG)(dpx < 0 ? -dpx : dpx)
+                                          * total / (ULONG)mw2);
+                        else
+                            dcyl = 0;
+                        if (dpx < 0) dcyl = -dcyl;
+
+                        if (dcyl < 0 && (ULONG)(-dcyl) > drag_anchor_cyl)
+                            new_cyl = 0;
+                        else
+                            new_cyl = (ULONG)((LONG)drag_anchor_cyl + dcyl);
                         if (new_cyl < drag_min) new_cyl = drag_min;
                         if (new_cyl > drag_max) new_cyl = drag_max;
 
@@ -3311,6 +3356,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
                                             ix, iy, iw, bx, by, bw, bh,
                                             hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                refresh_all_gadgets(win, glist);
                             }
                         }
                         break;
