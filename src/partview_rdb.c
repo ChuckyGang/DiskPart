@@ -207,7 +207,7 @@ void pv_export_mountlist(struct Window *win, struct BlockDev *bd,
     }
 }
 
-void rdb_restore_block(struct Window *win, struct BlockDev *bd)
+BOOL rdb_restore_block(struct Window *win, struct BlockDev *bd)
 {
     struct EasyStruct es;
     UBYTE *buf;
@@ -221,7 +221,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
-        return;
+        return FALSE;
     }
 
     /* Prominent warning before doing anything else */
@@ -229,7 +229,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
     es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE_WARN);
     es.es_TextFormat=(UBYTE*)GS(MSG_RDB_RESTORE_WARN_BODY);
     es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_YES_RESTORE_CANCEL);
-    if (EasyRequest(win, &es, NULL) != 1) return;
+    if (EasyRequest(win, &es, NULL) != 1) return FALSE;
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
@@ -237,7 +237,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
-        return;
+        return FALSE;
     }
 
     {
@@ -258,7 +258,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
             }
             FreeAslRequest(fr);
         }
-        if (!chosen) return;
+        if (!chosen) return FALSE;
     }
 
     fh = Open((UBYTE *)load_path, MODE_OLDFILE);
@@ -268,7 +268,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_OPEN_BACKUP);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
-        return;
+        return FALSE;
     }
 
     Seek(fh, 0, OFFSET_END);
@@ -281,11 +281,11 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BACKUP_SIZE_MISMATCH);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
-        return;
+        return FALSE;
     }
 
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { Close(fh); return; }
+    if (!buf) { Close(fh); return FALSE; }
 
     if (Read(fh, buf, fsize) != fsize) {
         Close(fh); FreeVec(buf);
@@ -294,7 +294,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILE_READ_ERROR);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
-        return;
+        return FALSE;
     }
     Close(fh);
 
@@ -306,7 +306,7 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
       es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE_FINAL);
       es.es_TextFormat=(UBYTE*)msg;
       es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_WRITE_IT_CANCEL);
-      if (EasyRequest(win, &es, NULL) != 1) { FreeVec(buf); return; } }
+      if (EasyRequest(win, &es, NULL) != 1) { FreeVec(buf); return FALSE; } }
 
     if (!BlockDev_WriteBlock(bd, 0, buf)) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
@@ -314,14 +314,16 @@ void rdb_restore_block(struct Window *win, struct BlockDev *bd)
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_WRITE_BLOCK_FAILED);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
         EasyRequest(win, &es, NULL);
-    } else {
-        es.es_StructSize=sizeof(es); es.es_Flags=0;
-        es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
-        es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCK_RESTORED);
-        es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL);
+        FreeVec(buf);
+        return FALSE;
     }
+    es.es_StructSize=sizeof(es); es.es_Flags=0;
+    es.es_Title=(UBYTE*)GS(MSG_RDB_RESTORE_TITLE);
+    es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCK_RESTORED);
+    es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
+    EasyRequest(win, &es, NULL);
     FreeVec(buf);
+    return TRUE;
 }
 
 /* ------------------------------------------------------------------ */
@@ -478,7 +480,7 @@ void rdb_backup_extended(struct Window *win, struct BlockDev *bd,
     FreeVec(buf);
 }
 
-void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
+BOOL rdb_restore_extended(struct Window *win, struct BlockDev *bd)
 {
     struct EasyStruct es;
     UBYTE *buf;
@@ -493,21 +495,21 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_DEV_NOT_ACCESSIBLE);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
 
     es.es_StructSize=sizeof(es); es.es_Flags=0;
     es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE_WARN);
     es.es_TextFormat=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_WARN_BODY);
     es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_YES_RESTORE_CANCEL);
-    if (EasyRequest(win, &es, NULL) != 1) return;
+    if (EasyRequest(win, &es, NULL) != 1) return FALSE;
 
     if (!AslBase) {
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_ASL_UNAVAIL);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
 
     { struct FileRequester *fr; BOOL chosen = FALSE;
@@ -526,7 +528,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
           }
           FreeAslRequest(fr);
       }
-      if (!chosen) return;
+      if (!chosen) return FALSE;
     }
 
     fh = Open((UBYTE *)load_path, MODE_OLDFILE);
@@ -535,7 +537,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_CANT_OPEN_BACKUP);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
 
     /* Get file size (Seek to end returns old pos; seek back returns end pos = size) */
@@ -548,7 +550,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILE_TOO_SMALL);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
 
     if (Read(fh, hdr, ERDB_HDR_SZ) != ERDB_HDR_SZ ||
@@ -558,7 +560,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_NOT_VALID_EXT_BACKUP);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
     block_lo   = hdr[2];
     block_size = hdr[3];
@@ -570,7 +572,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_BLOCKSIZE_MISMATCH);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
     if (fsize != (LONG)(ERDB_HDR_SZ + num_blocks * block_size)) {
         Close(fh);
@@ -578,7 +580,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
         es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
         es.es_TextFormat=(UBYTE*)GS(MSG_RDB_FILESIZE_MISMATCH_HDR);
         es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-        EasyRequest(win, &es, NULL); return;
+        EasyRequest(win, &es, NULL); return FALSE;
     }
 
     /* Final confirmation */
@@ -592,11 +594,11 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
       es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE_FINAL);
       es.es_TextFormat=(UBYTE*)msg;
       es.es_GadgetFormat=(UBYTE*)GS(MSG_RDB_WRITE_IT_CANCEL);
-      if (EasyRequest(win, &es, NULL) != 1) { Close(fh); return; }
+      if (EasyRequest(win, &es, NULL) != 1) { Close(fh); return FALSE; }
     }
 
     buf = (UBYTE *)AllocVec(bd->block_size, MEMF_PUBLIC | MEMF_CLEAR);
-    if (!buf) { Close(fh); return; }
+    if (!buf) { Close(fh); return FALSE; }
 
     for (blk = 0; blk < num_blocks; blk++) {
         if (Read(fh, buf, (LONG)block_size) != (LONG)block_size) {
@@ -605,7 +607,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
             es.es_Title=(UBYTE*)GS(MSG_RDB_EXT_RESTORE_TITLE);
             es.es_TextFormat=(UBYTE*)GS(MSG_RDB_READ_ERR_BACKUP);
             es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
-            EasyRequest(win, &es, NULL); return;
+            EasyRequest(win, &es, NULL); return FALSE;
         }
         if (!BlockDev_WriteBlock(bd, block_lo + blk, buf)) {
             Close(fh); FreeVec(buf);
@@ -616,7 +618,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
               es.es_TextFormat=(UBYTE*)msg;
               es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
               EasyRequest(win, &es, NULL); }
-            return;
+            return FALSE;
         }
     }
     Close(fh); FreeVec(buf);
@@ -625,6 +627,7 @@ void rdb_restore_extended(struct Window *win, struct BlockDev *bd)
     es.es_TextFormat=(UBYTE*)GS(MSG_RDB_EXT_RESTORED_OK);
     es.es_GadgetFormat=(UBYTE*)GS(MSG_OK);
     EasyRequest(win, &es, NULL);
+    return TRUE;
 }
 
 /* ------------------------------------------------------------------ */

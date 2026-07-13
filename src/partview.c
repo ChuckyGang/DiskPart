@@ -434,6 +434,19 @@ static void offer_reboot(struct Window *win, const char *msg)
     }
 }
 
+/* Cycle the device open/close after a raw block-level write (RDB restore)
+   before re-reading it.  Some drivers (e.g. A3000 scsi.device - see the
+   TD_WRITE64 comment in BlockDev_WriteBlock()) keep a read cache tied to
+   the open device instance, so re-reading the just-written blocks on the
+   SAME still-open handle can silently return the pre-write data; closing
+   and reopening the device is what actually drops that cache. */
+static struct BlockDev *reopen_after_raw_write(struct BlockDev *bd,
+                                                const char *devname, ULONG unit)
+{
+    if (bd) BlockDev_Close(bd);
+    return BlockDev_Open(devname, unit);
+}
+
 static void build_part_list(struct RDBInfo *rdb, WORD sel)
 {
     UWORD i;
@@ -2272,12 +2285,52 @@ BOOL partview_run(const char *devname, ULONG unit)
                         /* Advanced menu */
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 0)
                             rdb_backup_block(win, bd, rdb);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 1)
-                            rdb_restore_block(win, bd);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 1) {
+                            if (rdb_restore_block(win, bd)) {
+                                bd = reopen_after_raw_write(bd, devname, unit);
+                                RDB_FreeCode(rdb);
+                                memset(rdb, 0, sizeof(*rdb));
+                                if (bd) {
+                                    RDB_Read(bd, rdb);
+                                    if (MBR_Read(bd, &mbr_store)) s_mbr = &mbr_store;
+                                    else s_mbr = NULL;
+                                } else {
+                                    s_mbr = NULL;
+                                }
+                                if (sel >= (WORD)rdb->num_parts)
+                                    sel = (WORD)rdb->num_parts - 1;
+                                needs_reboot = TRUE;
+                                refresh_listview(win, lv_gad, rdb, sel);
+                                draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                            ix, iy, iw, bx, by, bw, bh,
+                                            hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                refresh_all_gadgets(win, glist);
+                            }
+                        }
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 3)
                             rdb_backup_extended(win, bd, rdb);
-                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 4)
-                            rdb_restore_extended(win, bd);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 4) {
+                            if (rdb_restore_extended(win, bd)) {
+                                bd = reopen_after_raw_write(bd, devname, unit);
+                                RDB_FreeCode(rdb);
+                                memset(rdb, 0, sizeof(*rdb));
+                                if (bd) {
+                                    RDB_Read(bd, rdb);
+                                    if (MBR_Read(bd, &mbr_store)) s_mbr = &mbr_store;
+                                    else s_mbr = NULL;
+                                } else {
+                                    s_mbr = NULL;
+                                }
+                                if (sel >= (WORD)rdb->num_parts)
+                                    sel = (WORD)rdb->num_parts - 1;
+                                needs_reboot = TRUE;
+                                refresh_listview(win, lv_gad, rdb, sel);
+                                draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
+                                            ix, iy, iw, bx, by, bw, bh,
+                                            hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                refresh_all_gadgets(win, glist);
+                            }
+                        }
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 6)
                             rdb_verify_block(win, bd, rdb);
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 7)

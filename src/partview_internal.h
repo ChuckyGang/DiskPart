@@ -57,10 +57,12 @@ BOOL  filesystem_manager_dialog(struct RDBInfo *rdb);
 
 void  rdb_backup_block   (struct Window *win, struct BlockDev *bd,
                           struct RDBInfo *rdb);
-void  rdb_restore_block  (struct Window *win, struct BlockDev *bd);
+/* Return TRUE only if the RDB block(s) were actually written to disk,
+   so callers know when the in-memory RDBInfo needs to be re-read. */
+BOOL  rdb_restore_block  (struct Window *win, struct BlockDev *bd);
 void  rdb_backup_extended(struct Window *win, struct BlockDev *bd,
                           struct RDBInfo *rdb);
-void  rdb_restore_extended(struct Window *win, struct BlockDev *bd);
+BOOL  rdb_restore_extended(struct Window *win, struct BlockDev *bd);
 void  rdb_view_block     (struct Window *win, struct BlockDev *bd,
                           struct RDBInfo *rdb);
 void  rdb_raw_scan       (struct Window *win, struct BlockDev *bd);
