@@ -29,203 +29,9 @@
 #include "imagecopy.h"
 #include "locale_support.h"
 #include "partview_internal.h"
-
-#define IMG_GID_CANCEL  100
+#include "progresswin.h"
 
 extern struct Library *AslBase;
-
-/* ------------------------------------------------------------------ */
-/* Small progress window: one status line that gets repainted in      */
-/* place every callback. No close gadget, no buttons - caller owns    */
-/* the lifecycle (open before the copy, close after).                 */
-/* ------------------------------------------------------------------ */
-
-struct ImgProgress {
-    struct Window  *win;
-    APTR            vi;
-    struct Gadget  *glist;
-    struct Gadget  *cancel_gad;
-    UWORD           x;          /* text x */
-    UWORD           y;          /* text baseline y */
-    char            title[80];  /* Intuition keeps a pointer */
-    ULONG           last_pct;   /* last percentage drawn (skip duplicates) */
-    BOOL            cancelled;  /* set by cancel button / close gadget */
-};
-
-static void prog_open(struct ImgProgress *p, const char *title)
-{
-    struct Screen *scr;
-    UWORD fh, bor_l, bor_t, bor_r, bor_b, pad, btn_h, btn_w;
-    UWORD win_w, win_h, status_y, btn_y;
-
-    memset(p, 0, sizeof(*p));
-    strncpy(p->title, title, sizeof(p->title) - 1);
-    p->last_pct = 0xFFFFFFFFUL;
-
-    scr = LockPubScreen(NULL);
-    if (!scr) return;
-
-    p->vi = GetVisualInfoA(scr, NULL);
-    if (!p->vi) { UnlockPubScreen(NULL, scr); return; }
-
-    fh    = scr->Font->ta_YSize;
-    bor_l = (UWORD)scr->WBorLeft;
-    bor_t = (UWORD)scr->WBorTop + fh + 1;
-    bor_r = (UWORD)scr->WBorRight;
-    bor_b = (UWORD)scr->WBorBottom;
-    pad   = 8;
-    btn_h = fh + 6;
-    btn_w = 80;
-    win_w = 380;
-    status_y = bor_t + pad;                 /* status text top */
-    btn_y    = status_y + (fh + 4) + pad;   /* cancel button top */
-    win_h    = btn_y + btn_h + pad + bor_b;
-
-    {
-        struct Gadget *gctx;
-        if (CreateContext(&p->glist) == NULL) {
-            FreeVisualInfo(p->vi); p->vi = NULL;
-            UnlockPubScreen(NULL, scr);
-            return;
-        }
-        gctx = p->glist;
-        {
-            struct NewGadget ng;
-            struct TagItem   bt[] = { { TAG_DONE, 0 } };
-            memset(&ng, 0, sizeof(ng));
-            ng.ng_VisualInfo = p->vi;
-            ng.ng_TextAttr   = scr->Font;
-            ng.ng_LeftEdge   = (win_w - btn_w) / 2;
-            ng.ng_TopEdge    = btn_y;
-            ng.ng_Width      = btn_w;
-            ng.ng_Height     = btn_h;
-            ng.ng_GadgetText = GS(MSG_CANCEL);
-            ng.ng_GadgetID   = IMG_GID_CANCEL;
-            p->cancel_gad = CreateGadgetA(BUTTON_KIND, gctx, &ng, bt);
-            if (!p->cancel_gad) {
-                FreeGadgets(p->glist); p->glist = NULL;
-                FreeVisualInfo(p->vi); p->vi = NULL;
-                UnlockPubScreen(NULL, scr);
-                return;
-            }
-        }
-    }
-
-    {
-        struct TagItem win_tags[] = {
-            { WA_Left,      (ULONG)((scr->Width  - win_w) / 2) },
-            { WA_Top,       (ULONG)((scr->Height - win_h) / 2) },
-            { WA_Width,     win_w  },
-            { WA_Height,    win_h  },
-            { WA_Title,     (ULONG)p->title },
-            { WA_Gadgets,   (ULONG)p->glist },
-            { WA_PubScreen, (ULONG)scr },
-            { WA_IDCMP,     IDCMP_GADGETUP | IDCMP_CLOSEWINDOW |
-                            IDCMP_VANILLAKEY | IDCMP_REFRESHWINDOW },
-            { WA_Flags,     WFLG_DRAGBAR | WFLG_DEPTHGADGET |
-                            WFLG_CLOSEGADGET | WFLG_SMART_REFRESH |
-                            WFLG_ACTIVATE },
-            { TAG_DONE,     0 }
-        };
-        p->win = OpenWindowTagList(NULL, win_tags);
-    }
-
-    UnlockPubScreen(NULL, scr);
-    if (!p->win) {
-        if (p->glist) { FreeGadgets(p->glist); p->glist = NULL; }
-        if (p->vi)    { FreeVisualInfo(p->vi); p->vi = NULL; }
-        return;
-    }
-    GT_RefreshWindow(p->win, NULL);
-
-    p->x = bor_l + pad;
-    p->y = status_y +
-           (p->win->RPort->Font ? p->win->RPort->Font->tf_Baseline : (UWORD)(fh - 1));
-}
-
-static void prog_close(struct ImgProgress *p)
-{
-    if (!p) return;
-    if (p->win) {
-        RemoveGList(p->win, p->glist, -1);
-        CloseWindow(p->win);
-        p->win = NULL;
-    }
-    if (p->glist) { FreeGadgets(p->glist); p->glist = NULL; }
-    if (p->vi)    { FreeVisualInfo(p->vi); p->vi = NULL; }
-}
-
-/* Drain any pending IntuiMessages, watching for cancel triggers
- * (Cancel button, close gadget, or ESC key). Sets p->cancelled if any
- * trigger fires. Non-blocking - returns immediately if no messages. */
-static void prog_check_input(struct ImgProgress *p)
-{
-    struct IntuiMessage *imsg;
-    if (!p->win) return;
-    while ((imsg = GT_GetIMsg(p->win->UserPort)) != NULL) {
-        ULONG          iclass = imsg->Class;
-        UWORD          code   = imsg->Code;
-        struct Gadget *gad    = (struct Gadget *)imsg->IAddress;
-        GT_ReplyIMsg(imsg);
-        switch (iclass) {
-        case IDCMP_GADGETUP:
-            if (gad && gad->GadgetID == IMG_GID_CANCEL)
-                p->cancelled = TRUE;
-            break;
-        case IDCMP_CLOSEWINDOW:
-            p->cancelled = TRUE;
-            break;
-        case IDCMP_VANILLAKEY:
-            if (code == 27 /* ESC */) p->cancelled = TRUE;
-            break;
-        case IDCMP_REFRESHWINDOW:
-            GT_BeginRefresh(p->win);
-            GT_EndRefresh(p->win, TRUE);
-            break;
-        }
-    }
-}
-
-/* ImageCopy progress callback: redraw the status line if the percentage
- * advanced (or unconditionally when total is unknown). Called from
- * inside ImageCopy_*; runs synchronously in the same task.
- *
- * Returns FALSE if the user clicked Cancel / closed the window / pressed
- * ESC, which tells ImageCopy_* to abort cleanly. */
-static BOOL prog_cb(void *ud, ULONG cur, ULONG total)
-{
-    struct ImgProgress *p = (struct ImgProgress *)ud;
-    char  line[96];
-    UWORD len, pad;
-
-    if (!p->win) return FALSE;
-
-    /* Drain pending Intuition messages first so cancel is responsive
-     * even when redrawing is throttled by the percentage check. */
-    prog_check_input(p);
-    if (p->cancelled) return FALSE;
-
-    if (total > 0) {
-        ULONG pct = (cur * 100UL) / total;
-        if (cur != total && pct == p->last_pct) return TRUE;
-        p->last_pct = pct;
-        DP_SNPRINTF(line, GS(MSG_IMG_PROGRESS_PCT_FMT),
-                (unsigned long)cur, (unsigned long)total,
-                (unsigned long)pct);
-    } else {
-        DP_SNPRINTF(line, GS(MSG_IMG_PROGRESS_COPIED_FMT), (unsigned long)cur);
-    }
-
-    /* Pad to 60 chars so any previous longer text is fully erased. */
-    len = (UWORD)strlen(line);
-    for (pad = len; pad < 60 && pad < sizeof(line) - 1; pad++) line[pad] = ' ';
-    line[(pad < sizeof(line)) ? pad : sizeof(line) - 1] = '\0';
-
-    SetAPen(p->win->RPort, 1);
-    Move(p->win->RPort, p->x, p->y);
-    Text(p->win->RPort, line, strlen(line));
-    return TRUE;
-}
 
 /* ------------------------------------------------------------------ */
 /* Dump current disk -> image file                                     */
@@ -298,18 +104,18 @@ void image_dump_disk(struct Window *win, struct BlockDev *bd)
     }
 
     {
-        static struct ImgProgress prog;
+        static struct ProgressWin prog;
         char  errbuf[80];
         BOOL  ok;
         char  done_msg[300];
 
         snprintf(prog.title, sizeof(prog.title), GS(MSG_IMG_DUMP_PROGRESS_TITLE_FMT), save_path);
-        prog_open(&prog, prog.title);
+        ProgressWin_Open(&prog, prog.title);
 
         errbuf[0] = '\0';
         ok = ImageCopy_DiskToFile(bd, save_path, 0,
-                                  prog_cb, &prog, errbuf, sizeof(errbuf));
-        prog_close(&prog);
+                                  ProgressWin_Callback, &prog, errbuf, sizeof(errbuf));
+        ProgressWin_Close(&prog);
 
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)GS(MSG_IMG_DUMP_TITLE);
@@ -383,18 +189,18 @@ void image_restore_disk(struct Window *win, struct BlockDev *bd)
     }
 
     {
-        static struct ImgProgress prog;
+        static struct ProgressWin prog;
         char  errbuf[80];
         BOOL  ok;
         char  done_msg[300];
 
         snprintf(prog.title, sizeof(prog.title), GS(MSG_IMG_RESTORE_PROGRESS_TITLE_FMT), load_path);
-        prog_open(&prog, prog.title);
+        ProgressWin_Open(&prog, prog.title);
 
         errbuf[0] = '\0';
         ok = ImageCopy_FileToDisk(bd, load_path,
-                                  prog_cb, &prog, errbuf, sizeof(errbuf));
-        prog_close(&prog);
+                                  ProgressWin_Callback, &prog, errbuf, sizeof(errbuf));
+        ProgressWin_Close(&prog);
 
         es.es_StructSize=sizeof(es); es.es_Flags=0;
         es.es_Title=(UBYTE*)GS(MSG_IMG_RESTORE_TITLE);

@@ -2355,6 +2355,12 @@ Image is larger than the destination.
 MSG_IC_IMAGE_EMPTY
 Image file is empty.
 ;
+MSG_IC_DEST_TOO_SMALL
+Destination disk is smaller than the source disk.
+;
+MSG_IC_BLOCK_SIZE_MISMATCH
+Source and destination disks have different block sizes.
+;
 ;
 ;==========================================================================
 ; partview_rdb.c
@@ -3346,6 +3352,12 @@ Yes (MBR+RDB)|RDB only
 MSG_PV_MENU_MBR_ADD
 Add MBR Partition...
 ;
+MSG_PV_MENU_COPY_WHOLE_DISK
+Copy Whole Disk to Another Disk...
+;
+MSG_PV_MENU_COPY_PARTITION
+Copy Partition to Another Disk...
+;
 MSG_MBR_DLG_ADD_TITLE
 Add MBR Partition
 ;
@@ -3527,4 +3539,52 @@ This device is not a hard disk (CD-ROM, tape, or similar). Partitioning is not s
 ;
 MSG_SCR_NOT_A_HARDDISK
 This device is not a hard disk (CD-ROM, tape, or similar). Partitioning is not supported.
+;
+;==========================================================================
+; partview_diskcopy.c
+;==========================================================================
+MSG_DC_TITLE
+Copy Whole Disk to Another Disk
+;
+MSG_DC_WARN_TITLE
+Copy Whole Disk to Another Disk - WARNING
+;
+MSG_DC_WARN_BODY
+This copies the ENTIRE disk block-for-block onto\nanother disk of your choosing.\n\nRDB, MBR, all partitions and filesystems on the\nDESTINATION disk will be permanently OVERWRITTEN.\n\nYou will be asked to pick the destination disk on\nthe next screen.\n\nContinue?
+;
+MSG_DC_SELF_BODY
+Cannot copy a disk onto itself.\nPlease choose a different destination disk.
+;
+MSG_DC_OPEN_FAIL_FMT
+Could not open destination disk:\n%s
+;
+MSG_DC_SIZE_MISMATCH_FMT
+Destination disk (%s) is smaller than the\nsource disk (%s).\n\nChoose a destination disk at least as large as\nthe source.
+;
+MSG_DC_BLOCKSIZE_MISMATCH
+Source and destination disks use different\nblock sizes and cannot be copied directly.
+;
+MSG_DC_DEVUNIT_FMT
+%s unit %lu  (%s)
+;
+MSG_DC_CONFIRM_TITLE
+Copy Whole Disk - FINAL WARNING
+;
+MSG_DC_CONFIRM_BODY_FMT
+About to ERASE and overwrite:\n\n  %s\n\nwith the full contents of:\n\n  %s\n\nThis cannot be undone.  Are you absolutely sure?
+;
+MSG_DC_CONFIRM_GADGETS
+Yes, copy|Cancel
+;
+MSG_DC_PROGRESS_TITLE_FMT
+Copying to %s
+;
+MSG_DC_OK
+Disk copy complete.\n\nReboot may be required for the new partition\nlayout on the destination disk to be picked up,\nif it was already mounted.
+;
+MSG_DC_CANCELLED
+Copy cancelled.\n\nWARNING: the destination disk has been\npartially overwritten and is in an\ninconsistent state.
+;
+MSG_DC_FAILED_FMT
+Copy failed:\n%s
 ;

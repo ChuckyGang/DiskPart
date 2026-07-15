@@ -202,3 +202,74 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
     Close(fh);
     return TRUE;
 }
+
+BOOL ImageCopy_DiskToDisk(struct BlockDev *src, struct BlockDev *dst,
+                          ImageCopyCb cb, void *ud,
+                          char *errbuf, ULONG ebsz)
+{
+    UBYTE *buf;
+    ULONG  total_blocks;
+    ULONG  dst_blocks;
+    ULONG  block;
+
+    if (!src || !dst) {
+        set_err(errbuf, ebsz, GS(MSG_IC_BAD_PARAMETERS));
+        return FALSE;
+    }
+
+    if (src->block_size != dst->block_size) {
+        set_err(errbuf, ebsz, GS(MSG_IC_BLOCK_SIZE_MISMATCH));
+        return FALSE;
+    }
+
+    total_blocks = (ULONG)(src->total_bytes / src->block_size);
+    if (total_blocks == 0) {
+        set_err(errbuf, ebsz, GS(MSG_IC_ZERO_BLOCKS));
+        return FALSE;
+    }
+
+    dst_blocks = (ULONG)(dst->total_bytes / dst->block_size);
+    if (dst_blocks < total_blocks) {
+        set_err(errbuf, ebsz, GS(MSG_IC_DEST_TOO_SMALL));
+        return FALSE;
+    }
+
+    buf = (UBYTE *)AllocVec(IMG_BATCH_BLOCKS * src->block_size, MEMF_PUBLIC);
+    if (!buf) {
+        set_err(errbuf, ebsz, GS(MSG_IC_OUT_OF_MEMORY));
+        return FALSE;
+    }
+
+    for (block = 0; block < total_blocks; ) {
+        ULONG batch = total_blocks - block;
+        ULONG i;
+        if (batch > IMG_BATCH_BLOCKS) batch = IMG_BATCH_BLOCKS;
+
+        /* Per-block reads - zero unreadable blocks rather than abort,
+         * matching ImageCopy_DiskToFile() behaviour. */
+        for (i = 0; i < batch; i++) {
+            UBYTE *p = buf + i * src->block_size;
+            if (!BlockDev_ReadBlock(src, block + i, p))
+                memset(p, 0, src->block_size);
+        }
+
+        for (i = 0; i < batch; i++) {
+            if (!BlockDev_WriteBlock(dst, block + i,
+                                     buf + i * src->block_size)) {
+                FreeVec(buf);
+                set_err(errbuf, ebsz, GS(MSG_IC_WRITE_ERROR));
+                return FALSE;
+            }
+        }
+
+        block += batch;
+        if (cb && !cb(ud, block, total_blocks)) {
+            FreeVec(buf);
+            set_err(errbuf, ebsz, GS(MSG_IC_CANCELLED));
+            return FALSE;
+        }
+    }
+
+    FreeVec(buf);
+    return TRUE;
+}

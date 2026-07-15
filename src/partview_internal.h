@@ -87,6 +87,17 @@ void  image_dump_disk    (struct Window *win, struct BlockDev *bd);
 void  image_restore_disk (struct Window *win, struct BlockDev *bd);
 
 /* ------------------------------------------------------------------ */
+/* partview_diskcopy.c                                                  */
+/* ------------------------------------------------------------------ */
+
+/* Copies bd (cur_devname/cur_unit, for display and self-copy guarding)
+   block-for-block onto a destination disk the user picks via the same
+   device/unit selector main.c uses at startup. Destructive to the
+   destination - confirmed twice before anything is written. */
+void  copy_whole_disk_to_disk(struct Window *win, struct BlockDev *bd,
+                              const char *cur_devname, ULONG cur_unit);
+
+/* ------------------------------------------------------------------ */
 /* partview_zero.c                                                      */
 /* ------------------------------------------------------------------ */
 

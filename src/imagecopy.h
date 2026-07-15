@@ -52,4 +52,14 @@ BOOL ImageCopy_FileToDisk(struct BlockDev *bd, const char *path,
                           ImageCopyCb cb, void *ud,
                           char *errbuf, ULONG ebsz);
 
+/* Copy every block of src (block 0 upward) directly onto dst, block for
+ * block - RDB, MBR, all partitions and filesystems on dst are overwritten.
+ * src and dst must have the same block_size, and dst must be at least as
+ * large as src (checked up front; returns FALSE with errbuf set otherwise).
+ * Unreadable source blocks are zero-filled rather than aborting the copy,
+ * matching ImageCopy_DiskToFile(). Returns TRUE on success. */
+BOOL ImageCopy_DiskToDisk(struct BlockDev *src, struct BlockDev *dst,
+                          ImageCopyCb cb, void *ud,
+                          char *errbuf, ULONG ebsz);
+
 #endif /* IMAGECOPY_H */
