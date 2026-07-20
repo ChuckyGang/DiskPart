@@ -147,26 +147,25 @@ BOOL PartClone_ValidateFootprint(const struct RDBInfo *drdb,
                                  ULONG low, ULONG high, ULONG h, ULONG s,
                                  int skip_idx, char *err_buf, ULONG ebsz)
 {
-    ULONG bpc = h * s;
-    ULONG new_lo = low * bpc;
-    ULONG new_hi = (high + 1) * bpc;   /* exclusive */
-    ULONG disk_blocks = drdb->cylinders * drdb->heads * drdb->sectors;
     UWORD i;
+    (void)h; (void)s;
 
-    if (high < low || (high + 1) * bpc > disk_blocks) {
+    /* Mirror RDB_Write's own accept/reject rules EXACTLY (cylinder space,
+       against the RDB's usable lo_cyl/hi_cyl), so a placement this function
+       approves can never be bounced by RDB_Write after the data is already
+       copied - which is what happened when this checked physical blocks
+       against total cylinders instead of the RDB's reserved hi_cyl. */
+    if (high < low ||
+        (drdb->lo_cyl > 0 && low  < drdb->lo_cyl) ||
+        (drdb->hi_cyl > 0 && high > drdb->hi_cyl)) {
         snprintf(err_buf, ebsz, GS(MSG_PC_OVERLAP_FMT),
                  "disk end", (unsigned long)low, (unsigned long)high);
         return FALSE;
     }
     for (i = 0; i < drdb->num_parts; i++) {
         const struct PartInfo *p = &drdb->parts[i];
-        ULONG ph, ps, plo, phi;
         if ((int)i == skip_idx) continue;
-        ph  = p->heads   > 0 ? p->heads   : drdb->heads;
-        ps  = p->sectors > 0 ? p->sectors : drdb->sectors;
-        plo = p->low_cyl * ph * ps;
-        phi = (p->high_cyl + 1) * ph * ps;   /* exclusive */
-        if (new_lo < phi && plo < new_hi) {
+        if (low <= p->high_cyl && p->low_cyl <= high) {
             snprintf(err_buf, ebsz, GS(MSG_PC_OVERLAP_FMT),
                      p->drive_name, (unsigned long)p->low_cyl,
                      (unsigned long)p->high_cyl);
