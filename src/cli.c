@@ -1524,7 +1524,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
 
     switch (fskind) {
         case CLI_GROW_SFS:
-            ok = SFS_GrowPartition(bd, &s_rdb, pi, old_hi,
+            ok = SFS_GrowPartition(bd, &s_rdb, pi, old_hi, 0,
                                    outbuf, cli_grow_progress, NULL);
             break;
         case CLI_GROW_PFS:

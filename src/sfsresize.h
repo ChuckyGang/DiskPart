@@ -35,9 +35,17 @@ BOOL SFS_IsSupportedType(ULONG dostype);
  * progress_ud : opaque value passed to progress_fn.
  * Returns TRUE on success.
  */
+/* new_total_ovr : 0 = derive the new SFS-block count from the partition
+ *                 cylinders (normal grow); non-zero = force the new SFS
+ *                 total to EXACTLY this many SFS blocks.  The clone path
+ *                 passes the destination partition's exact SFS-block count
+ *                 (dst device blocks / sectors-per-block), because a cloned
+ *                 SFS's stored total need not divide cleanly into the dest
+ *                 geometry's cylinders, and SFS refuses to mount ("Un-
+ *                 initialized") unless its total matches the DosEnvec. */
 BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        const struct PartInfo *pi, ULONG old_high_cyl,
-                       char *err_buf,
+                       ULONG new_total_ovr, char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud);
 
 /*
