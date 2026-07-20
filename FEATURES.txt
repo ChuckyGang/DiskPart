@@ -120,9 +120,13 @@ scripting interface.
    overwrite, or "[ Create a new partition ]".  The destination keeps its
    own geometry and location; the source's blocks are dropped in and the
    filesystem type adopted (SFS root offsets fixed up, PFS3 size flag
-   cleared).  SFS and PFS3 (self-describing) can clone into any large
-   enough partition on any geometry; FFS/OFS needs an exactly-same-size
-   destination (its size is baked into its layout).
+   cleared).  All three filesystems clone into any large-enough partition
+   on any geometry - SFS/PFS3 self-describe their size, and FFS/OFS is
+   grown to fill the destination after the copy.  The cloned volume is
+   renamed "CL-<old>" so it does not clash with the source's label, and
+   when the destination disk has no driver for the cloned filesystem the
+   driver is copied from the source RDB (GUI asks first, CLI automatic)
+   so the clone mounts without that filesystem being resident.
  * Dump a partition to a self-describing file and restore it (CLI PARTOUT/
    PARTIN, script PARTOUT/PARTIN, GUI Advanced > Dump/Restore Partition).
    The file carries a header with the full DosEnvec, so a restore recreates
