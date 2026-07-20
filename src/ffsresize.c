@@ -658,13 +658,23 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             }
             {
                 ULONG off = (new_root - reserved) % bpbm;
-                /* We do not abort if the target block is already marked used.
-                   On a second grow the block at new_root may be an FFS bm block
-                   written by the validator after the previous grow.  Since we
-                   set bm_flag=0, FFS will rebuild the bitmap from the directory
-                   tree after reboot and will mark new_root USED (it IS the root).
-                   Anything previously at that position is superseded. */
-                BM_SETUSED(bm_buf, off);  /* unconditional: protect new_root */
+                /* REFUSE an occupied relocation target (2026-07-20).  This
+                   used to "supersede" whatever sat at new_root - the fuzz
+                   loop proved that corrupts data: a small grow of a well-
+                   filled partition computes a new centre that lands on file
+                   data, and the old code overwrote that block with the
+                   relocated root (fail_it0: sub/f5.bin lost a block).  The
+                   old rationale (a stale validator-written bm block at the
+                   target) was also unsafe: the on-disk chain still points
+                   there, so the validator would rebuild bitmap content
+                   over the root.  Same remedy as the shrink: pick a
+                   slightly different size. */
+                if (new_root != root_blk && !BM_TESTFREE(bm_buf, off)) {
+                    sprintf(err_buf, GS(MSG_FFS_SHR_TARGET_USED_FMT),
+                            (unsigned long)new_root);
+                    goto done;
+                }
+                BM_SETUSED(bm_buf, off);  /* protect new_root */
             }
             /* If root moves AND the old position is in the same bm block,
                free it in the same pass. */

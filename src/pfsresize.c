@@ -446,10 +446,78 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         }
 
         /* ---------------------------------------------------------------- */
+        /* Unseal pass (2026-07-20): free any allocated-marked bits in the  */
+        /* OLD last bitmap block that now fall inside the grown size.       */
+        /* Freshly formatted pfs3 leaves out-of-range bits FREE, but an     */
+        /* earlier DiskPart SHRINK sealed them - without this, the re-grown */
+        /* region up to that block's coverage end would stay unallocatable  */
+        /* (bits read as used) while blocksfree claims it free.  Bits below */
+        /* cur_disksize are NEVER touched (real allocation state).          */
+        /* Non-fatal: any read/validation hiccup skips the unseal - volumes */
+        /* never shrunk by DiskPart do not need it.                         */
+        if (old_num_bmb > 0 && (reserved_blksize % 512) == 0) {
+            ULONG max_idx = (options & PFS_MODE_SUPERINDEX)
+                            ? (ULONG)PFS_MAX_BITMAPINDEX : 5UL;
+            ULONG useq = old_num_bmb - 1;
+            ULONG uii  = useq / idxperblk;
+            if (uii < max_idx) {
+                UWORD un_phys = (UWORD)(reserved_blksize / 512);
+                ULONG part_lbase = pi->low_cyl * heads * sectors;
+                UBYTE *scr = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC);
+                if (scr) {
+                    ULONG inr = pfs_getl(cluster_buf,
+                                         PFS_RB_BITMAPINDEX + 4 * uii);
+                    if (inr != 0 &&
+                        pfs_read_cluster(bd,
+                            (part_lbase + inr) * phys_per_lblock,
+                            scr, un_phys) &&
+                        pfs_getw(scr, 0) == 0x4D49 /* 'MI' */) {
+                        ULONG bmnr = pfs_getl(scr,
+                                        12 + 4 * (useq % idxperblk));
+                        if (bmnr != 0 &&
+                            pfs_read_cluster(bd,
+                                (part_lbase + bmnr) * phys_per_lblock,
+                                scr, un_phys) &&
+                            pfs_getw(scr, 0) == 0x424D /* 'BM' */ &&
+                            pfs_getl(scr, 8) == useq) {
+                            ULONG changed = 0;
+                            for (ULONG m = 0; m < longsperbmb; m++) {
+                                ULONG b0 = bitmapstart +
+                                           (useq * longsperbmb + m) * 32;
+                                ULONG v  = pfs_getl(scr, 12 + 4 * m);
+                                ULONG nv = v;
+                                for (ULONG k = 0; k < 32; k++) {
+                                    ULONG blk = b0 + k;
+                                    if (blk >= cur_disksize &&
+                                        blk < new_disksize)
+                                        nv |= (1UL << (31u - k));
+                                }
+                                if (nv != v) {
+                                    pfs_setl(scr, 12 + 4 * m, nv);
+                                    changed++;
+                                }
+                            }
+                            if (changed)
+                                (void)pfs_write_cluster(bd,
+                                    (part_lbase + bmnr) * phys_per_lblock,
+                                    scr, un_phys);
+                        }
+                    }
+                    FreeVec(scr);
+                }
+            }
+        }
+
+        /* ---------------------------------------------------------------- */
         /* Phase 5 - update rootblock fields in the cluster buffer          */
         /* ---------------------------------------------------------------- */
-        if (options & PFS_MODE_SIZEFIELD)
-            pfs_setl(cluster_buf, PFS_RB_DISKSIZE, new_disksize);
+        /* disksize is written UNCONDITIONALLY (2026-07-20; used to be
+           MODE_SIZEFIELD-gated).  pfs3 ignores the field once the flag is
+           clear, but DiskPart's own SHRINKINFO/SHRINK read it as the
+           volume size - a second grow after the flag was cleared (by a
+           previous grow or a shrink) left it stale and skewed every later
+           size calculation.  Found by the grow/shrink fuzz loop. */
+        pfs_setl(cluster_buf, PFS_RB_DISKSIZE, new_disksize);
         pfs_setl(cluster_buf, PFS_RB_BLOCKSFREE, blocksfree + delta_blocks);
 
         /* ---------------------------------------------------------------- */
@@ -780,10 +848,9 @@ BOOL PFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 #define PFS_SPROG(msg) do { if (progress_fn) progress_fn(progress_ud,(msg)); } while(0)
     UBYTE  first_sector[512];
     UBYTE *cluster_buf = NULL, *original_buf = NULL;
-    UBYTE *idx_buf = NULL, *bm_buf = NULL, *bm_orig = NULL;
+    UBYTE *idx_buf = NULL, *bm_buf = NULL;
     BOOL   ok = FALSE, did_inhibit = FALSE;
-    BOOL   seal_written = FALSE, cluster_written = FALSE;
-    ULONG  seal_abs = 0;          /* physical sector of the sealed bm block */
+    BOOL   cluster_written = FALSE;
     UWORD  n_phys = 0, cluster_phys = 0;
     char   inh_name[44];
 
@@ -835,8 +902,7 @@ BOOL PFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         original_buf = (UBYTE *)AllocVec(cluster_bytes, MEMF_PUBLIC);
         idx_buf      = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
         bm_buf       = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
-        bm_orig      = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
-        if (!cluster_buf || !original_buf || !idx_buf || !bm_buf || !bm_orig) {
+        if (!cluster_buf || !original_buf || !idx_buf || !bm_buf) {
             sprintf(err_buf, GS(MSG_PFS_OUT_OF_MEMORY),
                     (unsigned long)cluster_bytes);
             goto done;
@@ -970,65 +1036,17 @@ BOOL PFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
             }
         }
 
-        /* ---- Phase 5b: seal the last kept bitmap block's tail ---- */
-        PFS_SPROG(GS(MSG_PFS_PROG_SHR_SEAL));
-        {
-            ULONG seq = new_num_bmb - 1;
-            ULONG ii  = seq / idxperblk;
-            ULONG inr = pfs_getl(cluster_buf, PFS_RB_BITMAPINDEX + 4 * ii);
-            ULONG bmnr = 0;
-            if (inr != 0) {
-                if (!pfs_read_cluster(bd, (part_lbase + inr) * phys_per_lblock,
-                                      idx_buf, n_phys)) {
-                    sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
-                            (unsigned long)inr);
-                    goto done;
-                }
-                if (pfs_getw(idx_buf, 0) != PFS_BMIBLKID) {
-                    sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
-                            (unsigned long)inr);
-                    goto done;
-                }
-                bmnr = pfs_getl(idx_buf, 12 + 4 * (seq % idxperblk));
-            }
-            /* Absent block: nothing to seal - pfs3 auto-creates it all-free
-               later, and its allocator's numblocks guard skips the tail. */
-            if (bmnr != 0) {
-                seal_abs = (part_lbase + bmnr) * phys_per_lblock;
-                if (!pfs_read_cluster(bd, seal_abs, bm_buf, n_phys)) {
-                    sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
-                            (unsigned long)bmnr);
-                    goto done;
-                }
-                if (pfs_getw(bm_buf, 0) != PFS_BMBLKID ||
-                    pfs_getl(bm_buf, 8) != seq) {
-                    sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
-                            (unsigned long)bmnr);
-                    goto done;
-                }
-                for (ULONG i = 0; i < reserved_blksize; i++)
-                    bm_orig[i] = bm_buf[i];
-                ULONG changed = 0;
-                for (ULONG m = 0; m < longsperbmb; m++) {
-                    ULONG b0 = bitmapstart + (seq * longsperbmb + m) * 32;
-                    ULONG v  = pfs_getl(bm_buf, 12 + 4 * m);
-                    ULONG nv = v;
-                    for (ULONG k = 0; k < 32; k++) {
-                        if (b0 + k >= new_disksize)
-                            nv &= ~(1UL << (31u - k));
-                    }
-                    if (nv != v) { pfs_setl(bm_buf, 12 + 4 * m, nv); changed++; }
-                }
-                if (changed) {
-                    if (!pfs_write_cluster(bd, seal_abs, bm_buf, n_phys)) {
-                        sprintf(err_buf, GS(MSG_PFS_CANNOT_WRITE),
-                                pi->drive_name);
-                        goto done;
-                    }
-                    seal_written = TRUE;
-                }
-            }
-        }
+        /* NOTE 2026-07-20: an earlier version SEALED (marked allocated) the
+           last kept bitmap block's out-of-range bits here.  DELIBERATELY
+           REMOVED after the grow/shrink fuzz loop exposed the asymmetry:
+           real pfs3 never seals (NewBitmapBlock inits all-free and the
+           allocator bounds every hit with "blocknr >= numblocks", verified
+           in pfs3aio allocation.c), and PFS grow did not unseal - so a
+           shrink-then-grow left the re-added region permanently
+           unallocatable with blocksfree disagreeing with the bitmap.
+           Out-of-range bits now stay free, exactly like a freshly formatted
+           pfs3 volume; PFS_GrowPartition additionally REPAIRS volumes that
+           were sealed by the old shrink (see its unseal pass). */
 
         /* ---- Phase 6: update + write the rootblock cluster ---- */
         PFS_SPROG(GS(MSG_PFS_PROG_SHR_ROOT));
@@ -1071,8 +1089,6 @@ done:
            failure path, so these writes are safe). */
         if (cluster_written)
             (void)pfs_write_cluster(bd, part_abs, original_buf, cluster_phys);
-        if (seal_written)
-            (void)pfs_write_cluster(bd, seal_abs, bm_orig, n_phys);
     }
     if (did_inhibit)
         Inhibit((STRPTR)inh_name, DOSFALSE);
@@ -1080,7 +1096,6 @@ done:
     if (original_buf) FreeVec(original_buf);
     if (idx_buf)      FreeVec(idx_buf);
     if (bm_buf)       FreeVec(bm_buf);
-    if (bm_orig)      FreeVec(bm_orig);
     return ok;
 #undef PFS_SPROG
 }
