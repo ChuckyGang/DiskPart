@@ -35,9 +35,16 @@ BOOL SFS_IsSupportedType(ULONG dostype);
  * progress_ud : opaque value passed to progress_fn.
  * Returns TRUE on success.
  */
+/* new_total_ovr : 0 = derive the new SFS-block count from the partition
+ *                 cylinders (normal grow).  Non-zero = force the new total to
+ *                 EXACTLY this many SFS blocks.  SmartFilesystem mounts only
+ *                 when the root's be_totalblocks equals its DosEnvec-derived
+ *                 blocks_total EXACTLY (Surfaces*BlocksPerTrack*ncyl /
+ *                 SectorPerBlock; see SFS filesystemmain.c), so the clone path
+ *                 passes the destination partition's exact block count. */
 BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        const struct PartInfo *pi, ULONG old_high_cyl,
-                       char *err_buf,
+                       ULONG new_total_ovr, char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud);
 
 /*

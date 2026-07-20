@@ -1030,7 +1030,7 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
             grow_open_progress(win, GS(MSG_MOVE_GROW_SFS_PROG_TITLE),
                                &prog_ud, 16);
 
-        BOOL result = SFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
+        BOOL result = SFS_GrowPartition(bd, rdb, pi, old_hi, 0, errbuf,
                                         ffs_grow_progress, &prog_ud);
         if (result) {
             BOOL wrote_rdb;

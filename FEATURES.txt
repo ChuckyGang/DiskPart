@@ -122,11 +122,11 @@ scripting interface.
    filesystem type adopted (SFS root offsets fixed up, PFS3 size flag
    cleared).  All three filesystems clone into any large-enough partition
    on any geometry: PFS3 self-describes its size; FFS/OFS is grown to fill
-   the destination; SFS validates its stored size against the partition's
-   DosEnvec (too small = "Uninitialized", too large = "no disk present"),
-   so an SFS clone shrinks the destination partition to just fit the copied
-   SFS (leaving it byte-identical to the source and its total within a
-   cylinder of the partition capacity - the mountable shape).  The volume is
+   the destination; SFS mounts only when its stored block count EXACTLY
+   equals the partition's DosEnvec-derived count, so an SFS clone trims the
+   destination partition to the smallest whole-cylinder span that holds the
+   source and grows the SFS by that sub-cylinder remainder to the exact
+   count (small enough to add no bitmap blocks).  The volume is
    renamed "CL-<old>" so it does not clash with the source's label, and
    when the destination disk has no driver for the cloned filesystem the
    driver is copied from the source RDB (GUI asks first, CLI automatic)

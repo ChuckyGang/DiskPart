@@ -198,7 +198,7 @@ BOOL SFS_IsSupportedType(ULONG dostype)
 
 BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        const struct PartInfo *pi, ULONG old_high_cyl,
-                       char *err_buf,
+                       ULONG new_total_ovr, char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud)
 {
 #define SFS_PROGRESS(msg) do { if (progress_fn) progress_fn(progress_ud,(msg)); } while(0)
@@ -394,6 +394,12 @@ BOOL SFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     if (bpc == 0) bpc = 1;
     delta_sfs      = cyl_diff * bpc;
     new_totalblocks = totalblocks + delta_sfs;
+    /* Clone: force the exact destination block count so the root's total
+       matches what SFS derives from the DosEnvec at mount (an EXACT check). */
+    if (new_total_ovr != 0 && new_total_ovr > totalblocks) {
+        new_totalblocks = new_total_ovr;
+        delta_sfs       = new_totalblocks - totalblocks;
+    }
     {
         UQUAD old_lb = ((UQUAD)lastbyteh << 32) | (UQUAD)lastbyte_lo;
         UQUAD new_lb = old_lb + (UQUAD)delta_sfs * (UQUAD)sfs_blocksize;
