@@ -154,6 +154,12 @@ BOOL  offer_move_partition(struct Window *win, struct BlockDev *bd,
 #define GROW_NEED_REBOOT 2   /* grown but couldn't remount live - reboot needed */
 #define GROW_ABORTED     3   /* refused (volume in use) or failed+restored      */
 
+/* GUI partition dump / restore (Advanced menu). */
+void  pv_dump_partition(struct Window *win, struct BlockDev *bd,
+                        struct RDBInfo *rdb, struct PartInfo *pi);
+BOOL  pv_restore_partition(struct Window *win, struct BlockDev *bd,
+                           struct RDBInfo *rdb, struct PartInfo *pi);
+
 /* GUI shrink flow (map drag + Edit dialog).  pi->high_cyl = requested
    new (smaller) value; old_lo/old_hi = pre-edit values.  GROW_NONE =
    not a plain supported shrink (caller falls back to legacy handling);

@@ -1249,8 +1249,22 @@
 #define MSG_SCR_PARTIN_USAGE         1243
 #define MSG_PC_NOT_FOUND_FMT         1244
 #define MSG_PC_RESTORE_ASK           1245
+#define MSG_PV_MENU_DUMP_PART        1246
+#define MSG_PV_MENU_RESTORE_PART     1247
+#define MSG_PV_PC_NO_SEL             1248
+#define MSG_PV_PC_DUMP_REQ_TITLE     1249
+#define MSG_PV_PC_RESTORE_REQ_TITLE  1250
+#define MSG_PV_PC_DUMP_PROG_FMT      1251
+#define MSG_PV_PC_RESTORE_PROG_FMT   1252
+#define MSG_PV_PC_DUMP_OK_FMT        1253
+#define MSG_PV_PC_DUMP_FAIL_FMT      1254
+#define MSG_PV_PC_RESTORE_CONFIRM_FMT 1255
+#define MSG_PV_PC_RESTORE_OK_FMT     1256
+#define MSG_PV_PC_RESTORE_FAIL_FMT   1257
+#define MSG_PV_PC_ASL_UNAVAIL        1258
+#define MSG_PV_PC_RESTORE_GADGETS    1259
 
-#define MSG_COUNT 1246
+#define MSG_COUNT 1260
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2508,5 +2522,19 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1243 MSG_SCR_PARTIN_USAGE */ "Usage: PARTIN <file> <drive>   (restore a dump into an existing partition)\n",
     /* 1244 MSG_PC_NOT_FOUND_FMT */ "No partition named \"%s\" on this disk.\n",
     /* 1245 MSG_PC_RESTORE_ASK */ "Overwrite partition %s with the dump? Its current contents are lost",
+    /* 1246 MSG_PV_MENU_DUMP_PART */ "Dump Partition to File...",
+    /* 1247 MSG_PV_MENU_RESTORE_PART */ "Restore Partition from File...",
+    /* 1248 MSG_PV_PC_NO_SEL */ "Select a partition first.",
+    /* 1249 MSG_PV_PC_DUMP_REQ_TITLE */ "Dump partition to file",
+    /* 1250 MSG_PV_PC_RESTORE_REQ_TITLE */ "Restore partition from file",
+    /* 1251 MSG_PV_PC_DUMP_PROG_FMT */ "Dumping to %s",
+    /* 1252 MSG_PV_PC_RESTORE_PROG_FMT */ "Restoring %s",
+    /* 1253 MSG_PV_PC_DUMP_OK_FMT */ "Partition %s dumped to\n%s",
+    /* 1254 MSG_PV_PC_DUMP_FAIL_FMT */ "Dump failed:\n%s",
+    /* 1255 MSG_PV_PC_RESTORE_CONFIRM_FMT */ "Overwrite partition %s with the dump\n%s ?\n\nThe current contents of %s are lost.",
+    /* 1256 MSG_PV_PC_RESTORE_OK_FMT */ "Restored into %s.  The RDB has been written -\nreboot before using this volume.",
+    /* 1257 MSG_PV_PC_RESTORE_FAIL_FMT */ "Restore failed:\n%s",
+    /* 1258 MSG_PV_PC_ASL_UNAVAIL */ "asl.library not available - cannot open a file requester.",
+    /* 1259 MSG_PV_PC_RESTORE_GADGETS */ "Restore|Cancel",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

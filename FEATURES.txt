@@ -113,6 +113,15 @@ scripting interface.
    free-block cache recounted; the start-root write is the atomic commit.
    Volumes whose bitmap was relocated high by a strategy-B grow are
    refused.  Reboot required like SFS grow.
+ * Dump a partition to a self-describing file and restore it (CLI PARTOUT/
+   PARTIN, script PARTOUT/PARTIN, GUI Advanced > Dump/Restore Partition).
+   The file carries a header with the full DosEnvec, so a restore recreates
+   a partition whose filesystem lines up; SFS absolute offsets are fixed up
+   for the destination's location.  Restore overwrites an existing partition
+   at least as large as the dump (larger leaves the filesystem source-sized;
+   GROW it afterward).  This doubles as a cross-disk clone: dump on one disk,
+   restore on another.  Never touches FAT/foreign data - Amiga partitions
+   only.
  * SHRINKINFO <drive> (CLI + script) reports how far a partition COULD
    shrink: scans the filesystem's own allocation bitmap (read-only, never
    writes) and prints the highest used block, the minimum size in cylinders

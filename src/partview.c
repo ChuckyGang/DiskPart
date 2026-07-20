@@ -1719,6 +1719,9 @@ static struct NewMenu partview_menu_def[] = {
     { NM_ITEM,  "Copy Partition to Another Disk...",  NULL, NM_ITEMDISABLED, 0, NULL },  /* ITEM 21 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 22 */
     { NM_ITEM,  "Shrink Report...",      NULL,         0, 0, NULL },  /* ITEM 23 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 24 */
+    { NM_ITEM,  "Dump Partition to File...",   NULL,   0, 0, NULL },  /* ITEM 25 */
+    { NM_ITEM,  "Restore Partition from File...", NULL, 0, 0, NULL }, /* ITEM 26 */
     /* Menu 2 - Health: disk diagnostics */
     { NM_TITLE, "Health",                NULL,         0, 0, NULL },
     { NM_ITEM,  "SMART Status",          NULL,         0, 0, NULL },  /* ITEM 0 */
@@ -1769,6 +1772,9 @@ static void localize_partview_menu(void)
         MSG_PV_MENU_COPY_PARTITION,
         -1,                          /* NM_BARLABEL */
         MSG_PV_MENU_SHRINKINFO,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_DUMP_PART,
+        MSG_PV_MENU_RESTORE_PART,
         MSG_PV_MENU_HEALTH,
         MSG_PV_MENU_SMART,
         MSG_PV_MENU_BADBLOCK,
@@ -2394,6 +2400,26 @@ BOOL partview_run(const char *devname, ULONG unit)
                                 es.es_TextFormat   = (UBYTE *)GS(MSG_ZERO_NO_PART_SEL);
                                 es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
                                 EasyRequest(win, &es, NULL);
+                            }
+                        }
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 25) {
+                            struct PartInfo *sp =
+                                (sel >= 0 && rdb && sel < (WORD)rdb->num_parts)
+                                ? &rdb->parts[sel] : NULL;
+                            pv_dump_partition(win, bd, rdb, sp);
+                        }
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 26) {
+                            struct PartInfo *sp =
+                                (sel >= 0 && rdb && sel < (WORD)rdb->num_parts)
+                                ? &rdb->parts[sel] : NULL;
+                            if (pv_restore_partition(win, bd, rdb, sp)) {
+                                needs_reboot = TRUE;
+                                refresh_listview(win, lv_gad, rdb, sel);
+                                draw_static(win, devname, unit, rdb,
+                                            (bd ? bd->disk_brand : ""),
+                                            ix, iy, iw, bx, by, bw, bh,
+                                            hx, hy, hw, sel, lastdisk_gad, lastlun_gad);
+                                refresh_all_gadgets(win, glist);
                             }
                         }
                         /* Health menu */
