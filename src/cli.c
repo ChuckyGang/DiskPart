@@ -32,6 +32,7 @@
 #include "ffsresize.h"
 #include "sfsresize.h"
 #include "pfsresize.h"
+#include "shrinkinfo.h"
 #include "locale_support.h"
 #include "cli.h"
 
@@ -59,7 +60,8 @@ extern struct DosLibrary *DOSBase;
     "NOUNMOUNT/S,MOUNTLIST/K,"                                    \
     "GROW/M,"                                                     \
     "ZEROPART/S,"                                                  \
-    "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S"
+    "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S,"    \
+    "SHRINKINFO/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -109,6 +111,7 @@ enum {
     ARG_STARTCYL,
     ARG_ENDCYL,
     ARG_ACTIVE,
+    ARG_SHRINKINFO,
     ARG_COUNT
 };
 
@@ -1536,6 +1539,57 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
+/* SHRINKINFO - read-only minimum-shrinkable-size report              */
+/* ------------------------------------------------------------------ */
+
+static void cli_si_emit(void *ud, const char *line)
+{
+    (void)ud;
+    cli_puts(line);
+}
+
+static LONG cmd_shrinkinfo(const char *devname, ULONG unit,
+                           const char *drive_s)
+{
+    struct BlockDev *bd;
+    struct PartInfo *pi = NULL;
+    char   name[32];
+    UWORD  nlen, i;
+    LONG   rc;
+
+    if (!drive_s || !drive_s[0])
+        { cli_puts(GS(MSG_SI_USAGE)); return RETURN_WARN; }
+    strncpy(name, drive_s, 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) { cli_puts(GS(MSG_SI_USAGE)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    for (i = 0; i < s_rdb.num_parts; i++)
+        if (str_eq_ci(s_rdb.parts[i].drive_name, name)) { pi = &s_rdb.parts[i]; break; }
+    if (!pi) {
+        DP_SNPRINTF(outbuf, GS(MSG_SI_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    rc = ShrinkInfo_Run(bd, &s_rdb, pi, cli_si_emit, NULL);
+
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd);
+    return rc;
+}
+
+/* ------------------------------------------------------------------ */
 /* ADDFS - add filesystem entry, then write RDB                       */
 /* ------------------------------------------------------------------ */
 
@@ -2571,7 +2625,8 @@ LONG cli_run(void)
         !args[ARG_ADDPART] && !args[ARG_ADDFS] && !args[ARG_DELPART] &&
         !args[ARG_CHECK]   && !args[ARG_CREATE]   &&
         !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW] &&
-        !args[ARG_ZEROPART] && !args[ARG_ADDMBR] && !args[ARG_DELMBR]) {
+        !args[ARG_ZEROPART] && !args[ARG_ADDMBR] && !args[ARG_DELMBR] &&
+        !args[ARG_SHRINKINFO]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -2610,7 +2665,8 @@ LONG cli_run(void)
          args[ARG_ADDPART]   || args[ARG_ADDFS]   ||
          args[ARG_DELPART]   || args[ARG_CHECK]   ||
          args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW] ||
-         args[ARG_ZEROPART]  || args[ARG_ADDMBR]  || args[ARG_DELMBR])) {
+         args[ARG_ZEROPART]  || args[ARG_ADDMBR]  || args[ARG_DELMBR] ||
+         args[ARG_SHRINKINFO])) {
 
         char  devname[64];
         ULONG unit;
@@ -2671,6 +2727,10 @@ LONG cli_run(void)
                     rc = cmd_grow(devname, unit, force, drive, size,
                                   (BOOL)args[ARG_NOUNMOUNT]);
             }
+
+            if (rc == RETURN_OK && args[ARG_SHRINKINFO])
+                rc = cmd_shrinkinfo(devname, unit,
+                                    (const char *)args[ARG_SHRINKINFO]);
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,

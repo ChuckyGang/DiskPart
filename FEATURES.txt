@@ -82,7 +82,13 @@ scripting interface.
  * FFS grow unmounts the volume first, grows it, then remounts with the new
    size - no reboot needed (unless the volume is in use, then it falls back to
    the grow-then-reboot path).  PFS and SFS grow still require a reboot.
- * SHRINKING of filesystems is NOT supported.
+ * SHRINKING of filesystems is NOT supported (yet).
+ * SHRINKINFO <drive> (CLI + script) reports how far a partition COULD
+   shrink: scans the filesystem's own allocation bitmap (read-only, never
+   writes) and prints the highest used block, the minimum size in cylinders
+   and the reclaimable space.  Movable metadata (FFS root/bitmap blocks,
+   SFS end root + bitmap) is excluded from the floor, since a future SHRINK
+   would relocate it.  Works on FFS/OFS, SFS and PFS3.
 
 
 --------------------------------------------------------------------------------
@@ -129,7 +135,7 @@ scripting interface.
  * Full command-line operation in addition to the GUI.
  * Script files with comments (# or ;) and blank lines.
  * Script commands: OPEN / CREATE / CLOSE, INIT NEW [MBR] / NEWGEO, ADDPART,
-   DELPART, ADDMBR, DELMBR, ADDFS, GROW, ZEROPART, WRITE, INFO, CHECKRDB,
+   DELPART, ADDMBR, DELMBR, ADDFS, GROW, SHRINKINFO, ZEROPART, WRITE, INFO, CHECKRDB,
    VERIFYRDB / VERIFYEXT, IMAGEOUT / IMAGEIN, MOUNTLIST, REBOOT.
    - INIT NEW MBR: writes empty MBR at block 0, places RDB at block 1.
    - ADDMBR TYPE=<t> START=<cyl> END=<cyl|+size> [ACTIVE]: adds an MBR

@@ -45,6 +45,7 @@
 #include "ffsresize.h"
 #include "sfsresize.h"
 #include "pfsresize.h"
+#include "shrinkinfo.h"
 #include "script.h"
 
 extern struct ExecBase   *SysBase;
@@ -1378,6 +1379,48 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
+/* SHRINKINFO - read-only minimum-shrinkable-size report              */
+/*   SHRINKINFO <drive>                                               */
+/*                                                                     */
+/* No dryrun gate: this command never writes, so it runs identically   */
+/* in DRYRUN mode (useful for planning a layout change up front).      */
+/* ------------------------------------------------------------------ */
+
+static void sc_si_emit(void *ud, const char *line)
+{
+    (void)ud;
+    sc_puts(line);
+}
+
+static LONG do_shrinkinfo(ULONG ln, char **tok, UWORD ntok)
+{
+    struct PartInfo *pi = NULL;
+    char  name[32];
+    UWORD nlen, i;
+
+    if (!s_st.bd)
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
+    if (ntok < 2) { sc_puts(GS(MSG_SI_USAGE)); return RETURN_ERROR; }
+
+    strncpy(name, tok[1], 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) { sc_puts(GS(MSG_SI_USAGE)); return RETURN_ERROR; }
+
+    for (i = 0; i < s_st.rdb.num_parts; i++)
+        if (ci_eq(s_st.rdb.parts[i].drive_name, name)) { pi = &s_st.rdb.parts[i]; break; }
+    if (!pi) {
+        DP_SNPRINTF(s_msg, GS(MSG_SI_NOT_FOUND_FMT), name);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    return ShrinkInfo_Run(s_st.bd, &s_st.rdb, pi, sc_si_emit, NULL);
+}
+
+/* ------------------------------------------------------------------ */
 /* ZEROPART - overwrite every block in a partition with zeros         */
 /*   ZEROPART NAME=<drive>                                            */
 /* ------------------------------------------------------------------ */
@@ -2008,6 +2051,7 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "VERIFYEXT")) return do_verifyext(ln, tok, ntok);
     if (ci_eq(tok[0], "ADDFS"))    return do_addfs(ln, tok, ntok);
     if (ci_eq(tok[0], "GROW"))     return do_grow(ln, tok, ntok);
+    if (ci_eq(tok[0], "SHRINKINFO")) return do_shrinkinfo(ln, tok, ntok);
     if (ci_eq(tok[0], "ZEROPART")) return do_zeropart(ln, tok, ntok);
     if (ci_eq(tok[0], "WRITE"))   return do_write(ln);
     if (ci_eq(tok[0], "INFO"))    return do_info(ln);

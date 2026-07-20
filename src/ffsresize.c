@@ -49,6 +49,7 @@
 #include "clib.h"
 #include "rdb.h"
 #include "ffsresize.h"
+#include "shrinkinfo.h"
 #include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
@@ -122,10 +123,17 @@ static BOOL write_fs_block(struct BlockDev *bd, ULONG part_abs, ULONG fs_blk,
 }
 
 /* FFS bitmap bit macros.
-   FFS uses MSB-first within each longword: bit 31 = lowest block, bit 0 = highest.
+   FFS uses LSB-first within each longword: bit 0 = lowest block, bit 31 =
+   highest (ADF spec / ADFlib adfIsBlockFree: 1 << (blockNr % 32) - and
+   amitools writes the same, verified against an xdftool-formatted volume).
+   NOTE 2026-07-20: this was MSB-first for a long time, which never hurt
+   the grow path only because it sets bm_flag=0 and FFS rebuilds the whole
+   bitmap from the directory tree at the next mount - but FFS_ShrinkInfo()
+   below actually TRUSTS these bits, so the order is load-bearing now.
+   (SFS and PFS3 really are MSB-first; each per its own source.)
    off = block offset within the bm block's coverage range.
    bm block's L[0] = checksum; bitmap data starts at L[1]. */
-#define BM_BIT(off)       (31u - ((unsigned)(off) % 32u))
+#define BM_BIT(off)       ((unsigned)(off) % 32u)
 #define BM_TESTFREE(b,off) ((b)[1u + (unsigned)(off)/32u] &   (1UL << BM_BIT(off)))
 #define BM_SETFREE(b,off)  ((b)[1u + (unsigned)(off)/32u] |=  (1UL << BM_BIT(off)))
 #define BM_SETUSED(b,off)  ((b)[1u + (unsigned)(off)/32u] &= ~(1UL << BM_BIT(off)))
@@ -1043,5 +1051,288 @@ done:
     if (root_buf)   FreeVec(root_buf);
     if (bm_buf)     FreeVec(bm_buf);
     if (bm_blknums) FreeVec(bm_blknums);
+    return ok;
+}
+
+/* ================================================================== */
+/* FFS_ShrinkInfo - READ-ONLY minimum-shrinkable-size scan.            */
+/*                                                                     */
+/* Walks the same boot->root->bitmap chain as FFS_GrowPartition above  */
+/* (same validations, same Inhibit-before-reads rule so the bitmap is  */
+/* post-flush current) but only READS: counts allocated blocks and     */
+/* finds the highest one.  The root block and the bitmap/ext blocks    */
+/* themselves are movable metadata (grow already relocates the root),  */
+/* so the shrink floor walks down past them to the highest block a     */
+/* SHRINK could NOT move (file data / directories).                    */
+/* ================================================================== */
+
+/* Shell sort + binary search for the movable-metadata set (root + bm  */
+/* + ext block numbers; a few thousand entries at most).               */
+static void ffs_sort_ulongs(ULONG *a, ULONG n)
+{
+    ULONG gap, i, j, v;
+    for (gap = n / 2; gap > 0; gap /= 2)
+        for (i = gap; i < n; i++) {
+            v = a[i];
+            for (j = i; j >= gap && a[j - gap] > v; j -= gap)
+                a[j] = a[j - gap];
+            a[j] = v;
+        }
+}
+
+static BOOL ffs_in_sorted(const ULONG *a, ULONG n, ULONG v)
+{
+    ULONG lo = 0, hi = n;
+    while (lo < hi) {
+        ULONG mid = lo + (hi - lo) / 2;
+        if (a[mid] == v) return TRUE;
+        if (a[mid] < v) lo = mid + 1; else hi = mid;
+    }
+    return FALSE;
+}
+
+BOOL FFS_ShrinkInfo(struct BlockDev *bd, const struct RDBInfo *rdb,
+                    const struct PartInfo *pi, struct ShrinkReport *rep,
+                    char *err_buf)
+{
+    ULONG *boot_buf = NULL, *root_buf = NULL, *bm_buf = NULL;
+    ULONG *bm_list  = NULL;   /* bm block numbers in coverage order      */
+    ULONG *meta     = NULL;   /* root + bm + ext blocks, sorted          */
+    ULONG  bm_count = 0, meta_n = 0;
+    BOOL   ok = FALSE, did_inhibit = FALSE;
+    char   inh_name[36];
+
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG dev_bsz = (pi->block_size > 0) ? pi->block_size : 512;
+    ULONG spb     = (pi->sectors_per_block > 0) ? pi->sectors_per_block : 1;
+    ULONG eff_bsz = dev_bsz * spb;
+    ULONG nlongs  = eff_bsz / 4;
+
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_FFS_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+    if (dev_bsz != 512) {
+        sprintf(err_buf, GS(MSG_FFS_ONLY_512_SECTORS), (unsigned long)dev_bsz);
+        return FALSE;
+    }
+    if (eff_bsz < 512 || eff_bsz > 16384 || (eff_bsz & (eff_bsz - 1)) != 0) {
+        sprintf(err_buf, GS(MSG_FFS_UNSUPPORTED_BLOCKSIZE),
+                (unsigned long)eff_bsz, (unsigned long)spb);
+        return FALSE;
+    }
+
+    ULONG part_abs = pi->low_cyl * heads * sectors;
+    ULONG blocks   = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors / spb;
+    ULONG bpbm     = (nlongs - 1) * 32;
+    ULONG reserved = (pi->reserved_blks > 0) ? pi->reserved_blks : 2UL;
+
+    if (blocks <= reserved) {
+        sprintf(err_buf, GS(MSG_FFS_PART_TOO_SMALL),
+                (unsigned long)blocks, (unsigned long)reserved);
+        return FALSE;
+    }
+
+    ULONG ext_slots   = EXT_BM_MAX(nlongs);
+    ULONG max_bm_list = (ULONG)(ROOT_BM_MAX + MAX_EXT_CHAIN * ext_slots);
+    /* Same BitmapCount formula as the grow path. */
+    ULONG need_bm     = (bpbm - 2 + blocks - reserved) / bpbm;
+
+    boot_buf = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    root_buf = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    bm_buf   = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    bm_list  = (ULONG *)AllocVec(max_bm_list * sizeof(ULONG),
+                                 MEMF_PUBLIC | MEMF_CLEAR);
+    meta     = (ULONG *)AllocVec((max_bm_list + MAX_EXT_CHAIN + 1) *
+                                 sizeof(ULONG), MEMF_PUBLIC | MEMF_CLEAR);
+    if (!boot_buf || !root_buf || !bm_buf || !bm_list || !meta) {
+        sprintf(err_buf, GS(MSG_FFS_OUT_OF_MEMORY));
+        goto done;
+    }
+
+    DP_SNPRINTF(inh_name, "%s:", pi->drive_name);
+    did_inhibit = Inhibit((STRPTR)inh_name, DOSTRUE);
+
+    /* Boot block -> root block number (same fallback rule as grow) */
+    if (!read_fs_block(bd, part_abs, 0, spb, boot_buf)) {
+        sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_BOOT), (unsigned long)part_abs);
+        goto done;
+    }
+    if ((boot_buf[BL_DOSTYPE] & 0xFFFFFF00UL) != 0x444F5300UL) {
+        sprintf(err_buf, GS(MSG_FFS_BOOT_DOSTYPE_MISMATCH),
+                (unsigned long)boot_buf[BL_DOSTYPE]);
+        goto done;
+    }
+    ULONG root_blk = boot_buf[BL_ROOT_BLK];
+    if (root_blk == 0 || root_blk >= blocks)
+        root_blk = blocks / 2;
+
+    if (!read_fs_block(bd, part_abs, root_blk, spb, root_buf)) {
+        sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_ROOT),
+                (unsigned long)(part_abs + root_blk * spb),
+                (unsigned long)root_blk);
+        goto done;
+    }
+    if (root_buf[RL_TYPE] != T_SHORT ||
+        root_buf[RL_SEC_TYPE(nlongs)] != ST_ROOT) {
+        sprintf(err_buf, GS(MSG_FFS_ROOT_WRONG_TYPE),
+                (unsigned long)root_buf[RL_TYPE],
+                (unsigned long)root_buf[RL_SEC_TYPE(nlongs)],
+                (unsigned long)part_abs,
+                (unsigned long)boot_buf[BL_ROOT_BLK],
+                (unsigned long)root_blk,
+                (unsigned long)blocks,
+                (unsigned long)spb);
+        goto done;
+    }
+    {
+        ULONG save = root_buf[RL_CHKSUM];
+        root_buf[RL_CHKSUM] = 0;
+        ULONG csum = ffs_checksum(root_buf, nlongs);
+        root_buf[RL_CHKSUM] = save;
+        if (csum != save) {
+            sprintf(err_buf, GS(MSG_FFS_ROOT_CHECKSUM_INVALID),
+                    (unsigned long)save, (unsigned long)csum);
+            goto done;
+        }
+    }
+    /* The bitmap is the sole source of truth here - refuse when FFS says
+       it is not valid, exactly like the grow path. */
+    if (root_buf[RL_BM_FLAG(nlongs)] != BM_VALID) {
+        sprintf(err_buf, GS(MSG_FFS_BITMAP_NOT_VALID),
+                (unsigned long)root_buf[RL_BM_FLAG(nlongs)]);
+        goto done;
+    }
+
+    /* Collect the bm chain (coverage order) + the movable-metadata set. */
+    meta[meta_n++] = root_blk;
+    for (ULONG i = 0; i < ROOT_BM_MAX; i++) {
+        ULONG p = root_buf[RL_BM_PAGES(nlongs) + i];
+        if (p == 0) break;
+        if (bm_count < max_bm_list) bm_list[bm_count++] = p;
+        meta[meta_n++] = p;
+    }
+    {
+        ULONG ext_blk = root_buf[RL_BM_EXT(nlongs)];
+        ULONG chain = 0;
+        while (ext_blk != 0 && chain < MAX_EXT_CHAIN) {
+            if (!read_fs_block(bd, part_abs, ext_blk, spb, bm_buf)) {
+                sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_EXT),
+                        (unsigned long)(part_abs + ext_blk * spb));
+                goto done;
+            }
+            meta[meta_n++] = ext_blk;
+            for (ULONG i = 0; i < ext_slots; i++) {
+                if (bm_buf[i] == 0) break;
+                if (bm_count < max_bm_list) bm_list[bm_count++] = bm_buf[i];
+                meta[meta_n++] = bm_buf[i];
+            }
+            chain++;
+            ext_blk = bm_buf[nlongs - 1];
+        }
+    }
+    if (bm_count < need_bm) {
+        sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT), (unsigned long)bm_count);
+        goto done;
+    }
+
+    /* Full scan: count used blocks, find the highest one.  Bits are
+       MSB-first, 1=free (see BM_BIT above); all-free / all-used longs
+       take the fast paths so a multi-GB partition stays quick. */
+    ULONG used = 0, highest = 0;
+    BOOL  any_used = FALSE;
+    for (ULONG bi = 0; bi < need_bm; bi++) {
+        if (!read_fs_block(bd, part_abs, bm_list[bi], spb, bm_buf)) {
+            sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                    (unsigned long)bm_list[bi]);
+            goto done;
+        }
+        if (ffs_checksum(bm_buf, nlongs) != 0) {
+            sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                    (unsigned long)bm_list[bi]);
+            goto done;
+        }
+        ULONG base = reserved + bi * bpbm;
+        for (ULONG li = 1; li < nlongs; li++) {
+            ULONG b0 = base + (li - 1) * 32;
+            if (b0 >= blocks) break;
+            ULONG v = bm_buf[li];
+            ULONG in_range = blocks - b0;
+            if (in_range > 32) in_range = 32;
+            if (v == 0xFFFFFFFFUL) continue;              /* all free */
+            if (v == 0 && in_range == 32) {               /* all used */
+                used += 32; highest = b0 + 31; any_used = TRUE;
+                continue;
+            }
+            for (ULONG k = 0; k < in_range; k++) {
+                if (!(v & (1UL << k))) {   /* LSB-first, see BM_BIT */
+                    used++; highest = b0 + k; any_used = TRUE;
+                }
+            }
+        }
+    }
+
+    /* Shrink floor: walk down from the top past movable metadata (and
+       free blocks) to the highest immovable used block.  Terminates
+       almost immediately in practice - format places the original bm
+       blocks next to the root at the centre, not in the tail. */
+    ffs_sort_ulongs(meta, meta_n);
+    ULONG floor_blk = 0;
+    BOOL  floor_found = FALSE;
+    if (any_used) {
+        ULONG blk = highest;
+        ULONG cached_bi = 0xFFFFFFFFUL;
+        ULONG steps = 0;
+        BOOL  cap_hit = FALSE;
+        while (blk >= reserved) {
+            if (++steps > 0x40000UL) { cap_hit = TRUE; break; }
+            if (!ffs_in_sorted(meta, meta_n, blk)) {
+                ULONG bi2 = (blk - reserved) / bpbm;
+                if (bi2 != cached_bi) {
+                    if (!read_fs_block(bd, part_abs, bm_list[bi2], spb, bm_buf)) {
+                        sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                                (unsigned long)bm_list[bi2]);
+                        goto done;
+                    }
+                    cached_bi = bi2;
+                }
+                ULONG off = (blk - reserved) % bpbm;
+                if (!BM_TESTFREE(bm_buf, off)) {
+                    floor_blk = blk; floor_found = TRUE;
+                    break;
+                }
+            }
+            blk--;
+        }
+        /* cap hit without a verdict: be conservative, keep the overall
+           highest as the floor.  Walking out the bottom instead means
+           every used block above 'reserved' is movable metadata - the
+           reserved+2 minimum below applies (empty volume). */
+        if (cap_hit && !floor_found) {
+            floor_blk = highest; floor_found = TRUE;
+        }
+    }
+
+    rep->total_blocks    = blocks;
+    rep->used_blocks     = used + reserved;   /* boot blocks always occupied */
+    rep->highest_used    = any_used ? highest : 0;
+    rep->min_blocks      = floor_found ? floor_blk + 1 : reserved + 2;
+    if (rep->min_blocks < reserved + 2) rep->min_blocks = reserved + 2;
+    rep->fs_block_bytes  = eff_bsz;
+    rep->meta_note_block = (any_used && (!floor_found || highest > floor_blk))
+                           ? highest : 0;
+    rep->deleted_blocks  = 0;
+    rep->fresh           = TRUE;   /* Inhibit above flushed before we read */
+    ok = TRUE;
+
+done:
+    if (did_inhibit) Inhibit((STRPTR)inh_name, DOSFALSE);
+    if (boot_buf) FreeVec(boot_buf);
+    if (root_buf) FreeVec(root_buf);
+    if (bm_buf)   FreeVec(bm_buf);
+    if (bm_list)  FreeVec(bm_list);
+    if (meta)     FreeVec(meta);
     return ok;
 }

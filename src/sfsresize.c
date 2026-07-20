@@ -63,6 +63,7 @@ extern struct IntuitionBase *IntuitionBase;
 #include "ffsresize.h"
 #include "sfsresize.h"
 #include "sfs_util.h"
+#include "shrinkinfo.h"
 #include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
@@ -967,4 +968,174 @@ done:
     return ok;
 
 #undef SFS_PROGRESS
+}
+
+/* ================================================================== */
+/* SFS_ShrinkInfo - READ-ONLY minimum-shrinkable-size scan.            */
+/*                                                                     */
+/* Reads the start root block, then every BTMP block at bitmapbase..   */
+/* bitmapbase+num_bmb-1 (consecutive - both grow strategies above keep */
+/* that invariant), counting used blocks and finding the highest one.  */
+/* Movable metadata excluded from the floor: the end root block (a     */
+/* shrink writes a fresh one at new_totalblocks-1, exactly like grow   */
+/* does) and the bitmap itself (strategy-B grows relocate it wholesale,*/
+/* so can a shrink).  If the bitmap currently sits above the floor,    */
+/* room for its relocated copy is added back in.  Admin containers     */
+/* count as immovable data.  SFS's recycle bin means deleted files     */
+/* still occupy blocks - reported separately via fsRootInfo.           */
+/* ================================================================== */
+
+BOOL SFS_ShrinkInfo(struct BlockDev *bd, const struct RDBInfo *rdb,
+                    const struct PartInfo *pi, struct ShrinkReport *rep,
+                    char *err_buf)
+{
+    UBYTE  scratch[512];
+    UBYTE *blk_buf = NULL, *bm_buf = NULL;
+    BOOL   ok = FALSE;
+
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_SFS_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+    ULONG phys_per_lb = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
+    ULONG phys_base   = pi->low_cyl * heads * sectors * phys_per_lb;
+
+    if (!BlockDev_ReadBlock(bd, phys_base, scratch)) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_BLOCK0),
+                (unsigned long)phys_base);
+        return FALSE;
+    }
+    if (sfs_getl(scratch, SFS_RB_ID) != SFS_ROOT_ID) {
+        sprintf(err_buf, GS(MSG_SFS_BLOCK0_BAD_ID),
+                (unsigned long)sfs_getl(scratch, SFS_RB_ID),
+                (unsigned long)SFS_ROOT_ID,
+                (unsigned long)phys_base,
+                (unsigned long)pi->low_cyl,
+                (unsigned long)heads,
+                (unsigned long)sectors);
+        return FALSE;
+    }
+    ULONG sfs_blocksize = sfs_getl(scratch, SFS_RB_BLOCKSIZE);
+    if (sfs_blocksize < 512 || (sfs_blocksize & (sfs_blocksize - 1)) ||
+        (sfs_blocksize % 512) != 0) {
+        sprintf(err_buf, GS(MSG_SFS_BLOCKSIZE_INVALID),
+                (unsigned long)sfs_blocksize);
+        return FALSE;
+    }
+    ULONG sfs_phys = sfs_blocksize / 512;
+
+    blk_buf = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC | MEMF_CLEAR);
+    bm_buf  = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!blk_buf || !bm_buf) {
+        sprintf(err_buf, GS(MSG_SFS_OOM_BUFFERS),
+                (unsigned long)sfs_blocksize);
+        goto done;
+    }
+
+    if (!sfs_read_block(bd, phys_base, 0, sfs_phys, blk_buf)) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_BLOCK0),
+                (unsigned long)phys_base);
+        goto done;
+    }
+    if (!sfs_verify_checksum(blk_buf, sfs_blocksize)) {
+        sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT), (unsigned long)0);
+        goto done;
+    }
+    ULONG totalblocks = sfs_getl(blk_buf, SFS_RB_TOTALBLOCKS);
+    ULONG bitmapbase  = sfs_getl(blk_buf, SFS_RB_BITMAPBASE);
+    ULONG rootobj     = sfs_getl(blk_buf, SFS_RB_ROOTOBJ);
+    if (totalblocks < 4 || bitmapbase == 0 || bitmapbase >= totalblocks) {
+        sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT), (unsigned long)bitmapbase);
+        goto done;
+    }
+
+    ULONG bib     = (sfs_blocksize - (ULONG)SFS_BM_HEADER_SIZE) * 8;
+    ULONG num_bmb = (totalblocks + bib - 1) / bib;
+    ULONG nlongs  = (sfs_blocksize - (ULONG)SFS_BM_HEADER_SIZE) / 4;
+
+    /* Movable-metadata test: end root + the bitmap block range. */
+#define SFS_SI_MOVABLE(blk) \
+    ((blk) == totalblocks - 1 || \
+     ((blk) >= bitmapbase && (blk) < bitmapbase + num_bmb))
+
+    ULONG used = 0, highest = 0, highest_data = 0;
+    BOOL  any_used = FALSE, any_data = FALSE;
+
+    for (ULONG k = 0; k < num_bmb; k++) {
+        ULONG bmb_nr = bitmapbase + k;
+        if (!sfs_read_block(bd, phys_base, bmb_nr, sfs_phys, bm_buf)) {
+            sprintf(err_buf, GS(MSG_SI_BM_READ_FMT), (unsigned long)bmb_nr);
+            goto done;
+        }
+        if (sfs_getl(bm_buf, 0) != SFS_BITMAP_ID ||
+            !sfs_verify_checksum(bm_buf, sfs_blocksize)) {
+            sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT), (unsigned long)bmb_nr);
+            goto done;
+        }
+        ULONG base = k * bib;
+        const ULONG *bm = (const ULONG *)(bm_buf + SFS_BM_HEADER_SIZE);
+        for (ULONG m = 0; m < nlongs; m++) {
+            ULONG b0 = base + m * 32;
+            if (b0 >= totalblocks) break;
+            ULONG v = bm[m];
+            ULONG in_range = totalblocks - b0;
+            if (in_range > 32) in_range = 32;
+            if (v == 0xFFFFFFFFUL) continue;               /* all free */
+            if (v == 0 && in_range == 32 &&                /* all used, */
+                !SFS_SI_MOVABLE(b0) && !SFS_SI_MOVABLE(b0 + 31) &&
+                b0 + 31 != totalblocks - 1) {              /* no movables */
+                used += 32; highest = b0 + 31; any_used = TRUE;
+                highest_data = b0 + 31; any_data = TRUE;
+                continue;
+            }
+            for (ULONG kk = 0; kk < in_range; kk++) {
+                if (!(v & (1UL << (31u - kk)))) {
+                    ULONG blk = b0 + kk;
+                    used++; highest = blk; any_used = TRUE;
+                    if (!SFS_SI_MOVABLE(blk)) {
+                        highest_data = blk; any_data = TRUE;
+                    }
+                }
+            }
+        }
+    }
+#undef SFS_SI_MOVABLE
+
+    /* deleted (recycle-bin) blocks from fsRootInfo in the root object
+       container: deletedblocks at byte offset blocksize-36 (see the
+       freeblocks handling in the grow path above). */
+    ULONG deleted = 0;
+    if (rootobj != 0 && rootobj < totalblocks) {
+        if (sfs_read_block(bd, phys_base, rootobj, sfs_phys, blk_buf) &&
+            sfs_getl(blk_buf, 0) == SFS_OBJC_ID)
+            deleted = sfs_getl(blk_buf, sfs_blocksize - 36);
+    }
+
+    /* Floor: highest immovable block, +1 for the relocated end root,
+       + room for the relocated bitmap when it sits above the floor. */
+    ULONG floor_end = any_data ? highest_data + 1 : 2;
+    ULONG minb      = floor_end + 1;             /* end root at minb-1 */
+    if (bitmapbase >= floor_end)
+        minb += num_bmb;
+    if (minb > totalblocks) minb = totalblocks;
+
+    rep->total_blocks    = totalblocks;
+    rep->used_blocks     = used;      /* SFS bitmap covers block 0 onward */
+    rep->highest_used    = any_used ? highest : 0;
+    rep->min_blocks      = minb;
+    rep->fs_block_bytes  = sfs_blocksize;
+    rep->meta_note_block = (any_used &&
+                            highest > (any_data ? highest_data : 0))
+                           ? highest : 0;
+    rep->deleted_blocks  = deleted;
+    rep->fresh           = FALSE;  /* read without Inhibit, like the grow */
+    ok = TRUE;
+
+done:
+    if (blk_buf) FreeVec(blk_buf);
+    if (bm_buf)  FreeVec(bm_buf);
+    return ok;
 }

@@ -1167,8 +1167,26 @@
 #define MSG_DC_OK                    1161
 #define MSG_DC_CANCELLED             1162
 #define MSG_DC_FAILED_FMT            1163
+#define MSG_SI_SCANNING_FMT          1164
+#define MSG_SI_HEADER_FMT            1165
+#define MSG_SI_CURRENT_FMT           1166
+#define MSG_SI_USED_FMT              1167
+#define MSG_SI_HIGHEST_FMT           1168
+#define MSG_SI_MIN_FMT               1169
+#define MSG_SI_RECLAIM_FMT           1170
+#define MSG_SI_RECLAIM_NONE          1171
+#define MSG_SI_META_NOTE_FMT         1172
+#define MSG_SI_SFS_DELETED_FMT       1173
+#define MSG_SI_FLUSH_CAVEAT          1174
+#define MSG_SI_UNSUPPORTED_FMT       1175
+#define MSG_SI_FAIL_FMT              1176
+#define MSG_SI_NOT_FOUND_FMT         1177
+#define MSG_SI_USAGE                 1178
+#define MSG_SI_BM_READ_FMT           1179
+#define MSG_SI_BM_BAD_FMT            1180
+#define MSG_SI_PFS_SMALLIDX          1181
 
-#define MSG_COUNT 1164
+#define MSG_COUNT 1182
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2344,5 +2362,23 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1161 MSG_DC_OK */ "Disk copy complete.\n\nReboot may be required for the new partition\nlayout on the destination disk to be picked up,\nif it was already mounted.",
     /* 1162 MSG_DC_CANCELLED */ "Copy cancelled.\n\nWARNING: the destination disk has been\npartially overwritten and is in an\ninconsistent state.",
     /* 1163 MSG_DC_FAILED_FMT */ "Copy failed:\n%s",
+    /* 1164 MSG_SI_SCANNING_FMT */ "Scanning %s (%s) allocation bitmap...\n",
+    /* 1165 MSG_SI_HEADER_FMT */ "\nShrink report for %s (%s):\n",
+    /* 1166 MSG_SI_CURRENT_FMT */ "  Current size : %lu cylinders (%lu-%lu) = %s\n",
+    /* 1167 MSG_SI_USED_FMT */ "  In use       : %lu of %lu blocks (%lu%%)\n",
+    /* 1168 MSG_SI_HIGHEST_FMT */ "  Highest used : block %lu of %lu\n",
+    /* 1169 MSG_SI_MIN_FMT */ "  Minimum size : %lu cylinders = %s  (HighCyl >= %lu)\n",
+    /* 1170 MSG_SI_RECLAIM_FMT */ "  Reclaimable  : %lu cylinders = %s\n",
+    /* 1171 MSG_SI_RECLAIM_NONE */ "  Reclaimable  : nothing - no room to shrink\n",
+    /* 1172 MSG_SI_META_NOTE_FMT */ "  Note: movable FS metadata near block %lu excluded (a SHRINK would relocate it).\n",
+    /* 1173 MSG_SI_SFS_DELETED_FMT */ "  Note: %lu blocks held by deleted (recycle-bin) files still count as used.\n",
+    /* 1174 MSG_SI_FLUSH_CAVEAT */ "  Note: numbers reflect the state last flushed to disk.\n",
+    /* 1175 MSG_SI_UNSUPPORTED_FMT */ "%s: SHRINKINFO supports FFS/OFS, SFS and PFS3 only (dostype 0x%08lx).\n",
+    /* 1176 MSG_SI_FAIL_FMT */ "SHRINKINFO %s failed: %s\n",
+    /* 1177 MSG_SI_NOT_FOUND_FMT */ "SHRINKINFO: no partition named \"%s\" on this disk.\n",
+    /* 1178 MSG_SI_USAGE */ "Usage: SHRINKINFO <drive>   (report how far a partition could shrink)\n",
+    /* 1179 MSG_SI_BM_READ_FMT */ "cannot read bitmap block %lu",
+    /* 1180 MSG_SI_BM_BAD_FMT */ "bitmap block %lu is invalid - run the disk validator/doctor first",
+    /* 1181 MSG_SI_PFS_SMALLIDX */ "PFS small-index layout (no MODE_SUPERINDEX) is not supported",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

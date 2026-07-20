@@ -249,6 +249,21 @@ GROW <drive> <size[KMG]|END>
     DiskPart DEV uaehf.device:3 GROW DH1 END FORCE
     DiskPart DEV scsi.device:0 GROW DH0 END NOUNMOUNT  ; boot partition
 
+SHRINKINFO=<drive>
+  Report how far the named partition could shrink.  READ-ONLY - scans the
+  filesystem's own allocation bitmap and prints the highest used block,
+  the minimum size in cylinders (with the matching HighCyl) and the
+  reclaimable space.  Movable filesystem metadata (FFS root/bitmap blocks,
+  SFS end root and bitmap) is excluded from the floor - a future SHRINK
+  would relocate it.  Works on FFS/OFS, SFS and PFS3 partitions.
+  Note: FFS keeps its root block at the partition centre, so a well-filled
+  FFS partition rarely shrinks below ~half; PFS3 packs metadata at the
+  start, so its floor is set purely by the highest data block.
+
+  Examples:
+    DiskPart DEV uaehf.device:3 SHRINKINFO=DH1
+    DiskPart IMAGE=disk.hdf SHRINKINFO=DH0
+
 ZEROPART NAME=<drive>
   Overwrite every block of the named partition with zeros.  Does not change
   the RDB or partition table — only the partition's data blocks are written.
@@ -409,6 +424,20 @@ GROW <drive> <size[KMG]|END> [NOUNMOUNT]
     GROW DH1 100M       ; add 100 MB (clamped to free space if less)
     GROW DH1 END        ; or: use all the free space after DH1
     GROW DH0 END NOUNMOUNT   ; boot partition: grow in place, then reboot
+    CLOSE
+
+SHRINKINFO <drive>
+  Report how far the named partition could shrink.  READ-ONLY - never
+  writes, so it also runs unchanged in DRYRUN mode (useful for planning
+  a layout change up front).  Scans the filesystem's own allocation
+  bitmap and prints the highest used block, the minimum size in
+  cylinders (with the matching HighCyl) and the reclaimable space.
+  Movable filesystem metadata (FFS root/bitmap blocks, SFS end root and
+  bitmap) is excluded from the floor - a future SHRINK would relocate it.
+  Works on FFS/OFS, SFS and PFS3 partitions.
+
+    OPEN uaehf.device 3
+    SHRINKINFO DH1
     CLOSE
 
 ZEROPART NAME=<drive>

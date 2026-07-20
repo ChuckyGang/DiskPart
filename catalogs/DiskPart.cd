@@ -3588,3 +3588,60 @@ Copy cancelled.\n\nWARNING: the destination disk has been\npartially overwritten
 MSG_DC_FAILED_FMT
 Copy failed:\n%s
 ;
+;==========================================================================
+; SHRINKINFO (minimum shrinkable size report)
+;==========================================================================
+MSG_SI_SCANNING_FMT
+Scanning %s (%s) allocation bitmap...\n
+;
+MSG_SI_HEADER_FMT
+\nShrink report for %s (%s):\n
+;
+MSG_SI_CURRENT_FMT
+  Current size : %lu cylinders (%lu-%lu) = %s\n
+;
+MSG_SI_USED_FMT
+  In use       : %lu of %lu blocks (%lu%%)\n
+;
+MSG_SI_HIGHEST_FMT
+  Highest used : block %lu of %lu\n
+;
+MSG_SI_MIN_FMT
+  Minimum size : %lu cylinders = %s  (HighCyl >= %lu)\n
+;
+MSG_SI_RECLAIM_FMT
+  Reclaimable  : %lu cylinders = %s\n
+;
+MSG_SI_RECLAIM_NONE
+  Reclaimable  : nothing - no room to shrink\n
+;
+MSG_SI_META_NOTE_FMT
+  Note: movable FS metadata near block %lu excluded (a SHRINK would relocate it).\n
+;
+MSG_SI_SFS_DELETED_FMT
+  Note: %lu blocks held by deleted (recycle-bin) files still count as used.\n
+;
+MSG_SI_FLUSH_CAVEAT
+  Note: numbers reflect the state last flushed to disk.\n
+;
+MSG_SI_UNSUPPORTED_FMT
+%s: SHRINKINFO supports FFS/OFS, SFS and PFS3 only (dostype 0x%08lx).\n
+;
+MSG_SI_FAIL_FMT
+SHRINKINFO %s failed: %s\n
+;
+MSG_SI_NOT_FOUND_FMT
+SHRINKINFO: no partition named "%s" on this disk.\n
+;
+MSG_SI_USAGE
+Usage: SHRINKINFO <drive>   (report how far a partition could shrink)\n
+;
+MSG_SI_BM_READ_FMT
+cannot read bitmap block %lu
+;
+MSG_SI_BM_BAD_FMT
+bitmap block %lu is invalid - run the disk validator/doctor first
+;
+MSG_SI_PFS_SMALLIDX
+PFS small-index layout (no MODE_SUPERINDEX) is not supported
+;

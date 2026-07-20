@@ -74,6 +74,7 @@ extern struct IntuitionBase *IntuitionBase;
 #include "rdb.h"
 #include "ffsresize.h"
 #include "pfsresize.h"
+#include "shrinkinfo.h"
 #include "locale_support.h"
 
 /* ------------------------------------------------------------------ */
@@ -534,4 +535,186 @@ done:
     return ok;
 
 #undef PFS_PROGRESS
+}
+
+/* ================================================================== */
+/* PFS_ShrinkInfo - READ-ONLY minimum-shrinkable-size scan.            */
+/*                                                                     */
+/* Unlike the grow above (which never needs to look at bitmap blocks - */
+/* PFS3 auto-creates them), this walks the real allocation bitmap:     */
+/* rootblock idx.large.bitmapindex[] -> bitmap index blocks ('MI') ->  */
+/* bitmap blocks ('BM'), verified against pfs3aio allocation.c:        */
+/* bits are MSB-first (1<<(31-i)), 1 = free, coverage starts at        */
+/* bitmapstart = lastreserved+1.  Block numbers are partition-relative */
+/* logical blocks; a metadata block spans reserved_blksize bytes.      */
+/* A bitmapindex/index entry of 0 means PFS3 has not created that      */
+/* bitmap block yet -> the whole covered range is untouched (free).    */
+/* All PFS metadata lives in the reserved area at the partition START, */
+/* so the tail is pure data: floor = highest used block + 1, nothing   */
+/* to relocate.                                                        */
+/* ================================================================== */
+
+#define PFS_BMBLKID  0x424D  /* 'BM' bitmapblock id (pfs3aio blocks.h)   */
+#define PFS_BMIBLKID 0x4D49  /* 'MI' bitmap index block id               */
+
+BOOL PFS_ShrinkInfo(struct BlockDev *bd, const struct RDBInfo *rdb,
+                    const struct PartInfo *pi, struct ShrinkReport *rep,
+                    char *err_buf)
+{
+    UBYTE  first_sector[512];
+    UBYTE *idx_buf = NULL, *bm_buf = NULL;
+    BOOL   ok = FALSE;
+
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_PFS_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+
+    ULONG phys_per_lblock = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
+    ULONG rb_lblock       = pi->reserved_blks > 0 ? pi->reserved_blks : 2;
+    ULONG part_lbase      = pi->low_cyl * heads * sectors;   /* logical blocks */
+    ULONG rb_abs          = (part_lbase + rb_lblock) * phys_per_lblock;
+
+    if (!BlockDev_ReadBlock(bd, rb_abs, first_sector)) {
+        sprintf(err_buf, GS(MSG_PFS_CANNOT_READ_ROOTBLOCK),
+                (unsigned long)rb_abs);
+        return FALSE;
+    }
+    {
+        ULONG disktype = pfs_getl(first_sector, PFS_RB_DISKTYPE);
+        if (disktype != PFS_ID_PFS1 && disktype != PFS_ID_PFS2) {
+            sprintf(err_buf, GS(MSG_PFS_NOT_ROOTBLOCK),
+                    (unsigned long)disktype,
+                    (unsigned long)PFS_ID_PFS1,
+                    (unsigned long)PFS_ID_PFS2);
+            return FALSE;
+        }
+    }
+
+    UWORD reserved_blksize = pfs_getw(first_sector, PFS_RB_RESERVED_BLKSIZE);
+    ULONG options          = pfs_getl(first_sector, PFS_RB_OPTIONS);
+    ULONG lastreserved     = pfs_getl(first_sector, PFS_RB_LASTRESERVED);
+    ULONG disksize         = pfs_getl(first_sector, PFS_RB_DISKSIZE);
+
+    if (reserved_blksize < 512 || (reserved_blksize % 512) != 0) {
+        sprintf(err_buf, GS(MSG_PFS_UNEXPECTED_BLKSIZE),
+                (unsigned)reserved_blksize);
+        return FALSE;
+    }
+    /* Without MODE_SUPERINDEX the bitmapindex[] does not live at the
+       idx.large offset this code reads - refuse rather than misread.
+       (Essentially every pfs3 HD partition has it set - see the grow
+       comments above.) */
+    if (!(options & PFS_MODE_SUPERINDEX)) {
+        sprintf(err_buf, GS(MSG_SI_PFS_SMALLIDX));
+        return FALSE;
+    }
+    if (disksize == 0) {
+        sprintf(err_buf, GS(MSG_PFS_METADATA_CORRUPT),
+                (unsigned long)0, (unsigned long)0, pi->drive_name);
+        return FALSE;
+    }
+
+    ULONG bitmapstart = lastreserved + 1;
+    ULONG longsperbmb = (ULONG)(reserved_blksize / 4) - 3;
+    ULONG bm_coverage = longsperbmb * 32;
+    ULONG user        = (disksize > bitmapstart) ? disksize - bitmapstart : 0;
+    ULONG num_bmb     = (user + bm_coverage - 1) / bm_coverage;
+    ULONG idxperblk   = longsperbmb;
+    ULONG num_idxb    = (num_bmb == 0) ? 0
+                        : (num_bmb + idxperblk - 1) / idxperblk;
+    if (num_idxb > PFS_MAX_BITMAPINDEX) {
+        sprintf(err_buf, GS(MSG_PFS_SUPERINDEX), (unsigned long)options);
+        return FALSE;
+    }
+
+    UWORD n_phys = (UWORD)(reserved_blksize / 512);
+    idx_buf = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
+    bm_buf  = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
+    if (!idx_buf || !bm_buf) {
+        sprintf(err_buf, GS(MSG_PFS_OUT_OF_MEMORY),
+                (unsigned long)reserved_blksize);
+        goto done;
+    }
+
+    ULONG used = 0, highest = 0;
+    BOOL  any_used = FALSE;
+    ULONG cur_idx = 0xFFFFFFFFUL;
+    BOOL  idx_absent = FALSE;
+
+    for (ULONG seq = 0; seq < num_bmb; seq++) {
+        ULONG ii = seq / idxperblk;
+        if (ii != cur_idx) {
+            ULONG inr = pfs_getl(first_sector,
+                                 PFS_RB_BITMAPINDEX + 4 * ii);
+            cur_idx    = ii;
+            idx_absent = (inr == 0);
+            if (!idx_absent) {
+                if (!pfs_read_cluster(bd, (part_lbase + inr) * phys_per_lblock,
+                                      idx_buf, n_phys)) {
+                    sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                            (unsigned long)inr);
+                    goto done;
+                }
+                if (pfs_getw(idx_buf, 0) != PFS_BMIBLKID) {
+                    sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                            (unsigned long)inr);
+                    goto done;
+                }
+            }
+        }
+        if (idx_absent) continue;              /* untouched region = free */
+
+        ULONG bmnr = pfs_getl(idx_buf, 12 + 4 * (seq % idxperblk));
+        if (bmnr == 0) continue;               /* untouched region = free */
+
+        if (!pfs_read_cluster(bd, (part_lbase + bmnr) * phys_per_lblock,
+                              bm_buf, n_phys)) {
+            sprintf(err_buf, GS(MSG_SI_BM_READ_FMT), (unsigned long)bmnr);
+            goto done;
+        }
+        if (pfs_getw(bm_buf, 0) != PFS_BMBLKID ||
+            pfs_getl(bm_buf, 8) != seq) {
+            sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT), (unsigned long)bmnr);
+            goto done;
+        }
+
+        for (ULONG m = 0; m < longsperbmb; m++) {
+            ULONG b0 = bitmapstart + (seq * longsperbmb + m) * 32;
+            if (b0 >= disksize) break;
+            ULONG v = pfs_getl(bm_buf, 12 + 4 * m);
+            ULONG in_range = disksize - b0;
+            if (in_range > 32) in_range = 32;
+            if (v == 0xFFFFFFFFUL) continue;               /* all free */
+            if (v == 0 && in_range == 32) {                /* all used */
+                used += 32; highest = b0 + 31; any_used = TRUE;
+                continue;
+            }
+            for (ULONG k = 0; k < in_range; k++) {
+                if (!(v & (1UL << (31u - k)))) {
+                    used++; highest = b0 + k; any_used = TRUE;
+                }
+            }
+        }
+    }
+
+    rep->total_blocks    = disksize;
+    rep->used_blocks     = used + bitmapstart;  /* boot + reserved area */
+    rep->highest_used    = any_used ? highest : 0;
+    rep->min_blocks      = any_used ? highest + 1 : bitmapstart;
+    if (rep->min_blocks < bitmapstart) rep->min_blocks = bitmapstart;
+    rep->fs_block_bytes  = (pi->block_size > 0) ? pi->block_size : 512;
+    rep->meta_note_block = 0;      /* PFS metadata all lives at the start */
+    rep->deleted_blocks  = 0;
+    rep->fresh           = FALSE;  /* read without Inhibit (see grow notes:
+                                      reads after Inhibit can hang on PFS) */
+    ok = TRUE;
+
+done:
+    if (idx_buf) FreeVec(idx_buf);
+    if (bm_buf)  FreeVec(bm_buf);
+    return ok;
 }
