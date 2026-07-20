@@ -141,6 +141,70 @@ static ULONG pc_part_base(const struct PartInfo *pi, ULONG dh, ULONG ds)
 }
 
 /* ------------------------------------------------------------------ */
+/* Footprint validation (physical 512-byte block space)               */
+/* ------------------------------------------------------------------ */
+BOOL PartClone_ValidateFootprint(const struct RDBInfo *drdb,
+                                 ULONG low, ULONG high, ULONG h, ULONG s,
+                                 int skip_idx, char *err_buf, ULONG ebsz)
+{
+    ULONG bpc = h * s;
+    ULONG new_lo = low * bpc;
+    ULONG new_hi = (high + 1) * bpc;   /* exclusive */
+    ULONG disk_blocks = drdb->cylinders * drdb->heads * drdb->sectors;
+    UWORD i;
+
+    if (high < low || (high + 1) * bpc > disk_blocks) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_OVERLAP_FMT),
+                 "disk end", (unsigned long)low, (unsigned long)high);
+        return FALSE;
+    }
+    for (i = 0; i < drdb->num_parts; i++) {
+        const struct PartInfo *p = &drdb->parts[i];
+        ULONG ph, ps, plo, phi;
+        if ((int)i == skip_idx) continue;
+        ph  = p->heads   > 0 ? p->heads   : drdb->heads;
+        ps  = p->sectors > 0 ? p->sectors : drdb->sectors;
+        plo = p->low_cyl * ph * ps;
+        phi = (p->high_cyl + 1) * ph * ps;   /* exclusive */
+        if (new_lo < phi && plo < new_hi) {
+            snprintf(err_buf, ebsz, GS(MSG_PC_OVERLAP_FMT),
+                     p->drive_name, (unsigned long)p->low_cyl,
+                     (unsigned long)p->high_cyl);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+BOOL PartClone_FindGap(const struct RDBInfo *drdb, ULONG cyl_span,
+                       ULONG h, ULONG s, ULONG *low_out)
+{
+    /* Scan candidate low cylinders from the RDB's low usable cyl upward,
+       jumping past each occupied partition; O(parts^2) but parts<=64. */
+    ULONG cand = drdb->lo_cyl;
+    char  scratch[80];
+    while (cand + cyl_span - 1 <= drdb->hi_cyl) {
+        if (PartClone_ValidateFootprint(drdb, cand, cand + cyl_span - 1,
+                                        h, s, -1, scratch, sizeof(scratch))) {
+            *low_out = cand;
+            return TRUE;
+        }
+        /* advance past the nearest partition that starts at/after cand */
+        {
+            ULONG next = drdb->hi_cyl + 1;
+            UWORD i;
+            for (i = 0; i < drdb->num_parts; i++) {
+                ULONG phi = drdb->parts[i].high_cyl;
+                if (phi >= cand && phi + 1 < next) next = phi + 1;
+            }
+            if (next <= cand) break;
+            cand = next;
+        }
+    }
+    return FALSE;
+}
+
+/* ------------------------------------------------------------------ */
 /* SFS position fixup: patch both root blocks' firstbyte/lastbyte from  */
 /* the source's absolute byte base to the destination's.  new_base/     */
 /* old_base are ABSOLUTE 512-byte block numbers.  Non-fatal-safe: the   */
@@ -329,12 +393,26 @@ BOOL PartClone_RestoreToPart(struct BlockDev *bd, struct RDBInfo *rdb,
 
     if (!PartClone_ReadHeader(path, &h, err_buf, ebsz)) return FALSE;
 
-    /* destination capacity uses the DUMP's geometry (what it will become) */
+    /* Give the destination the dump's geometry AND cylinder span, keeping
+       its start - so the restored filesystem's size matches what the dump
+       was made from (FFS derives its root position from the partition size,
+       so a size mismatch would break it).  Validate the new footprint fits
+       without overlapping another partition, then adopt it. */
     {
         ULONG spb  = (h.block_size >= 1024) ? (h.block_size / 512) : 1;
         ULONG hh   = h.heads   > 0 ? h.heads   : rdb->heads;
         ULONG ss   = h.sectors > 0 ? h.sectors : rdb->sectors;
-        dst_blocks = (dst->high_cyl - dst->low_cyl + 1) * hh * ss * spb;
+        ULONG span = (h.src_high_cyl >= h.src_low_cyl)
+                     ? (h.src_high_cyl - h.src_low_cyl + 1) : 1;
+        ULONG new_high = dst->low_cyl + span - 1;
+        int   didx = (int)(dst - &rdb->parts[0]);
+        if (!PartClone_ValidateFootprint(rdb, dst->low_cyl, new_high,
+                                         hh, ss, didx, err_buf, ebsz))
+            return FALSE;
+        dst->heads    = hh;
+        dst->sectors  = ss;
+        dst->high_cyl = new_high;
+        dst_blocks = span * hh * ss * spb;
         dst_base   = dst->low_cyl * hh * ss * spb;
         /* where the SFS roots in the dump think they live: source base */
         src_base_at_dump = h.src_low_cyl * hh * ss * spb;

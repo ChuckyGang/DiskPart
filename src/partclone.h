@@ -76,6 +76,20 @@ BOOL PartClone_RestoreToPart(struct BlockDev *bd, struct RDBInfo *rdb,
                              MoveProgressFn progress_fn, void *progress_ud,
                              char *err_buf, ULONG ebsz);
 
+/* Validate that a partition occupying cylinders [low..high] with geometry
+   h x s fits within drdb's disk and overlaps no partition except skip_idx
+   (pass -1 to check against all).  Overlap is checked in physical 512-byte
+   block space, so differing per-partition geometries compare correctly.
+   Returns TRUE if the placement is valid. */
+BOOL PartClone_ValidateFootprint(const struct RDBInfo *drdb,
+                                 ULONG low, ULONG high, ULONG h, ULONG s,
+                                 int skip_idx, char *err_buf, ULONG ebsz);
+
+/* Find a starting cylinder for a NEW partition of cyl_span cylinders (with
+   geometry h x s) that fits a free gap on drdb.  Returns TRUE + *low_out. */
+BOOL PartClone_FindGap(const struct RDBInfo *drdb, ULONG cyl_span,
+                       ULONG h, ULONG s, ULONG *low_out);
+
 /* Direct clone of partition src -> partition dst (same disk: sbd==dbd; or
    two disks).  dst must be at least as large as src.  dst's DosEnvec is set
    from src; SFS offsets fixed up for dst's location.  The caller writes

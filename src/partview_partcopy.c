@@ -39,6 +39,65 @@
 #define PCP_GID_SELECT 2
 #define PCP_GID_CANCEL 3
 
+/* Sentinel index returned by the picker for the "create new partition" row. */
+#define PCP_CREATE_NEW  0x7FFF
+
+/* ---- listview render hook: persistent selection highlight ----
+   A plain GadTools listview only shows LVR_SELECTED while the button is
+   held (reverts on release, every ROM), so the chosen row never stays
+   marked.  Same fix as diskselect.c: a module-level selected index + a
+   COMPLEMENT overlay in a custom GTLV_CallBack render hook, and
+   gui_force_lv_redraw() to re-run the hook after a click. */
+static WORD  pcp_sel_idx = -1;
+static struct Node *pcp_nodes_base;   /* h_Data: the node array in use */
+
+static ULONG pcp_lv_render(void)
+{
+    register struct Hook      *h    __asm__("a0");
+    register struct LVDrawMsg *msg  __asm__("a1");
+    register struct Node      *node __asm__("a2");
+    struct Hook      *_h    = h;
+    struct LVDrawMsg *_msg  = msg;
+    struct Node      *_node = node;
+#define h    _h
+#define msg  _msg
+#define node _node
+    struct RastPort *rp;
+    struct Rectangle *b;
+    BOOL sel;
+    UWORD bg_pen, fg_pen, len;
+    const char *name;
+    WORD idx;
+
+    if (msg->lvdm_MethodID != LV_DRAW) return LVCB_OK;
+    rp = msg->lvdm_RastPort;
+    b  = &msg->lvdm_Bounds;
+    idx = (WORD)(node - (struct Node *)h->h_Data);
+    sel = (msg->lvdm_State == LVR_SELECTED ||
+           msg->lvdm_State == LVR_SELECTEDDISABLED) ||
+          (idx == pcp_sel_idx);
+    bg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[BACKGROUNDPEN];
+    fg_pen = (UWORD)msg->lvdm_DrawInfo->dri_Pens[TEXTPEN];
+    SetAPen(rp, (LONG)bg_pen); SetDrMd(rp, JAM2);
+    RectFill(rp, b->MinX, b->MinY, b->MaxX, b->MaxY);
+    name = node->ln_Name ? node->ln_Name : "";
+    len  = (UWORD)strlen(name);
+    SetAPen(rp, (LONG)fg_pen); SetDrMd(rp, JAM1);
+    Move(rp, b->MinX + 2, b->MinY + (WORD)rp->TxBaseline);
+    Text(rp, name, len);
+    if (sel) {
+        SetDrMd(rp, COMPLEMENT);
+        RectFill(rp, b->MinX, b->MinY, b->MaxX, b->MaxY);
+        SetDrMd(rp, JAM1);
+    }
+    return LVCB_OK;
+#undef h
+#undef msg
+#undef node
+}
+
+static struct Hook pcp_lv_hook;
+
 /* ---- destination disk picker (same flow as partview_diskcopy.c) ---- */
 static BOOL pcp_devname_eq_ci(const char *a, const char *b)
 {
@@ -94,17 +153,14 @@ static WORD pcp_pick_partition(struct Window *parent, struct RDBInfo *drdb,
     APTR   vi = NULL;
     struct Gadget *glist = NULL, *gctx;
     struct Window *win = NULL;
-    static char rows[MAX_PARTITIONS][64];
-    struct Node nodes[MAX_PARTITIONS];
+    static char rows[MAX_PARTITIONS + 1][64];
+    static struct Node nodes[MAX_PARTITIONS + 1];
     struct List list;
     static char title[80];
-    WORD sel = -1, result = -1;
-    UWORD i;
+    WORD result = -1;
+    UWORD i, nrows;
 
-    if (drdb->num_parts == 0) {
-        pcp_msg(parent, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_PARTS));
-        return -1;
-    }
+    pcp_sel_idx = -1;
 
     /* manual exec list init (NewList is inline-only in some NDKs) */
     list.lh_Head     = (struct Node *)&list.lh_Tail;
@@ -119,10 +175,20 @@ static WORD pcp_pick_partition(struct Window *parent, struct RDBInfo *drdb,
         FormatSize((UQUAD)(p->high_cyl - p->low_cyl + 1) * hh * ss * 512UL, sz);
         DP_SNPRINTF(rows[i], "%-10s %-8s %s", p->drive_name, dt, sz);
         nodes[i].ln_Name = rows[i];
-        nodes[i].ln_Type = NT_USER;
-        nodes[i].ln_Pri  = 0;
+        nodes[i].ln_Type = NT_USER; nodes[i].ln_Pri = 0;
         AddTail(&list, &nodes[i]);
     }
+    /* trailing "create a new partition" row */
+    strncpy(rows[drdb->num_parts], GS(MSG_PCP_NEW_ENTRY), 63);
+    rows[drdb->num_parts][63] = '\0';
+    nodes[drdb->num_parts].ln_Name = rows[drdb->num_parts];
+    nodes[drdb->num_parts].ln_Type = NT_USER; nodes[drdb->num_parts].ln_Pri = 0;
+    AddTail(&list, &nodes[drdb->num_parts]);
+    nrows = drdb->num_parts + 1;
+    pcp_nodes_base = nodes;
+    pcp_lv_hook.h_Entry    = (HOOKFUNC)pcp_lv_render;
+    pcp_lv_hook.h_SubEntry = NULL;
+    pcp_lv_hook.h_Data     = (APTR)nodes;
     DP_SNPRINTF(title, GS(MSG_PCP_PICK_TITLE_FMT), devname);
 
     scr = LockPubScreen(NULL);
@@ -140,12 +206,16 @@ static WORD pcp_pick_partition(struct Window *parent, struct RDBInfo *drdb,
         UWORD inner_w = win_w - bor_l - bor_r;
         UWORD btn_h = font_h + 6;
         UWORD row_h = (UWORD)(font_h + 2);
-        UWORD rows_shown = (drdb->num_parts > 4) ? drdb->num_parts : 4;
+        UWORD rows_shown = (nrows > 4) ? nrows : 4;
         UWORD lv_h = row_h * rows_shown;
         UWORD win_h = bor_t + pad + lv_h + pad + btn_h + pad + bor_b;
         struct NewGadget ng;
         struct Gadget *lv_gad, *sel_gad, *cancel_gad;
-        struct TagItem lv_tags[] = { { GTLV_Labels, (ULONG)&list }, { TAG_DONE, 0 } };
+        struct TagItem lv_tags[] = {
+            { GTLV_Labels,   (ULONG)&list },
+            { GTLV_CallBack, (ULONG)&pcp_lv_hook },
+            { TAG_DONE, 0 }
+        };
         struct TagItem bt[] = { { TAG_DONE, 0 } };
 
         gctx = CreateContext(&glist);
@@ -196,6 +266,7 @@ static WORD pcp_pick_partition(struct Window *parent, struct RDBInfo *drdb,
 
     {
         BOOL running = TRUE;
+        WORD sel = -1;
         while (running) {
             struct IntuiMessage *imsg;
             WaitPort(win->UserPort);
@@ -209,9 +280,14 @@ static WORD pcp_pick_partition(struct Window *parent, struct RDBInfo *drdb,
                     running = FALSE; break;
                 case IDCMP_GADGETDOWN:
                 case IDCMP_GADGETUP:
-                    if (gad->GadgetID == PCP_GID_LIST) sel = (WORD)code;
-                    else if (gad->GadgetID == PCP_GID_SELECT) {
-                        if (sel >= 0 && sel < (WORD)drdb->num_parts) result = sel;
+                    if (gad->GadgetID == PCP_GID_LIST) {
+                        sel = (WORD)code;
+                        pcp_sel_idx = sel;            /* persist the highlight */
+                        gui_force_lv_redraw(gad, win, &list);
+                    } else if (gad->GadgetID == PCP_GID_SELECT) {
+                        if (sel >= 0 && sel < (WORD)nrows)
+                            result = (sel == (WORD)drdb->num_parts)
+                                     ? PCP_CREATE_NEW : sel;
                         running = FALSE;
                     } else if (gad->GadgetID == PCP_GID_CANCEL) {
                         running = FALSE;
@@ -269,19 +345,71 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         BlockDev_Close(dest); return;
     }
 
-    dpi_idx = pcp_pick_partition(win, &drdb, dest_devname);
-    if (dpi_idx < 0) { RDB_FreeCode(&drdb); BlockDev_Close(dest); return; }
-    dpi = &drdb.parts[dpi_idx];
-
-    /* self-clone guard (same disk + same partition) */
-    if (pcp_devname_eq_ci(dest_devname, cur_devname) && dest_unit == cur_unit &&
-        dpi->low_cyl == src->low_cyl && dpi->high_cyl == src->high_cyl) {
-        pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PC_CLONE_SAME));
-        RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
-    }
-
     if (!src->heads)   src->heads   = rdb->heads;
     if (!src->sectors) src->sectors = rdb->sectors;
+
+    dpi_idx = pcp_pick_partition(win, &drdb, dest_devname);
+    if (dpi_idx < 0) { RDB_FreeCode(&drdb); BlockDev_Close(dest); return; }
+
+    {
+        ULONG src_span = src->high_cyl - src->low_cyl + 1;
+        int   skip_idx;
+
+        if (dpi_idx == PCP_CREATE_NEW) {
+            /* Create a fresh partition of the source's geometry+span in the
+               first free gap, auto-named, added to the destination RDB. */
+            ULONG low;
+            char  nm[8];
+            UWORD n;
+            if (drdb.num_parts >= MAX_PARTITIONS) {
+                pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_PARTS));
+                RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            }
+            if (!PartClone_FindGap(&drdb, src_span, src->heads, src->sectors,
+                                   &low)) {
+                DP_SNPRINTF(body, GS(MSG_PC_NOGAP_FMT), (unsigned long)src_span);
+                pcp_msg(win, GS(MSG_PCP_TITLE), body);
+                RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            }
+            dpi = &drdb.parts[drdb.num_parts];
+            memset(dpi, 0, sizeof(*dpi));
+            /* unique DHn name on the destination disk */
+            for (n = 0; n < 100; n++) {
+                UWORD j; BOOL taken = FALSE;
+                DP_SNPRINTF(nm, "DH%lu", (unsigned long)n);
+                for (j = 0; j < drdb.num_parts; j++)
+                    if (pcp_devname_eq_ci(drdb.parts[j].drive_name, nm)) { taken = TRUE; break; }
+                if (!taken) break;
+            }
+            strncpy(dpi->drive_name, nm, sizeof(dpi->drive_name) - 1);
+            dpi->low_cyl = low;
+            skip_idx = -1;                 /* brand new: overlap-check all */
+        } else {
+            dpi = &drdb.parts[dpi_idx];
+            /* self-clone guard (same disk + same partition) */
+            if (pcp_devname_eq_ci(dest_devname, cur_devname) &&
+                dest_unit == cur_unit &&
+                dpi->low_cyl == src->low_cyl && dpi->high_cyl == src->high_cyl) {
+                pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PC_CLONE_SAME));
+                RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            }
+            skip_idx = dpi_idx;            /* overwrite: ignore its own space */
+        }
+
+        /* Give the target the source's geometry + cylinder span (so the
+           filesystem's size matches), keeping its start, and validate it
+           fits without overlapping any other partition. */
+        dpi->heads    = src->heads;
+        dpi->sectors  = src->sectors;
+        dpi->high_cyl = dpi->low_cyl + src_span - 1;
+        if (!PartClone_ValidateFootprint(&drdb, dpi->low_cyl, dpi->high_cyl,
+                                         src->heads, src->sectors, skip_idx,
+                                         err, sizeof(err))) {
+            pcp_msg(win, GS(MSG_PCP_TITLE), err);
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+        }
+        if (dpi_idx == PCP_CREATE_NEW) drdb.num_parts++;
+    }
 
     {
         struct EasyStruct es;
@@ -312,8 +440,12 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
             }
         }
         ProgressWin_Close(&prog);
-        if (ok) DP_SNPRINTF(body, GS(MSG_PCP_OK_FMT), src->drive_name, dpi->drive_name);
-        else    DP_SNPRINTF(body, GS(MSG_PCP_FAIL_FMT), err);
+        if (ok && dpi_idx == PCP_CREATE_NEW)
+            DP_SNPRINTF(body, GS(MSG_PCP_NEW_OK_FMT), dpi->drive_name);
+        else if (ok)
+            DP_SNPRINTF(body, GS(MSG_PCP_OK_FMT), src->drive_name, dpi->drive_name);
+        else
+            DP_SNPRINTF(body, GS(MSG_PCP_FAIL_FMT), err);
         pcp_msg(win, GS(MSG_PCP_TITLE), body);
     }
 

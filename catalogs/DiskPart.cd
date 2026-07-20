@@ -3927,3 +3927,15 @@ Cloned %s onto %s.\nThe destination RDB has been written -\nreboot that disk bef
 MSG_PCP_FAIL_FMT
 Clone failed:\n%s
 ;
+MSG_PC_OVERLAP_FMT
+The clone would overlap %s (cyl %lu-%lu) or run past the disk.\n
+;
+MSG_PC_NOGAP_FMT
+No free gap of %lu cylinders on the destination disk.\n
+;
+MSG_PCP_NEW_ENTRY
+[ Create a new partition ]
+;
+MSG_PCP_NEW_OK_FMT
+Created %s and cloned into it.\nThe destination RDB has been written -\nreboot that disk before using the volume.
+;

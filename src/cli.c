@@ -2022,6 +2022,23 @@ static LONG cmd_partclone(const char *devname, ULONG unit, BOOL force,
     if (!src->heads)   src->heads   = s_rdb.heads;
     if (!src->sectors) src->sectors = s_rdb.sectors;
 
+    /* The clone gives dst the source's geometry and cylinder SPAN (so the
+       filesystem's size matches), keeping dst's start; validate it fits
+       without overlapping any other partition. */
+    {
+        int   didx     = (int)(dst - &s_rdb.parts[0]);
+        ULONG src_span = src->high_cyl - src->low_cyl + 1;
+        dst->heads    = src->heads;
+        dst->sectors  = src->sectors;
+        dst->high_cyl = dst->low_cyl + src_span - 1;
+        if (!PartClone_ValidateFootprint(&s_rdb, dst->low_cyl, dst->high_cyl,
+                                         src->heads, src->sectors, didx,
+                                         err, sizeof(err))) {
+            cli_puts(err);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+    }
+
     DP_SNPRINTF(outbuf, GS(MSG_PC_CLONE_ASK), src->drive_name, dst->drive_name);
     if (!ask_yn(outbuf, force)) {
         cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));

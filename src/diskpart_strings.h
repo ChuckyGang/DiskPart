@@ -1276,8 +1276,12 @@
 #define MSG_PCP_PROG_FMT             1270
 #define MSG_PCP_OK_FMT               1271
 #define MSG_PCP_FAIL_FMT             1272
+#define MSG_PC_OVERLAP_FMT           1273
+#define MSG_PC_NOGAP_FMT             1274
+#define MSG_PCP_NEW_ENTRY            1275
+#define MSG_PCP_NEW_OK_FMT           1276
 
-#define MSG_COUNT 1273
+#define MSG_COUNT 1277
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2562,5 +2566,9 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1270 MSG_PCP_PROG_FMT */ "Cloning onto %s",
     /* 1271 MSG_PCP_OK_FMT */ "Cloned %s onto %s.\nThe destination RDB has been written -\nreboot that disk before using the volume.",
     /* 1272 MSG_PCP_FAIL_FMT */ "Clone failed:\n%s",
+    /* 1273 MSG_PC_OVERLAP_FMT */ "The clone would overlap %s (cyl %lu-%lu) or run past the disk.\n",
+    /* 1274 MSG_PC_NOGAP_FMT */ "No free gap of %lu cylinders on the destination disk.\n",
+    /* 1275 MSG_PCP_NEW_ENTRY */ "[ Create a new partition ]",
+    /* 1276 MSG_PCP_NEW_OK_FMT */ "Created %s and cloned into it.\nThe destination RDB has been written -\nreboot that disk before using the volume.",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */
