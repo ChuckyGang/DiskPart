@@ -69,7 +69,8 @@ extern struct DosLibrary *DOSBase;
     "GROW/M,"                                                     \
     "ZEROPART/S,"                                                  \
     "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S,"    \
-    "SHRINKINFO/K,SHRINK/K,PARTOUT/K,PARTIN/K,PARTCLONE/K,TO/K"
+    "SHRINKINFO/K,SHRINK/K,PARTOUT/K,PARTIN/K,PARTCLONE/K,TO/K,"   \
+    "TODEV/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -125,6 +126,7 @@ enum {
     ARG_PARTIN,
     ARG_PARTCLONE,
     ARG_TO,
+    ARG_TODEV,
     ARG_COUNT
 };
 
@@ -1991,13 +1993,21 @@ static LONG cmd_partin(const char *devname, ULONG unit, BOOL force,
 /*   PARTCLONE=<src> TO=<dst>                                          */
 /* ------------------------------------------------------------------ */
 
+/* Second RDB for cross-disk clone (large; keep out of the stack). */
+static struct RDBInfo s_rdb2;
+
 static LONG cmd_partclone(const char *devname, ULONG unit, BOOL force,
-                          const char *src_s, const char *dst_s)
+                          const char *src_s, const char *dst_s,
+                          const char *todev_s)
 {
-    struct BlockDev *bd;
+    struct BlockDev *bd, *dbd;
     struct PartInfo *src, *dst;
+    struct RDBInfo  *drdb;
     struct CliProg prog;
-    char   sname[32], dname[32], err[128];
+    char   sname[32], dname[32], err[128], ddevname[64];
+    ULONG  dunit = 0;
+    BOOL   cross = (todev_s && todev_s[0]);
+    LONG   rc = RETURN_ERROR;
 
     if (!dst_s || !dst_s[0]) { cli_puts(GS(MSG_PC_CLONE_USAGE)); return RETURN_WARN; }
 
@@ -2012,54 +2022,62 @@ static LONG cmd_partclone(const char *devname, ULONG unit, BOOL force,
         BlockDev_Close(bd); return RETURN_ERROR;
     }
     src = cli_find_part(src_s, sname);
-    dst = cli_find_part(dst_s, dname);
     if (!src) { DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), sname); cli_puts(outbuf);
-                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
-    if (!dst) { DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), dname); cli_puts(outbuf);
-                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
-    if (src == dst) { cli_puts(GS(MSG_PC_CLONE_SAME));
                 RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
     if (!src->heads)   src->heads   = s_rdb.heads;
     if (!src->sectors) src->sectors = s_rdb.sectors;
 
-    /* The clone gives dst the source's geometry and cylinder SPAN (so the
-       filesystem's size matches), keeping dst's start; validate it fits
-       without overlapping any other partition. */
-    {
-        int   didx     = (int)(dst - &s_rdb.parts[0]);
-        ULONG src_span = src->high_cyl - src->low_cyl + 1;
-        dst->heads    = src->heads;
-        dst->sectors  = src->sectors;
-        dst->high_cyl = dst->low_cyl + src_span - 1;
-        if (!PartClone_ValidateFootprint(&s_rdb, dst->low_cyl, dst->high_cyl,
-                                         src->heads, src->sectors, didx,
-                                         err, sizeof(err))) {
-            cli_puts(err);
-            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    /* Destination: same disk, or a second device via TODEV=. */
+    if (cross) {
+        if (!parse_dev(todev_s, ddevname, &dunit)) {
+            strncpy(ddevname, todev_s, 63); ddevname[63] = '\0'; dunit = unit;
         }
+        dbd = cli_open_target(ddevname, dunit);
+        if (!dbd) { RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
+        memset(&s_rdb2, 0, sizeof(s_rdb2));
+        if (!RDB_Read(dbd, &s_rdb2) || !s_rdb2.valid) {
+            cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+            BlockDev_Close(dbd); RDB_FreeCode(&s_rdb); BlockDev_Close(bd);
+            return RETURN_ERROR;
+        }
+        drdb = &s_rdb2;
+        dst  = NULL;
+        { UWORD i, l; char tmp[32];
+          strncpy(tmp, dst_s, 30); tmp[30] = 0;
+          l = (UWORD)strlen(tmp); if (l && tmp[l-1] == ':') tmp[l-1] = 0;
+          for (i = 0; i < s_rdb2.num_parts; i++)
+              if (str_eq_ci(s_rdb2.parts[i].drive_name, tmp)) { dst = &s_rdb2.parts[i]; break; }
+        }
+    } else {
+        dbd  = bd;
+        drdb = &s_rdb;
+        dst  = cli_find_part(dst_s, dname);
     }
+    if (!dst) { DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), dst_s); cli_puts(outbuf);
+                goto cleanup; }
+    if (dbd == bd && src == dst) { cli_puts(GS(MSG_PC_CLONE_SAME)); goto cleanup; }
 
     DP_SNPRINTF(outbuf, GS(MSG_PC_CLONE_ASK), src->drive_name, dst->drive_name);
     if (!ask_yn(outbuf, force)) {
-        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
-        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES)); rc = RETURN_OK; goto cleanup;
     }
 
     prog.last_pct = 0; prog.last_blocks = 0; err[0] = '\0';
-    if (!PartClone_PartToPart(bd, src, bd, &s_rdb, dst,
+    if (!PartClone_PartToPart(bd, src, dbd, drdb, dst,
                               cli_move_progress, &prog, err, sizeof(err))) {
-        cli_puts(err);
-        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        cli_puts(err); goto cleanup;
     }
     cli_puts(GS(MSG_CLI_WRITING_RDB));
-    if (!RDB_Write(bd, &s_rdb)) {
-        cli_puts(GS(MSG_CLI_FAILED));
-        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
-    }
+    if (!RDB_Write(dbd, drdb)) { cli_puts(GS(MSG_CLI_FAILED)); goto cleanup; }
     cli_puts(GS(MSG_CLI_OK));
     DP_SNPRINTF(outbuf, GS(MSG_PC_CLONE_OK_FMT), src->drive_name, dst->drive_name);
     cli_puts(outbuf);
-    RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    rc = RETURN_OK;
+
+cleanup:
+    if (cross) { RDB_FreeCode(&s_rdb2); BlockDev_Close(dbd); }
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd);
+    return rc;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3221,7 +3239,8 @@ LONG cli_run(void)
             if (rc == RETURN_OK && args[ARG_PARTCLONE])
                 rc = cmd_partclone(devname, unit, force,
                                    (const char *)args[ARG_PARTCLONE],
-                                   (const char *)args[ARG_TO]);
+                                   (const char *)args[ARG_TO],
+                                   (const char *)args[ARG_TODEV]);
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,

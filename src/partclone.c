@@ -13,6 +13,8 @@
 #include "rdb.h"
 #include "partmove.h"
 #include "sfsresize.h"      /* SFS_IsSupportedType */
+#include "pfsresize.h"      /* PFS_IsSupportedType */
+#include "ffsresize.h"      /* FFS_IsSupportedType */
 #include "sfs_util.h"
 #include "partclone.h"
 #include "locale_support.h"
@@ -464,6 +466,29 @@ out:
 #undef PROG
 }
 
+/* PFS3 rootblock: options field at byte 4, MODE_SIZEFIELD = 0x10.  The
+   rootblock sits at logical block reserved_blks from the partition start.
+   PFS uses datestamp validation, not a block checksum, so clearing the bit
+   and writing the sector back is safe (same as pfsresize.c).  Non-fatal. */
+#define PC_PFS_OPTIONS_OFF  4
+#define PC_PFS_MODE_SIZEFIELD 16
+static void pc_pfs_clear_sizefield(struct BlockDev *bd, ULONG part_base_blk,
+                                   ULONG reserved_blks, ULONG phys_per_lb)
+{
+    UBYTE sec[512];
+    ULONG rb = part_base_blk + (reserved_blks ? reserved_blks : 2) * phys_per_lb;
+    ULONG opt;
+    if (!BlockDev_ReadBlock(bd, rb, sec)) return;
+    /* only touch a genuine PFS rootblock (disktype 'PFS\1'/'PFS\2') */
+    if (pc_getl(sec, 0) != 0x50465301UL && pc_getl(sec, 0) != 0x50465302UL)
+        return;
+    opt = pc_getl(sec, PC_PFS_OPTIONS_OFF);
+    if (opt & PC_PFS_MODE_SIZEFIELD) {
+        pc_setl(sec, PC_PFS_OPTIONS_OFF, opt & ~(ULONG)PC_PFS_MODE_SIZEFIELD);
+        (void)BlockDev_WriteBlock(bd, rb, sec);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Direct partition -> partition                                       */
 /* ------------------------------------------------------------------ */
@@ -476,21 +501,46 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
 #define PROG(d,t,ph) do { if (progress_fn) progress_fn(progress_ud,(d),(t),(ph)); } while(0)
     UBYTE *buf = NULL;
     ULONG  src_base, src_count, dst_base, dst_blocks, done = 0;
+    ULONG  sh, ss, dh, ds;
     BOOL   ok = FALSE;
 
-    src_base  = pc_part_base(src, src->heads, src->sectors);
-    src_count = pc_part_blocks(src, src->heads, src->sectors);
-
-    /* destination sized with the SOURCE geometry it will adopt */
-    {
-        ULONG spb = (src->block_size >= 1024) ? (src->block_size / 512) : 1;
-        ULONG hh  = src->heads   > 0 ? src->heads   : drdb->heads;
-        ULONG ss  = src->sectors > 0 ? src->sectors : drdb->sectors;
-        dst_blocks = (dst->high_cyl - dst->low_cyl + 1) * hh * ss * spb;
-        dst_base   = dst->low_cyl * hh * ss * spb;
+    /* Keep the DESTINATION partition exactly as it is - its own geometry,
+       location and size - and drop the source's blocks into it.  The
+       filesystem content is partition-relative and geometry-independent, so
+       this works across disks of different geometry: only the FS's own size
+       awareness matters (see the FFS check below).  Block sizes must match
+       so the FS blocks line up. */
+    if (src->block_size && dst->block_size && src->block_size != dst->block_size) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_BLKSIZE_MISMATCH),
+                 (unsigned long)src->block_size, (unsigned long)dst->block_size,
+                 (unsigned long)src->block_size);
+        return FALSE;
     }
+
+    sh = src->heads   > 0 ? src->heads   : drdb->heads;
+    ss = src->sectors > 0 ? src->sectors : drdb->sectors;
+    dh = dst->heads   > 0 ? dst->heads   : drdb->heads;
+    ds = dst->sectors > 0 ? dst->sectors : drdb->sectors;
+
+    src_base  = pc_part_base(src, sh, ss);
+    src_count = pc_part_blocks(src, sh, ss);
+    dst_base   = pc_part_base(dst, dh, ds);   /* dest's OWN physical footprint */
+    dst_blocks = pc_part_blocks(dst, dh, ds);
+
     if (src_count == 0) { snprintf(err_buf, ebsz, GS(MSG_PC_NOT_FOUND_FMT), src->drive_name); return FALSE; }
-    if (dst_blocks < src_count) {
+
+    /* FFS/OFS bakes its total size into its on-disk layout (root position and
+       bitmap come from the DosEnvec geometry), so it must land in a partition
+       of EXACTLY the same block count.  SFS and PFS3 store their own size in
+       their root, so they happily sit in a larger partition. */
+    if (FFS_IsSupportedType(src->dos_type)) {
+        if (dst_blocks != src_count) {
+            snprintf(err_buf, ebsz, GS(MSG_PC_FFS_EXACT_FMT),
+                     (unsigned long)src_count, dst->drive_name,
+                     (unsigned long)dst_blocks);
+            return FALSE;
+        }
+    } else if (dst_blocks < src_count) {
         snprintf(err_buf, ebsz, GS(MSG_PC_DST_TOO_SMALL_FMT),
                  dst->drive_name, (unsigned long)dst_blocks,
                  (unsigned long)src_count);
@@ -519,30 +569,25 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
         PROG(done, src_count, GS(MSG_PC_COPYING));
     }
 
-    {
-        char saved[32];
-        ULONG i;
-        for (i = 0; i < 32; i++) saved[i] = dst->drive_name[i];
-        /* adopt source geometry+dostype; keep dst's own name + location */
-        dst->dos_type = src->dos_type; dst->block_size = src->block_size;
-        dst->sectors_per_block = src->sectors_per_block;
-        dst->reserved_blks = src->reserved_blks;
-        dst->heads = src->heads; dst->sectors = src->sectors;
-        dst->flags = src->flags; dst->dev_flags = src->dev_flags;
-        dst->mask = src->mask; dst->max_transfer = src->max_transfer;
-        dst->num_buffer = src->num_buffer; dst->buf_mem_type = src->buf_mem_type;
-        dst->boot_blocks = src->boot_blocks; dst->interleave = src->interleave;
-        dst->control = src->control; dst->baud = src->baud;
-        dst->boot_pri = src->boot_pri;
-        for (i = 0; i < 32; i++) dst->drive_name[i] = saved[i];
-    }
+    /* Adopt only the FILESYSTEM-defining fields; keep the destination's own
+       name, location, geometry, block size and mount flags. */
+    dst->dos_type          = src->dos_type;
+    dst->sectors_per_block = src->sectors_per_block;
+    dst->reserved_blks     = src->reserved_blks;
+
     if (SFS_IsSupportedType(src->dos_type)) {
-        ULONG spb = (src->block_size >= 1024) ? (src->block_size / 512) : 1;
-        ULONG hh  = src->heads > 0 ? src->heads : drdb->heads;
-        ULONG ss  = src->sectors > 0 ? src->sectors : drdb->sectors;
-        ULONG src_base_blk = src->low_cyl * hh * ss * spb;
+        /* SFS root blocks store ABSOLUTE byte offsets - shift them from the
+           source's physical position to the destination's. */
         PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
-        pc_sfs_fixup(dbd, dst_base, src_base_blk);
+        pc_sfs_fixup(dbd, dst_base, src_base);
+    } else if (PFS_IsSupportedType(src->dos_type)) {
+        /* PFS3 fails to mount if MODE_SIZEFIELD is set and its stored
+           disksize != the partition's dg_TotalSectors.  In a larger
+           destination they differ, so clear the flag (the FS then uses its
+           own stored disksize - the extra space is free for a later GROW). */
+        PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
+        pc_pfs_clear_sizefield(dbd, dst_base, dst->reserved_blks,
+                               (dst->block_size >= 1024) ? (dst->block_size / 512) : 1);
     }
     ok = TRUE;
 out:

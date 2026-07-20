@@ -345,22 +345,6 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         BlockDev_Close(dest); return;
     }
 
-    /* A partition's cylinder range only means the same physical thing on
-       both disks when they share heads x sectors; the RDB stores
-       partitions in disk-geometry cylinders, so a clone across different
-       geometries can't be cylinder-aligned (and would break FFS, whose
-       size comes from geometry).  Refuse clearly rather than mis-scale. */
-    {
-        ULONG sh = src->heads   > 0 ? src->heads   : rdb->heads;
-        ULONG ss = src->sectors > 0 ? src->sectors : rdb->sectors;
-        if (sh != drdb.heads || ss != drdb.sectors) {
-            DP_SNPRINTF(body, GS(MSG_PC_GEOM_MISMATCH_FMT),
-                        (unsigned long)sh, (unsigned long)ss,
-                        (unsigned long)drdb.heads, (unsigned long)drdb.sectors);
-            pcp_msg(win, GS(MSG_PCP_TITLE), body);
-            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
-        }
-    }
 
     if (!src->heads)   src->heads   = rdb->heads;
     if (!src->sectors) src->sectors = rdb->sectors;
@@ -368,64 +352,69 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
     dpi_idx = pcp_pick_partition(win, &drdb, dest_devname);
     if (dpi_idx < 0) { RDB_FreeCode(&drdb); BlockDev_Close(dest); return; }
 
-    {
-        ULONG src_span = src->high_cyl - src->low_cyl + 1;
-        int   skip_idx;
+    if (dpi_idx == PCP_CREATE_NEW) {
+        /* Create a partition in the DESTINATION disk's geometry, sized to
+           hold the source's blocks (rounded up to a cylinder), in the first
+           free gap, auto-named, added to the destination RDB.  The engine
+           keeps this footprint and drops the source's blocks in. */
+        ULONG sh    = src->heads   > 0 ? src->heads   : rdb->heads;
+        ULONG ss    = src->sectors > 0 ? src->sectors : rdb->sectors;
+        ULONG spb   = (src->block_size >= 1024) ? (src->block_size / 512) : 1;
+        ULONG src_dev = (src->high_cyl - src->low_cyl + 1) * sh * ss * spb;
+        ULONG dbpc  = drdb.heads * drdb.sectors * spb;
+        ULONG cyl_span = dbpc ? (src_dev + dbpc - 1) / dbpc : 0;
+        ULONG low;
+        char  nm[8];
+        UWORD n;
 
-        if (dpi_idx == PCP_CREATE_NEW) {
-            /* Create a fresh partition of the source's geometry+span in the
-               first free gap, auto-named, added to the destination RDB. */
-            ULONG low;
-            char  nm[8];
-            UWORD n;
-            if (drdb.num_parts >= MAX_PARTITIONS) {
-                pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_PARTS));
-                RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
-            }
-            if (!PartClone_FindGap(&drdb, src_span, src->heads, src->sectors,
-                                   &low)) {
-                DP_SNPRINTF(body, GS(MSG_PC_NOGAP_FMT), (unsigned long)src_span);
-                pcp_msg(win, GS(MSG_PCP_TITLE), body);
-                RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
-            }
-            dpi = &drdb.parts[drdb.num_parts];
-            memset(dpi, 0, sizeof(*dpi));
-            /* unique DHn name on the destination disk */
-            for (n = 0; n < 100; n++) {
-                UWORD j; BOOL taken = FALSE;
-                DP_SNPRINTF(nm, "DH%lu", (unsigned long)n);
-                for (j = 0; j < drdb.num_parts; j++)
-                    if (pcp_devname_eq_ci(drdb.parts[j].drive_name, nm)) { taken = TRUE; break; }
-                if (!taken) break;
-            }
-            strncpy(dpi->drive_name, nm, sizeof(dpi->drive_name) - 1);
-            dpi->low_cyl = low;
-            skip_idx = -1;                 /* brand new: overlap-check all */
-        } else {
-            dpi = &drdb.parts[dpi_idx];
-            /* self-clone guard (same disk + same partition) */
-            if (pcp_devname_eq_ci(dest_devname, cur_devname) &&
-                dest_unit == cur_unit &&
-                dpi->low_cyl == src->low_cyl && dpi->high_cyl == src->high_cyl) {
-                pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PC_CLONE_SAME));
-                RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
-            }
-            skip_idx = dpi_idx;            /* overwrite: ignore its own space */
+        if (drdb.num_parts >= MAX_PARTITIONS || cyl_span == 0) {
+            pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_PARTS));
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
         }
-
-        /* Give the target the source's geometry + cylinder span (so the
-           filesystem's size matches), keeping its start, and validate it
-           fits without overlapping any other partition. */
-        dpi->heads    = src->heads;
-        dpi->sectors  = src->sectors;
-        dpi->high_cyl = dpi->low_cyl + src_span - 1;
+        if (!PartClone_FindGap(&drdb, cyl_span, drdb.heads, drdb.sectors, &low)) {
+            DP_SNPRINTF(body, GS(MSG_PC_NOGAP_FMT), (unsigned long)cyl_span);
+            pcp_msg(win, GS(MSG_PCP_TITLE), body);
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+        }
+        dpi = &drdb.parts[drdb.num_parts];
+        memset(dpi, 0, sizeof(*dpi));
+        for (n = 0; n < 100; n++) {
+            UWORD j; BOOL taken = FALSE;
+            DP_SNPRINTF(nm, "DH%lu", (unsigned long)n);
+            for (j = 0; j < drdb.num_parts; j++)
+                if (pcp_devname_eq_ci(drdb.parts[j].drive_name, nm)) { taken = TRUE; break; }
+            if (!taken) break;
+        }
+        strncpy(dpi->drive_name, nm, sizeof(dpi->drive_name) - 1);
+        dpi->low_cyl    = low;
+        dpi->high_cyl   = low + cyl_span - 1;
+        dpi->heads      = drdb.heads;          /* destination disk geometry */
+        dpi->sectors    = drdb.sectors;
+        dpi->block_size = src->block_size;     /* match source's FS blocks   */
+        dpi->dos_type   = src->dos_type;
+        dpi->sectors_per_block = src->sectors_per_block;
+        dpi->reserved_blks     = src->reserved_blks;
+        dpi->mask       = 0x7FFFFFFEUL;
+        dpi->max_transfer = 0x0FFFFFFEUL;
+        dpi->num_buffer = 30;
         if (!PartClone_ValidateFootprint(&drdb, dpi->low_cyl, dpi->high_cyl,
-                                         src->heads, src->sectors, skip_idx,
+                                         dpi->heads, dpi->sectors, -1,
                                          err, sizeof(err))) {
             pcp_msg(win, GS(MSG_PCP_TITLE), err);
             RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
         }
-        if (dpi_idx == PCP_CREATE_NEW) drdb.num_parts++;
+        drdb.num_parts++;
+    } else {
+        dpi = &drdb.parts[dpi_idx];
+        /* self-clone guard (same disk + same partition) */
+        if (pcp_devname_eq_ci(dest_devname, cur_devname) &&
+            dest_unit == cur_unit &&
+            dpi->low_cyl == src->low_cyl && dpi->high_cyl == src->high_cyl) {
+            pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PC_CLONE_SAME));
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+        }
+        /* overwrite in place: destination footprint unchanged (the engine
+           checks it is large enough / exact-size for FFS). */
     }
 
     {
