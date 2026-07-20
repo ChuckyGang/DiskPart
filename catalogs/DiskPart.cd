@@ -3888,3 +3888,42 @@ asl.library not available - cannot open a file requester.
 MSG_PV_PC_RESTORE_GADGETS
 Restore|Cancel
 ;
+MSG_PC_CLONE_USAGE
+Usage: PARTCLONE=<src> TO=<dst>   (clone src partition onto existing dst)\n
+;
+MSG_PC_CLONE_SAME
+Source and destination are the same partition.\n
+;
+MSG_PC_CLONE_ASK
+Clone %s onto %s, overwriting it
+;
+MSG_PCP_TITLE
+Copy Partition to Another Disk
+;
+MSG_PCP_PICK_TITLE_FMT
+Destination partition on %s
+;
+MSG_PCP_CLONE_HERE
+Clone Here
+;
+MSG_PCP_DEST_NO_RDB
+The destination disk has no valid RDB.\nInitialise and partition it first.
+;
+MSG_PCP_DEST_NO_PARTS
+The destination disk has no partitions to overwrite.\nCreate one first (Add), then retry.
+;
+MSG_PCP_CONFIRM_FMT
+Clone partition %s ONTO %s on %s,\noverwriting everything in %s?\n\nThis cannot be undone.
+;
+MSG_PCP_CONFIRM_GADGETS
+Clone|Cancel
+;
+MSG_PCP_PROG_FMT
+Cloning onto %s
+;
+MSG_PCP_OK_FMT
+Cloned %s onto %s.\nThe destination RDB has been written -\nreboot that disk before using the volume.
+;
+MSG_PCP_FAIL_FMT
+Clone failed:\n%s
+;

@@ -113,6 +113,13 @@ scripting interface.
    free-block cache recounted; the start-root write is the atomic commit.
    Volumes whose bitmap was relocated high by a strategy-B grow are
    refused.  Reboot required like SFS grow.
+ * Copy a partition onto another partition - same disk or a different one.
+   CLI: PARTCLONE=<src> TO=<dst> (same disk).  GUI: Advanced > "Copy
+   Partition to Another Disk..." picks a destination disk (device/unit
+   selector) and a destination partition to overwrite.  The clone adopts
+   the source's geometry/dostype and fixes up SFS location offsets; the
+   destination must be at least as large.  Cross-disk from the CLI is also
+   available via dump-then-restore.
  * Dump a partition to a self-describing file and restore it (CLI PARTOUT/
    PARTIN, script PARTOUT/PARTIN, GUI Advanced > Dump/Restore Partition).
    The file carries a header with the full DosEnvec, so a restore recreates

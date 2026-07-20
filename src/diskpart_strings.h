@@ -1263,8 +1263,21 @@
 #define MSG_PV_PC_RESTORE_FAIL_FMT   1257
 #define MSG_PV_PC_ASL_UNAVAIL        1258
 #define MSG_PV_PC_RESTORE_GADGETS    1259
+#define MSG_PC_CLONE_USAGE           1260
+#define MSG_PC_CLONE_SAME            1261
+#define MSG_PC_CLONE_ASK             1262
+#define MSG_PCP_TITLE                1263
+#define MSG_PCP_PICK_TITLE_FMT       1264
+#define MSG_PCP_CLONE_HERE           1265
+#define MSG_PCP_DEST_NO_RDB          1266
+#define MSG_PCP_DEST_NO_PARTS        1267
+#define MSG_PCP_CONFIRM_FMT          1268
+#define MSG_PCP_CONFIRM_GADGETS      1269
+#define MSG_PCP_PROG_FMT             1270
+#define MSG_PCP_OK_FMT               1271
+#define MSG_PCP_FAIL_FMT             1272
 
-#define MSG_COUNT 1260
+#define MSG_COUNT 1273
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2536,5 +2549,18 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1257 MSG_PV_PC_RESTORE_FAIL_FMT */ "Restore failed:\n%s",
     /* 1258 MSG_PV_PC_ASL_UNAVAIL */ "asl.library not available - cannot open a file requester.",
     /* 1259 MSG_PV_PC_RESTORE_GADGETS */ "Restore|Cancel",
+    /* 1260 MSG_PC_CLONE_USAGE */ "Usage: PARTCLONE=<src> TO=<dst>   (clone src partition onto existing dst)\n",
+    /* 1261 MSG_PC_CLONE_SAME */ "Source and destination are the same partition.\n",
+    /* 1262 MSG_PC_CLONE_ASK */ "Clone %s onto %s, overwriting it",
+    /* 1263 MSG_PCP_TITLE */ "Copy Partition to Another Disk",
+    /* 1264 MSG_PCP_PICK_TITLE_FMT */ "Destination partition on %s",
+    /* 1265 MSG_PCP_CLONE_HERE */ "Clone Here",
+    /* 1266 MSG_PCP_DEST_NO_RDB */ "The destination disk has no valid RDB.\nInitialise and partition it first.",
+    /* 1267 MSG_PCP_DEST_NO_PARTS */ "The destination disk has no partitions to overwrite.\nCreate one first (Add), then retry.",
+    /* 1268 MSG_PCP_CONFIRM_FMT */ "Clone partition %s ONTO %s on %s,\noverwriting everything in %s?\n\nThis cannot be undone.",
+    /* 1269 MSG_PCP_CONFIRM_GADGETS */ "Clone|Cancel",
+    /* 1270 MSG_PCP_PROG_FMT */ "Cloning onto %s",
+    /* 1271 MSG_PCP_OK_FMT */ "Cloned %s onto %s.\nThe destination RDB has been written -\nreboot that disk before using the volume.",
+    /* 1272 MSG_PCP_FAIL_FMT */ "Clone failed:\n%s",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

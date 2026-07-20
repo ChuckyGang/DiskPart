@@ -154,6 +154,11 @@ BOOL  offer_move_partition(struct Window *win, struct BlockDev *bd,
 #define GROW_NEED_REBOOT 2   /* grown but couldn't remount live - reboot needed */
 #define GROW_ABORTED     3   /* refused (volume in use) or failed+restored      */
 
+/* GUI clone one partition onto a partition on another (or the same) disk. */
+void  copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
+                             struct RDBInfo *rdb, struct PartInfo *src,
+                             const char *cur_devname, ULONG cur_unit);
+
 /* GUI partition dump / restore (Advanced menu). */
 void  pv_dump_partition(struct Window *win, struct BlockDev *bd,
                         struct RDBInfo *rdb, struct PartInfo *pi);

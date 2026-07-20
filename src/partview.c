@@ -1716,7 +1716,7 @@ static struct NewMenu partview_menu_def[] = {
     { NM_ITEM,  "Add MBR Partition...", NULL,         0, 0, NULL },  /* ITEM 18 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 19 */
     { NM_ITEM,  "Copy Whole Disk to Another Disk...", NULL, 0, 0, NULL },  /* ITEM 20 */
-    { NM_ITEM,  "Copy Partition to Another Disk...",  NULL, NM_ITEMDISABLED, 0, NULL },  /* ITEM 21 */
+    { NM_ITEM,  "Copy Partition to Another Disk...",  NULL, 0, 0, NULL },  /* ITEM 21 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 22 */
     { NM_ITEM,  "Shrink Report...",      NULL,         0, 0, NULL },  /* ITEM 23 */
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 24 */
@@ -2389,6 +2389,12 @@ BOOL partview_run(const char *devname, ULONG unit)
                         }
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 20)
                             copy_whole_disk_to_disk(win, bd, devname, unit);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 21) {
+                            struct PartInfo *sp =
+                                (sel >= 0 && rdb && sel < (WORD)rdb->num_parts)
+                                ? &rdb->parts[sel] : NULL;
+                            copy_partition_to_disk(win, bd, rdb, sp, devname, unit);
+                        }
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 23) {
                             if (sel >= 0 && bd && rdb && sel < (WORD)rdb->num_parts)
                                 pv_shrink_report(win, bd, rdb, &rdb->parts[sel]);

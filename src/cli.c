@@ -69,7 +69,7 @@ extern struct DosLibrary *DOSBase;
     "GROW/M,"                                                     \
     "ZEROPART/S,"                                                  \
     "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S,"    \
-    "SHRINKINFO/K,SHRINK/K,PARTOUT/K,PARTIN/K"
+    "SHRINKINFO/K,SHRINK/K,PARTOUT/K,PARTIN/K,PARTCLONE/K,TO/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -123,6 +123,8 @@ enum {
     ARG_SHRINK,
     ARG_PARTOUT,
     ARG_PARTIN,
+    ARG_PARTCLONE,
+    ARG_TO,
     ARG_COUNT
 };
 
@@ -1985,6 +1987,65 @@ static LONG cmd_partin(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
+/* PARTCLONE - clone one partition onto another (same disk)           */
+/*   PARTCLONE=<src> TO=<dst>                                          */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_partclone(const char *devname, ULONG unit, BOOL force,
+                          const char *src_s, const char *dst_s)
+{
+    struct BlockDev *bd;
+    struct PartInfo *src, *dst;
+    struct CliProg prog;
+    char   sname[32], dname[32], err[128];
+
+    if (!dst_s || !dst_s[0]) { cli_puts(GS(MSG_PC_CLONE_USAGE)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    src = cli_find_part(src_s, sname);
+    dst = cli_find_part(dst_s, dname);
+    if (!src) { DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), sname); cli_puts(outbuf);
+                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
+    if (!dst) { DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), dname); cli_puts(outbuf);
+                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
+    if (src == dst) { cli_puts(GS(MSG_PC_CLONE_SAME));
+                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR; }
+    if (!src->heads)   src->heads   = s_rdb.heads;
+    if (!src->sectors) src->sectors = s_rdb.sectors;
+
+    DP_SNPRINTF(outbuf, GS(MSG_PC_CLONE_ASK), src->drive_name, dst->drive_name);
+    if (!ask_yn(outbuf, force)) {
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    }
+
+    prog.last_pct = 0; prog.last_blocks = 0; err[0] = '\0';
+    if (!PartClone_PartToPart(bd, src, bd, &s_rdb, dst,
+                              cli_move_progress, &prog, err, sizeof(err))) {
+        cli_puts(err);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
+    if (!RDB_Write(bd, &s_rdb)) {
+        cli_puts(GS(MSG_CLI_FAILED));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_OK));
+    DP_SNPRINTF(outbuf, GS(MSG_PC_CLONE_OK_FMT), src->drive_name, dst->drive_name);
+    cli_puts(outbuf);
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* ADDFS - add filesystem entry, then write RDB                       */
 /* ------------------------------------------------------------------ */
 
@@ -3017,7 +3078,7 @@ LONG cli_run(void)
         !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW] &&
         !args[ARG_ZEROPART] && !args[ARG_ADDMBR] && !args[ARG_DELMBR] &&
         !args[ARG_SHRINKINFO] && !args[ARG_SHRINK] &&
-        !args[ARG_PARTOUT] && !args[ARG_PARTIN]) {
+        !args[ARG_PARTOUT] && !args[ARG_PARTIN] && !args[ARG_PARTCLONE]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -3058,7 +3119,7 @@ LONG cli_run(void)
          args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW] ||
          args[ARG_ZEROPART]  || args[ARG_ADDMBR]  || args[ARG_DELMBR] ||
          args[ARG_SHRINKINFO] || args[ARG_SHRINK] ||
-         args[ARG_PARTOUT] || args[ARG_PARTIN])) {
+         args[ARG_PARTOUT] || args[ARG_PARTIN] || args[ARG_PARTCLONE])) {
 
         char  devname[64];
         ULONG unit;
@@ -3139,6 +3200,11 @@ LONG cli_run(void)
                 rc = cmd_partin(devname, unit, force,
                                 (const char *)args[ARG_PARTIN],
                                 (const char *)args[ARG_NAME]);
+
+            if (rc == RETURN_OK && args[ARG_PARTCLONE])
+                rc = cmd_partclone(devname, unit, force,
+                                   (const char *)args[ARG_PARTCLONE],
+                                   (const char *)args[ARG_TO]);
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,
