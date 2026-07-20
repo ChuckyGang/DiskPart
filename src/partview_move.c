@@ -1208,13 +1208,13 @@ int offer_shrink(struct Window *win, struct BlockDev *bd,
         if (!can_remount) {
             struct EasyStruct offer_es;
             static char offer_msg[256];
-            DP_SNPRINTF(offer_msg, GS(MSG_MOVE_BUSY_OFFER_FMT),
+            DP_SNPRINTF(offer_msg, GS(MSG_PV_SHR_BUSY_OFFER_FMT),
                     pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
             offer_es.es_StructSize   = sizeof(offer_es);
             offer_es.es_Flags        = 0;
             offer_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
             offer_es.es_TextFormat   = (UBYTE *)offer_msg;
-            offer_es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_BUSY_OFFER_GADGETS);
+            offer_es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_SHR_BUSY_GADGETS);
             if (EasyRequest(win, &offer_es, NULL) != 1) {
                 if (prog_win) CloseWindow(prog_win);
                 pi->high_cyl = old_hi;

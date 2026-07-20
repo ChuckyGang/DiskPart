@@ -1225,8 +1225,10 @@
 #define MSG_PV_SHR_OK_REBOOT_FMT     1219
 #define MSG_PV_SHR_OK_RDBFAIL_FMT    1220
 #define MSG_PV_SHR_FAIL_FMT          1221
+#define MSG_PV_SHR_BUSY_OFFER_FMT    1222
+#define MSG_PV_SHR_BUSY_GADGETS      1223
 
-#define MSG_COUNT 1222
+#define MSG_COUNT 1224
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2460,5 +2462,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1219 MSG_PV_SHR_OK_REBOOT_FMT */ "\"%s\" shrunk to %s and the RDB written.\nReboot before using this volume.",
     /* 1220 MSG_PV_SHR_OK_RDBFAIL_FMT */ "\"%s\": the filesystem was shrunk but the RDB\nwrite FAILED - use Write to retry, and do NOT\nreboot before it succeeds.",
     /* 1221 MSG_PV_SHR_FAIL_FMT */ "Shrink failed:\n%s\n\nThe original size was restored.",
+    /* 1222 MSG_PV_SHR_BUSY_OFFER_FMT */ "Cannot unmount %s: the volume is in use (%s).\nThis is normal for the boot partition.\n\nShrink it in place instead? The volume will be LOCKED and\nyou MUST reboot before using it - do not access it first.",
+    /* 1223 MSG_PV_SHR_BUSY_GADGETS */ "Shrink + Reboot|Cancel",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

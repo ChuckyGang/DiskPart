@@ -3771,3 +3771,9 @@ MSG_PV_SHR_OK_RDBFAIL_FMT
 MSG_PV_SHR_FAIL_FMT
 Shrink failed:\n%s\n\nThe original size was restored.
 ;
+MSG_PV_SHR_BUSY_OFFER_FMT
+Cannot unmount %s: the volume is in use (%s).\nThis is normal for the boot partition.\n\nShrink it in place instead? The volume will be LOCKED and\nyou MUST reboot before using it - do not access it first.
+;
+MSG_PV_SHR_BUSY_GADGETS
+Shrink + Reboot|Cancel
+;
