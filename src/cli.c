@@ -1689,25 +1689,42 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
     }
 
+    /* Size semantics: bare value = TARGET size ("make it 30M"),
+       leading '-' = relative ("shrink by 30M"), MIN = down to the floor. */
     to_min = str_eq_ci(size_s, "MIN");
     if (to_min) {
         new_hi = min_high;
     } else {
-        UQUAD bytes = parse_size_bytes(size_s);
-        ULONG rem_cyls;
+        BOOL  relative = (size_s[0] == '-');
+        UQUAD bytes    = parse_size_bytes(relative ? size_s + 1 : size_s);
+        UQUAD cylbytes = (UQUAD)blks_cyl * 512UL;
         if (bytes == 0) {
             DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
             cli_puts(outbuf);
             RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
         }
-        rem_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
-        if (rem_cyls == 0) {
-            DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
-            cli_puts(outbuf);
-            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        if (relative) {
+            ULONG rem_cyls = (ULONG)(bytes / cylbytes);
+            if (rem_cyls == 0) {
+                DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
+                cli_puts(outbuf);
+                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+            }
+            new_hi = (rem_cyls < old_hi - pi->low_cyl) ? old_hi - rem_cyls
+                                                       : min_high;
+        } else {
+            /* target size, rounded UP to whole cylinders so the partition
+               ends up at least as large as requested */
+            ULONG new_ncyl = (ULONG)((bytes + cylbytes - 1) / cylbytes);
+            if (new_ncyl == 0) new_ncyl = 1;
+            new_hi = pi->low_cyl + new_ncyl - 1;
+            if (new_hi >= old_hi) {
+                DP_SNPRINTF(outbuf, GS(MSG_SHR_NOT_SMALLER_FMT),
+                        pi->drive_name);
+                cli_puts(outbuf);
+                RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_WARN;
+            }
         }
-        new_hi = (rem_cyls < old_hi - pi->low_cyl) ? old_hi - rem_cyls
-                                                   : min_high;
         if (new_hi < min_high) {
             new_hi = min_high;
             FormatSize((UQUAD)(old_hi - new_hi) * blks_cyl * 512UL, szbuf);

@@ -85,7 +85,8 @@ scripting interface.
  * SHRINK (EXPERIMENTAL): all three GROW filesystems supported -
    FFS/OFS, PFS3 and SFS.  Shrinks a partition and its filesystem in
    one step.  CLI:
-   SHRINK=<drive> SIZE=<amount|MIN>; script: SHRINK <drive> <amount|MIN>
+   SHRINK=<drive> SIZE=<size|-amount|MIN> (target size, or relative
+   with a leading '-'); script: SHRINK <drive> <size|-amount|MIN>
    [NOUNMOUNT].  Refuses unless every allocated block in the removed range
    is movable metadata (root/bitmap blocks - relocated automatically); the
    root moves to the new computed centre position, direct children are

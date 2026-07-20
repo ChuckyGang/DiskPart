@@ -3655,7 +3655,7 @@ Shrink Report
 ; SHRINK (partition + filesystem shrink)
 ;==========================================================================
 MSG_SHR_USAGE
-Usage: SHRINK <drive> <size[KMG]|MIN> [NOUNMOUNT]   (size = amount to remove)\n
+Usage: SHRINK <drive> <size[KMG]|-amount|MIN> [NOUNMOUNT]  (size = new size, -amount = shrink by, MIN = smallest)\n
 ;
 MSG_SHR_NOT_FOUND_FMT
 SHRINK: no partition named "%s" on this disk.\n
@@ -3728,4 +3728,7 @@ Updating PFS rootblock (disksize/blocksfree)
 ;
 MSG_SFS_SHR_BITMAP_HIGH
 the SFS bitmap lies above the new end - shrink less (bitmap relocation is not supported)
+;
+MSG_SHR_NOT_SMALLER_FMT
+SHRINK: %s: requested size is not smaller than the partition - nothing to do.\n
 ;

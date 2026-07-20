@@ -264,13 +264,15 @@ SHRINKINFO=<drive>
     DiskPart DEV uaehf.device:3 SHRINKINFO=DH1
     DiskPart IMAGE=disk.hdf SHRINKINFO=DH0
 
-SHRINK=<drive> SIZE=<amount[KMG]|MIN>  [NOUNMOUNT] [FORCE]
+SHRINK=<drive> SIZE=<size[KMG]|-amount|MIN>  [NOUNMOUNT] [FORCE]
   EXPERIMENTAL - works on FFS/OFS, PFS3 and SFS (same set as GROW).  Shrink a
   partition and its filesystem in one step: the removed range is verified
   free first (same scan as SHRINKINFO; any data block there = clean
   refusal), then the filesystem is edited for the new size and the RDB
-  is written.  SIZE is the amount to REMOVE (mirrors GROW's amount to
-  add), clamped to the scan floor; SIZE=MIN shrinks as far as possible.
+  is written.  SIZE is the TARGET size ("SIZE=30M" makes the partition
+  ~30 MB, rounded up to whole cylinders); a leading '-' makes it
+  relative ("SIZE=-30M" shrinks BY 30 MB); SIZE=MIN shrinks as far as
+  possible.  Anything below the scan floor is clamped to the floor.
   The freed cylinders appear after the partition - ready for ADDPART.
   FFS: root relocates to the new computed centre, bitmap chain truncated,
   direct children re-parented; remounts live.  bm_flag is set to 0, so
@@ -286,7 +288,8 @@ SHRINK=<drive> SIZE=<amount[KMG]|MIN>  [NOUNMOUNT] [FORCE]
   mandatory.
 
   Examples:
-    DiskPart DEV scsi.device:3 SHRINK=DH4 SIZE=20M
+    DiskPart DEV scsi.device:3 SHRINK=DH4 SIZE=40M     ; make DH4 40 MB
+    DiskPart DEV scsi.device:3 SHRINK=DH4 SIZE=-20M    ; shrink DH4 by 20 MB
     DiskPart DEV scsi.device:3 SHRINK=DH4 SIZE=MIN FORCE
 
 ZEROPART NAME=<drive>
@@ -451,15 +454,17 @@ GROW <drive> <size[KMG]|END> [NOUNMOUNT]
     GROW DH0 END NOUNMOUNT   ; boot partition: grow in place, then reboot
     CLOSE
 
-SHRINK <drive> <amount[KMG]|MIN> [NOUNMOUNT]
+SHRINK <drive> <size[KMG]|-amount|MIN> [NOUNMOUNT]
   EXPERIMENTAL - FFS/OFS, PFS3 and SFS.  Script form of the CLI SHRINK
-  command (see CLI COMMANDS above for the full description).  <amount>
-  is the size to REMOVE, clamped to the scan floor; MIN shrinks as far
-  as possible.  Commits on its own like GROW - no separate WRITE needed.
+  command (see CLI COMMANDS above for the full description).  <size>
+  is the TARGET size; a leading '-' makes it relative (shrink BY that
+  amount); MIN shrinks as far as possible.  Clamped to the scan floor.
+  Commits on its own like GROW - no separate WRITE needed.
   In DRYRUN mode it prints the plan and changes nothing.
 
     OPEN uaehf.device 3
-    SHRINK DH1 20M       ; remove 20 MB (clamped to the floor if less)
+    SHRINK DH1 40M       ; make DH1 40 MB
+    SHRINK DH1 -20M      ; shrink DH1 by 20 MB
     SHRINK DH1 MIN       ; shrink as far as the data allows
     CLOSE
 

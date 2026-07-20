@@ -1212,8 +1212,9 @@
 #define MSG_PFS_PROG_SHR_VERIFY      1206
 #define MSG_PFS_PROG_SHR_ROOT        1207
 #define MSG_SFS_SHR_BITMAP_HIGH      1208
+#define MSG_SHR_NOT_SMALLER_FMT      1209
 
-#define MSG_COUNT 1209
+#define MSG_COUNT 1210
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2409,7 +2410,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1181 MSG_SI_PFS_SMALLIDX */ "PFS small-index layout (no MODE_SUPERINDEX) is not supported",
     /* 1182 MSG_PV_MENU_SHRINKINFO */ "Shrink Report...",
     /* 1183 MSG_PV_SHRINK_TITLE */ "Shrink Report",
-    /* 1184 MSG_SHR_USAGE */ "Usage: SHRINK <drive> <size[KMG]|MIN> [NOUNMOUNT]   (size = amount to remove)\n",
+    /* 1184 MSG_SHR_USAGE */ "Usage: SHRINK <drive> <size[KMG]|-amount|MIN> [NOUNMOUNT]  (size = new size, -amount = shrink by, MIN = smallest)\n",
     /* 1185 MSG_SHR_NOT_FOUND_FMT */ "SHRINK: no partition named \"%s\" on this disk.\n",
     /* 1186 MSG_SHR_UNSUPPORTED_FMT */ "SHRINK: %s: this filesystem is not supported yet (dostype 0x%08lx).\n",
     /* 1187 MSG_SHR_BAD_SIZE_FMT */ "SHRINK: bad size \"%s\".\n",
@@ -2434,5 +2435,6 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1206 MSG_PFS_PROG_SHR_VERIFY */ "Verifying the removed area is free",
     /* 1207 MSG_PFS_PROG_SHR_ROOT */ "Updating PFS rootblock (disksize/blocksfree)",
     /* 1208 MSG_SFS_SHR_BITMAP_HIGH */ "the SFS bitmap lies above the new end - shrink less (bitmap relocation is not supported)",
+    /* 1209 MSG_SHR_NOT_SMALLER_FMT */ "SHRINK: %s: requested size is not smaller than the partition - nothing to do.\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */
