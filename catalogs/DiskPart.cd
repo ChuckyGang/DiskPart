@@ -3661,7 +3661,7 @@ MSG_SHR_NOT_FOUND_FMT
 SHRINK: no partition named "%s" on this disk.\n
 ;
 MSG_SHR_UNSUPPORTED_FMT
-SHRINK: %s: only FFS/OFS is supported so far (dostype 0x%08lx).\n
+SHRINK: %s: this filesystem is not supported yet (dostype 0x%08lx).\n
 ;
 MSG_SHR_BAD_SIZE_FMT
 SHRINK: bad size "%s".\n
@@ -3713,4 +3713,16 @@ Verifying the removed area is free
 ;
 MSG_FFS_PROG_SHR_BITMAP
 Rewriting the allocation bitmap for the new size
+;
+MSG_PFS_SHR_FREECOUNT_FMT
+blocksfree (%lu) is less than the blocks to remove (%lu) - the tail cannot be free
+;
+MSG_PFS_PROG_SHR_SEAL
+Sealing out-of-range bitmap bits
+;
+MSG_PFS_PROG_SHR_VERIFY
+Verifying the removed area is free
+;
+MSG_PFS_PROG_SHR_ROOT
+Updating PFS rootblock (disksize/blocksfree)
 ;

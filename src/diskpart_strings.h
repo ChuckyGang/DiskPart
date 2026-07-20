@@ -1207,8 +1207,12 @@
 #define MSG_FFS_SHR_NO_FREE_FMT      1201
 #define MSG_FFS_PROG_SHR_VERIFY      1202
 #define MSG_FFS_PROG_SHR_BITMAP      1203
+#define MSG_PFS_SHR_FREECOUNT_FMT    1204
+#define MSG_PFS_PROG_SHR_SEAL        1205
+#define MSG_PFS_PROG_SHR_VERIFY      1206
+#define MSG_PFS_PROG_SHR_ROOT        1207
 
-#define MSG_COUNT 1204
+#define MSG_COUNT 1208
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2406,7 +2410,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1183 MSG_PV_SHRINK_TITLE */ "Shrink Report",
     /* 1184 MSG_SHR_USAGE */ "Usage: SHRINK <drive> <size[KMG]|MIN> [NOUNMOUNT]   (size = amount to remove)\n",
     /* 1185 MSG_SHR_NOT_FOUND_FMT */ "SHRINK: no partition named \"%s\" on this disk.\n",
-    /* 1186 MSG_SHR_UNSUPPORTED_FMT */ "SHRINK: %s: only FFS/OFS is supported so far (dostype 0x%08lx).\n",
+    /* 1186 MSG_SHR_UNSUPPORTED_FMT */ "SHRINK: %s: this filesystem is not supported yet (dostype 0x%08lx).\n",
     /* 1187 MSG_SHR_BAD_SIZE_FMT */ "SHRINK: bad size \"%s\".\n",
     /* 1188 MSG_SHR_NOTHING_FMT */ "SHRINK: %s is already at its minimum - nothing to shrink.\n",
     /* 1189 MSG_SHR_CLAMP_FMT */ "SHRINK: clamped to the minimum from the scan - removing %s.\n",
@@ -2424,5 +2428,9 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1201 MSG_FFS_SHR_NO_FREE_FMT */ "no free block below the new end to relocate bitmap block %lu to",
     /* 1202 MSG_FFS_PROG_SHR_VERIFY */ "Verifying the removed area is free",
     /* 1203 MSG_FFS_PROG_SHR_BITMAP */ "Rewriting the allocation bitmap for the new size",
+    /* 1204 MSG_PFS_SHR_FREECOUNT_FMT */ "blocksfree (%lu) is less than the blocks to remove (%lu) - the tail cannot be free",
+    /* 1205 MSG_PFS_PROG_SHR_SEAL */ "Sealing out-of-range bitmap bits",
+    /* 1206 MSG_PFS_PROG_SHR_VERIFY */ "Verifying the removed area is free",
+    /* 1207 MSG_PFS_PROG_SHR_ROOT */ "Updating PFS rootblock (disksize/blocksfree)",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

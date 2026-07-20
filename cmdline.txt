@@ -265,16 +265,20 @@ SHRINKINFO=<drive>
     DiskPart IMAGE=disk.hdf SHRINKINFO=DH0
 
 SHRINK=<drive> SIZE=<amount[KMG]|MIN>  [NOUNMOUNT] [FORCE]
-  EXPERIMENTAL - FFS/OFS only so far (PFS3 and SFS follow).  Shrink a
+  EXPERIMENTAL - FFS/OFS and PFS3 so far (SFS follows).  Shrink a
   partition and its filesystem in one step: the removed range is verified
   free first (same scan as SHRINKINFO; any data block there = clean
-  refusal), then the root block is relocated to the new computed centre,
-  the bitmap chain is truncated, direct children are re-parented, and the
-  RDB is written.  SIZE is the amount to REMOVE (mirrors GROW's amount to
+  refusal), then the filesystem is edited for the new size and the RDB
+  is written.  SIZE is the amount to REMOVE (mirrors GROW's amount to
   add), clamped to the scan floor; SIZE=MIN shrinks as far as possible.
   The freed cylinders appear after the partition - ready for ADDPART.
-  bm_flag is set to 0, so FFS revalidates the volume on the next mount;
-  mount it once before shrinking the same partition again.
+  FFS: root relocates to the new computed centre, bitmap chain truncated,
+  direct children re-parented; remounts live.  bm_flag is set to 0, so
+  FFS revalidates on the next mount - mount once before shrinking the
+  same FFS partition again.
+  PFS3: disksize/blocksfree updated, out-of-range bitmap bits sealed,
+  roving pointer clamped; reboot required (like PFS3 GROW).  Undeleting
+  files deleted BEFORE the shrink may fail - error, never corruption.
   NOUNMOUNT works like GROW's: shrink in place, volume locked, reboot
   mandatory.
 
@@ -445,7 +449,7 @@ GROW <drive> <size[KMG]|END> [NOUNMOUNT]
     CLOSE
 
 SHRINK <drive> <amount[KMG]|MIN> [NOUNMOUNT]
-  EXPERIMENTAL - FFS/OFS only so far.  Script form of the CLI SHRINK
+  EXPERIMENTAL - FFS/OFS and PFS3 so far.  Script form of the CLI SHRINK
   command (see CLI COMMANDS above for the full description).  <amount>
   is the size to REMOVE, clamped to the scan floor; MIN shrinks as far
   as possible.  Commits on its own like GROW - no separate WRITE needed.

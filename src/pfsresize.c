@@ -724,3 +724,363 @@ done:
     if (bm_buf)  FreeVec(bm_buf);
     return ok;
 }
+
+/* ================================================================== */
+/* PFS_ShrinkPartition - shrink the PFS3/PFS2 filesystem to a smaller */
+/* cylinder range.  EXPERIMENTAL - writes filesystem metadata.        */
+/*                                                                     */
+/* The lightest surgery of the three filesystems: all PFS metadata    */
+/* lives in the reserved area at the partition START, so nothing gets */
+/* relocated - the on-disk changes are:                               */
+/*                                                                     */
+/*   1. TAIL-FREE GATE: every user block in [new_disksize,            */
+/*      cur_disksize) must be FREE in the bitmap (absent bitmap/index */
+/*      entries = region never touched by PFS3 = free).  One used     */
+/*      block = clean refusal.  Unlike FFS there is no movable        */
+/*      metadata to except.                                            */
+/*   2. SEAL: in the last KEPT bitmap block, bits covering blocks     */
+/*      >= new_disksize are cleared (marked allocated).  pfs3's       */
+/*      allocator also has its own guard (allocation.c: "if (blocknr  */
+/*      >= vol->numblocks) continue"), so this is defense in depth -  */
+/*      and if the last kept bitmap block does not exist yet, pfs3    */
+/*      auto-creates it all-free later and that same guard protects    */
+/*      the out-of-range tail.  Bitmap/index blocks beyond the new    */
+/*      coverage become orphaned reserved blocks (a few blocks leak;  */
+/*      harmless, and never referenced again since pfs3 derives the   */
+/*      bitmap count from disksize).                                   */
+/*   3. Rootblock: disksize -> new_disksize, blocksfree -= delta      */
+/*      (exact, because the gate proved every removed block free),    */
+/*      MODE_SIZEFIELD handled exactly like the grow (update value,   */
+/*      then clear the flag so the mount-time size check never trips),*/
+/*      and roving_ptr clamped to 0 when it points into the removed   */
+/*      bitmap range (it is a bitmap-FIELD offset - allocation.c      */
+/*      divides it by longsperbmb to get a bitmap seqnr, and a stale  */
+/*      seqnr >= the new bitmap count would index past the new        */
+/*      coverage at mount).                                            */
+/*                                                                     */
+/* Caveat (documented): deldir entries for files deleted before the   */
+/* shrink may reference blocks beyond the new end - undeleting such a */
+/* file fails with a read error, but nothing is corrupted.            */
+/*                                                                     */
+/* Write order: seal first (marking used is always safe), rootblock   */
+/* cluster last; both BEFORE any Inhibit (UAE zeroes the device       */
+/* write-extent during Inhibit(DOSTRUE) - see the grow's Phase 6      */
+/* comment).  Rollback: originals of the sealed bitmap block and the  */
+/* rootblock cluster are saved and written back on any failure.  The  */
+/* RDB write (by the caller, only after success) is the commit point. */
+/* ================================================================== */
+
+#define PFS_RB_ROVING 76   /* ULONG roving_ptr (bytes 76-79) */
+
+BOOL PFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
+                         const struct PartInfo *pi, ULONG old_high_cyl,
+                         char *err_buf,
+                         FFS_ProgressFn progress_fn, void *progress_ud)
+{
+#define PFS_SPROG(msg) do { if (progress_fn) progress_fn(progress_ud,(msg)); } while(0)
+    UBYTE  first_sector[512];
+    UBYTE *cluster_buf = NULL, *original_buf = NULL;
+    UBYTE *idx_buf = NULL, *bm_buf = NULL, *bm_orig = NULL;
+    BOOL   ok = FALSE, did_inhibit = FALSE;
+    BOOL   seal_written = FALSE, cluster_written = FALSE;
+    ULONG  seal_abs = 0;          /* physical sector of the sealed bm block */
+    UWORD  n_phys = 0, cluster_phys = 0;
+    char   inh_name[44];
+
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_PFS_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+
+    ULONG phys_per_lblock = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
+    ULONG rb_lblock       = pi->reserved_blks > 0 ? pi->reserved_blks : 2;
+    ULONG part_lbase      = pi->low_cyl * heads * sectors;
+    ULONG part_abs        = (part_lbase + rb_lblock) * phys_per_lblock;
+
+    /* ---- Phase 1/2: read + validate the rootblock first sector ---- */
+    PFS_SPROG(GS(MSG_PFS_READING_ROOTBLOCK));
+    if (!BlockDev_ReadBlock(bd, part_abs, first_sector)) {
+        sprintf(err_buf, GS(MSG_PFS_CANNOT_READ_ROOTBLOCK),
+                (unsigned long)part_abs);
+        return FALSE;
+    }
+    {
+        ULONG disktype = pfs_getl(first_sector, PFS_RB_DISKTYPE);
+        if (disktype != PFS_ID_PFS1 && disktype != PFS_ID_PFS2) {
+            sprintf(err_buf, GS(MSG_PFS_NOT_ROOTBLOCK),
+                    (unsigned long)disktype,
+                    (unsigned long)PFS_ID_PFS1,
+                    (unsigned long)PFS_ID_PFS2);
+            return FALSE;
+        }
+    }
+    UWORD rblkcluster      = pfs_getw(first_sector, PFS_RB_RBLKCLUSTER);
+    UWORD reserved_blksize = pfs_getw(first_sector, PFS_RB_RESERVED_BLKSIZE);
+    if (rblkcluster == 0 || reserved_blksize < 512 ||
+        (reserved_blksize % 512) != 0) {
+        sprintf(err_buf, GS(MSG_PFS_UNEXPECTED_BLKSIZE),
+                (unsigned)reserved_blksize);
+        return FALSE;
+    }
+
+    /* ---- Phase 3: read + save the full rootblock cluster ---- */
+    PFS_SPROG(GS(MSG_PFS_READING_CLUSTER));
+    cluster_phys = (UWORD)((ULONG)rblkcluster * phys_per_lblock);
+    {
+        ULONG cluster_bytes = (ULONG)cluster_phys * 512;
+        cluster_buf  = (UBYTE *)AllocVec(cluster_bytes, MEMF_PUBLIC);
+        original_buf = (UBYTE *)AllocVec(cluster_bytes, MEMF_PUBLIC);
+        idx_buf      = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
+        bm_buf       = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
+        bm_orig      = (UBYTE *)AllocVec(reserved_blksize, MEMF_PUBLIC | MEMF_CLEAR);
+        if (!cluster_buf || !original_buf || !idx_buf || !bm_buf || !bm_orig) {
+            sprintf(err_buf, GS(MSG_PFS_OUT_OF_MEMORY),
+                    (unsigned long)cluster_bytes);
+            goto done;
+        }
+        if (!pfs_read_cluster(bd, part_abs, cluster_buf, cluster_phys)) {
+            sprintf(err_buf, GS(MSG_PFS_CANNOT_READ_CLUSTER),
+                    (unsigned)cluster_phys, (unsigned long)part_abs);
+            goto done;
+        }
+        for (ULONG i = 0; i < cluster_bytes; i++)
+            original_buf[i] = cluster_buf[i];
+    }
+    n_phys = (UWORD)(reserved_blksize / 512);
+
+    {
+        ULONG options      = pfs_getl(cluster_buf, PFS_RB_OPTIONS);
+        ULONG lastreserved = pfs_getl(cluster_buf, PFS_RB_LASTRESERVED);
+        ULONG blocksfree   = pfs_getl(cluster_buf, PFS_RB_BLOCKSFREE);
+        ULONG cur_disksize = pfs_getl(cluster_buf, PFS_RB_DISKSIZE);
+        ULONG roving       = pfs_getl(cluster_buf, PFS_RB_ROVING);
+
+        /* ---- Phase 4: derive the new size in PFS3's own units ----
+           bpc from the on-disk disksize, exactly like the grow - immune
+           to DosEnvec-vs-format geometry mismatches. */
+        ULONG old_ncyl = (old_high_cyl >= pi->low_cyl)
+                         ? (old_high_cyl - pi->low_cyl + 1) : 1;
+        ULONG cyl_diff = old_high_cyl - pi->high_cyl;
+        if (cur_disksize == 0 || old_ncyl == 0 || cyl_diff == 0) {
+            sprintf(err_buf, GS(MSG_PFS_METADATA_CORRUPT),
+                    (unsigned long)blocksfree, (unsigned long)cur_disksize,
+                    pi->drive_name);
+            goto done;
+        }
+        ULONG bpc          = cur_disksize / old_ncyl;
+        ULONG delta_blocks = cyl_diff * bpc;
+        ULONG new_disksize = (delta_blocks < cur_disksize)
+                             ? cur_disksize - delta_blocks : 0;
+        ULONG bitmapstart  = lastreserved + 1;
+
+        if (bpc == 0 || new_disksize <= bitmapstart + 1) {
+            sprintf(err_buf, GS(MSG_FFS_SHR_TOO_SMALL_FMT),
+                    (unsigned long)new_disksize);
+            goto done;
+        }
+        if (blocksfree > cur_disksize) {
+            sprintf(err_buf, GS(MSG_PFS_METADATA_CORRUPT),
+                    (unsigned long)blocksfree, (unsigned long)cur_disksize,
+                    pi->drive_name);
+            goto done;
+        }
+        if (blocksfree < delta_blocks) {
+            sprintf(err_buf, GS(MSG_PFS_SHR_FREECOUNT_FMT),
+                    (unsigned long)blocksfree, (unsigned long)delta_blocks);
+            goto done;
+        }
+
+        ULONG longsperbmb = (ULONG)(reserved_blksize / 4) - 3;
+        ULONG bm_coverage = longsperbmb * 32;
+        ULONG idxperblk   = longsperbmb;
+        ULONG old_user    = cur_disksize - bitmapstart;
+        ULONG new_user    = new_disksize - bitmapstart;
+        ULONG old_num_bmb = (old_user + bm_coverage - 1) / bm_coverage;
+        ULONG new_num_bmb = (new_user + bm_coverage - 1) / bm_coverage;
+        ULONG old_num_idxb = (old_num_bmb + idxperblk - 1) / idxperblk;
+        ULONG max_idx     = (options & PFS_MODE_SUPERINDEX)
+                            ? (ULONG)PFS_MAX_BITMAPINDEX : 5UL;
+        if (old_num_idxb > max_idx) {
+            sprintf(err_buf, GS(MSG_PFS_SUPERINDEX), (unsigned long)options);
+            goto done;
+        }
+
+        /* ---- Phase 5a: TAIL-FREE GATE over [new_disksize, cur_disksize) */
+        PFS_SPROG(GS(MSG_PFS_PROG_SHR_VERIFY));
+        {
+            ULONG seq_lo  = (new_disksize - bitmapstart) / bm_coverage;
+            ULONG cur_idx = 0xFFFFFFFFUL;
+            BOOL  idx_absent = FALSE;
+            for (ULONG seq = seq_lo; seq < old_num_bmb; seq++) {
+                ULONG ii = seq / idxperblk;
+                if (ii != cur_idx) {
+                    ULONG inr = pfs_getl(cluster_buf,
+                                         PFS_RB_BITMAPINDEX + 4 * ii);
+                    cur_idx = ii;
+                    idx_absent = (inr == 0);
+                    if (!idx_absent) {
+                        if (!pfs_read_cluster(bd,
+                                (part_lbase + inr) * phys_per_lblock,
+                                idx_buf, n_phys)) {
+                            sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                                    (unsigned long)inr);
+                            goto done;
+                        }
+                        if (pfs_getw(idx_buf, 0) != PFS_BMIBLKID) {
+                            sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                                    (unsigned long)inr);
+                            goto done;
+                        }
+                    }
+                }
+                if (idx_absent) continue;          /* untouched = free */
+                ULONG bmnr = pfs_getl(idx_buf, 12 + 4 * (seq % idxperblk));
+                if (bmnr == 0) continue;           /* untouched = free */
+                if (!pfs_read_cluster(bd, (part_lbase + bmnr) * phys_per_lblock,
+                                      bm_buf, n_phys)) {
+                    sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                            (unsigned long)bmnr);
+                    goto done;
+                }
+                if (pfs_getw(bm_buf, 0) != PFS_BMBLKID ||
+                    pfs_getl(bm_buf, 8) != seq) {
+                    sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                            (unsigned long)bmnr);
+                    goto done;
+                }
+                for (ULONG m = 0; m < longsperbmb; m++) {
+                    ULONG b0 = bitmapstart + (seq * longsperbmb + m) * 32;
+                    if (b0 >= cur_disksize) break;
+                    ULONG v = pfs_getl(bm_buf, 12 + 4 * m);
+                    if (v == 0xFFFFFFFFUL) continue;
+                    for (ULONG k = 0; k < 32; k++) {
+                        ULONG blk = b0 + k;
+                        if (blk >= cur_disksize) break;
+                        if (blk < new_disksize) continue;
+                        if (!(v & (1UL << (31u - k)))) {
+                            sprintf(err_buf, GS(MSG_FFS_SHR_TAIL_USED_FMT),
+                                    (unsigned long)blk);
+                            goto done;
+                        }
+                    }
+                }
+            }
+        }
+
+        /* ---- Phase 5b: seal the last kept bitmap block's tail ---- */
+        PFS_SPROG(GS(MSG_PFS_PROG_SHR_SEAL));
+        {
+            ULONG seq = new_num_bmb - 1;
+            ULONG ii  = seq / idxperblk;
+            ULONG inr = pfs_getl(cluster_buf, PFS_RB_BITMAPINDEX + 4 * ii);
+            ULONG bmnr = 0;
+            if (inr != 0) {
+                if (!pfs_read_cluster(bd, (part_lbase + inr) * phys_per_lblock,
+                                      idx_buf, n_phys)) {
+                    sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                            (unsigned long)inr);
+                    goto done;
+                }
+                if (pfs_getw(idx_buf, 0) != PFS_BMIBLKID) {
+                    sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                            (unsigned long)inr);
+                    goto done;
+                }
+                bmnr = pfs_getl(idx_buf, 12 + 4 * (seq % idxperblk));
+            }
+            /* Absent block: nothing to seal - pfs3 auto-creates it all-free
+               later, and its allocator's numblocks guard skips the tail. */
+            if (bmnr != 0) {
+                seal_abs = (part_lbase + bmnr) * phys_per_lblock;
+                if (!pfs_read_cluster(bd, seal_abs, bm_buf, n_phys)) {
+                    sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                            (unsigned long)bmnr);
+                    goto done;
+                }
+                if (pfs_getw(bm_buf, 0) != PFS_BMBLKID ||
+                    pfs_getl(bm_buf, 8) != seq) {
+                    sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                            (unsigned long)bmnr);
+                    goto done;
+                }
+                for (ULONG i = 0; i < reserved_blksize; i++)
+                    bm_orig[i] = bm_buf[i];
+                ULONG changed = 0;
+                for (ULONG m = 0; m < longsperbmb; m++) {
+                    ULONG b0 = bitmapstart + (seq * longsperbmb + m) * 32;
+                    ULONG v  = pfs_getl(bm_buf, 12 + 4 * m);
+                    ULONG nv = v;
+                    for (ULONG k = 0; k < 32; k++) {
+                        if (b0 + k >= new_disksize)
+                            nv &= ~(1UL << (31u - k));
+                    }
+                    if (nv != v) { pfs_setl(bm_buf, 12 + 4 * m, nv); changed++; }
+                }
+                if (changed) {
+                    if (!pfs_write_cluster(bd, seal_abs, bm_buf, n_phys)) {
+                        sprintf(err_buf, GS(MSG_PFS_CANNOT_WRITE),
+                                pi->drive_name);
+                        goto done;
+                    }
+                    seal_written = TRUE;
+                }
+            }
+        }
+
+        /* ---- Phase 6: update + write the rootblock cluster ---- */
+        PFS_SPROG(GS(MSG_PFS_PROG_SHR_ROOT));
+        pfs_setl(cluster_buf, PFS_RB_DISKSIZE, new_disksize);
+        pfs_setl(cluster_buf, PFS_RB_BLOCKSFREE, blocksfree - delta_blocks);
+        if (roving / longsperbmb >= new_num_bmb)
+            pfs_setl(cluster_buf, PFS_RB_ROVING, 0);
+
+        if (!pfs_write_cluster(bd, part_abs, cluster_buf, cluster_phys)) {
+            sprintf(err_buf, GS(MSG_PFS_CANNOT_WRITE), pi->drive_name);
+            goto done;
+        }
+        cluster_written = TRUE;
+
+        /* Second write clears MODE_SIZEFIELD, exactly like the grow: the
+           live handler's dg_TotalSectors still reflects the OLD RDB until
+           reboot, so the mount-time "disksize == dg_TotalSectors" check
+           must be disarmed. */
+        if (options & PFS_MODE_SIZEFIELD) {
+            pfs_setl(cluster_buf, PFS_RB_OPTIONS,
+                     options & ~(ULONG)PFS_MODE_SIZEFIELD);
+            if (!pfs_write_cluster(bd, part_abs, cluster_buf, cluster_phys))
+                PFS_SPROG(GS(MSG_PFS_SIZEFIELD_CLEAR_FAIL));
+        }
+
+        /* ---- Phase 7: flush PFS cache (grow's exact pattern) ---- */
+        PFS_SPROG(GS(MSG_PFS_FLUSHING_CACHE));
+        Delay(50);
+        if (pi->drive_name[0]) {
+            DP_SNPRINTF(inh_name, "%s:", pi->drive_name);
+            if (Inhibit((STRPTR)inh_name, DOSTRUE))
+                did_inhibit = TRUE;
+        }
+        ok = TRUE;
+    }
+
+done:
+    if (!ok) {
+        /* Roll back everything we wrote (no Inhibit is active on any
+           failure path, so these writes are safe). */
+        if (cluster_written)
+            (void)pfs_write_cluster(bd, part_abs, original_buf, cluster_phys);
+        if (seal_written)
+            (void)pfs_write_cluster(bd, seal_abs, bm_orig, n_phys);
+    }
+    if (did_inhibit)
+        Inhibit((STRPTR)inh_name, DOSFALSE);
+    if (cluster_buf)  FreeVec(cluster_buf);
+    if (original_buf) FreeVec(original_buf);
+    if (idx_buf)      FreeVec(idx_buf);
+    if (bm_buf)       FreeVec(bm_buf);
+    if (bm_orig)      FreeVec(bm_orig);
+    return ok;
+#undef PFS_SPROG
+}

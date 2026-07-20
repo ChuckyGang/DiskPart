@@ -1636,8 +1636,11 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
-    /* Filesystem-by-filesystem rollout: FFS first, PFS/SFS to follow. */
-    if (!FFS_IsSupportedType(pi->dos_type)) {
+    /* Filesystem-by-filesystem rollout: FFS + PFS3 so far, SFS follows. */
+    int fskind;
+    if      (FFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_FFS;
+    else if (PFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_PFS;
+    else {
         DP_SNPRINTF(outbuf, GS(MSG_SHR_UNSUPPORTED_FMT),
                 pi->drive_name, (unsigned long)pi->dos_type);
         cli_puts(outbuf);
@@ -1659,7 +1662,9 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
        tail under Inhibit anyway (defense in depth). */
     cli_puts(GS(MSG_SHR_SCANNING));
     memset(&rep, 0, sizeof(rep)); scanerr[0] = '\0';
-    if (!FFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr)) {
+    if (!((fskind == CLI_GROW_PFS)
+          ? PFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr)
+          : FFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr))) {
         DP_SNPRINTF(outbuf, GS(MSG_SHR_FAIL_FMT), scanerr);
         cli_puts(outbuf);
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
@@ -1736,8 +1741,11 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
         }
     }
 
-    ok = FFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
-                             outbuf, cli_grow_progress, NULL);
+    ok = (fskind == CLI_GROW_PFS)
+         ? PFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
+                               outbuf, cli_grow_progress, NULL)
+         : FFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
+                               outbuf, cli_grow_progress, NULL);
 
     if (!ok) {
         char diag[200];
@@ -1758,7 +1766,9 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
     }
     cli_puts(GS(MSG_CLI_OK));
 
-    if (!no_unmount) {
+    /* Live remount is FFS-only, same as GROW - PFS keeps its stale
+       in-memory rootblock until a reboot. */
+    if (fskind == CLI_GROW_FFS && !no_unmount) {
         DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
         cli_grow_progress(NULL, step);
         if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {

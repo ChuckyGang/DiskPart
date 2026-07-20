@@ -1423,7 +1423,10 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
         return RETURN_ERROR;
     }
 
-    if (!FFS_IsSupportedType(pi->dos_type)) {
+    int fskind;
+    if      (FFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_FFS;
+    else if (PFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_PFS;
+    else {
         DP_SNPRINTF(s_msg, GS(MSG_SHR_UNSUPPORTED_FMT),
                 pi->drive_name, (unsigned long)pi->dos_type);
         sc_puts(s_msg);
@@ -1442,7 +1445,9 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
 
     sc_puts(GS(MSG_SHR_SCANNING));
     memset(&rep, 0, sizeof(rep)); scanerr[0] = '\0';
-    if (!FFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr)) {
+    if (!((fskind == GROW_FS_PFS)
+          ? PFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr)
+          : FFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr))) {
         DP_SNPRINTF(s_msg, GS(MSG_SHR_FAIL_FMT), scanerr);
         sc_puts(s_msg);
         return RETURN_ERROR;
@@ -1520,8 +1525,11 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
         }
     }
 
-    ok = FFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
-                             s_msg, script_grow_progress, NULL);
+    ok = (fskind == GROW_FS_PFS)
+         ? PFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                               s_msg, script_grow_progress, NULL)
+         : FFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                               s_msg, script_grow_progress, NULL);
 
     if (!ok) {
         char diag[200];
@@ -1543,7 +1551,9 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
     sc_puts(GS(MSG_SCR_OK_DOT));
     s_st.dirty = FALSE;
 
-    if (!no_unmount) {
+    /* Live remount is FFS-only, same as GROW - PFS keeps its stale
+       in-memory rootblock until a reboot. */
+    if (fskind == GROW_FS_FFS && !no_unmount) {
         DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
         script_grow_progress(NULL, step);
         if (MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr))) {

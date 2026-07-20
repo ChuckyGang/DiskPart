@@ -40,4 +40,17 @@ BOOL PFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud);
 
+/*
+ * Shrink the PFS3/PFS2 filesystem to a smaller cylinder range.
+ * pi->high_cyl must already be set to the NEW (smaller) value;
+ * old_high_cyl is the value it had before the edit.  Refuses unless
+ * every user block in the removed range is free in the bitmap.
+ * Same write-order contract as grow: call this FIRST, write the RDB
+ * only after it succeeds.  Reversible until the RDB write.
+ */
+BOOL PFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
+                         const struct PartInfo *pi, ULONG old_high_cyl,
+                         char *err_buf,
+                         FFS_ProgressFn progress_fn, void *progress_ud);
+
 #endif /* PFSRESIZE_H */
