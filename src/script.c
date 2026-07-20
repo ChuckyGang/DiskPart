@@ -1320,7 +1320,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
                                    s_msg, script_grow_progress, NULL);
             break;
         default:
-            ok = FFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+            ok = FFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi, 0,
                                    s_msg, script_grow_progress, NULL);
             break;
     }

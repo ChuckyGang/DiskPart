@@ -529,18 +529,12 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
 
     if (src_count == 0) { snprintf(err_buf, ebsz, GS(MSG_PC_NOT_FOUND_FMT), src->drive_name); return FALSE; }
 
-    /* FFS/OFS bakes its total size into its on-disk layout (root position and
-       bitmap come from the DosEnvec geometry), so it must land in a partition
-       of EXACTLY the same block count.  SFS and PFS3 store their own size in
-       their root, so they happily sit in a larger partition. */
-    if (FFS_IsSupportedType(src->dos_type)) {
-        if (dst_blocks != src_count) {
-            snprintf(err_buf, ebsz, GS(MSG_PC_FFS_EXACT_FMT),
-                     dst->drive_name, (unsigned long)dst_blocks,
-                     (unsigned long)src_count);
-            return FALSE;
-        }
-    } else if (dst_blocks < src_count) {
+    /* FFS/OFS bakes its total size into its layout (root position + bitmap
+       come from the geometry).  Same size = drop-in copy.  LARGER = copy then
+       grow the FFS to fill (the grow is fed the EXACT source block count via
+       old_blocks_ovr, since it is not a whole number of dest cylinders).
+       SMALLER can't be done by a plain copy. */
+    if (dst_blocks < src_count) {
         snprintf(err_buf, ebsz, GS(MSG_PC_DST_TOO_SMALL_FMT),
                  dst->drive_name, (unsigned long)dst_blocks,
                  (unsigned long)src_count);
@@ -575,7 +569,25 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
     dst->sectors_per_block = src->sectors_per_block;
     dst->reserved_blks     = src->reserved_blks;
 
-    if (SFS_IsSupportedType(src->dos_type)) {
+    if (FFS_IsSupportedType(src->dos_type) && dst_blocks > src_count) {
+        /* Larger destination: grow the just-copied FFS to fill it.  The FFS
+           is coherent at its source size; the grow reads its root (from the
+           boot-block pointer) and bitmap chain, relocates the root to the new
+           centre, extends the bitmap and sets bm_flag=0 so FFS revalidates on
+           mount.  old_blocks_ovr = the EXACT source FS block count. */
+        ULONG spb = (dst->block_size >= 1024) ? (dst->block_size / 512) : 1;
+        /* FFS_GrowPartition writes a ~210-char diagnostic into its err_buf on
+           BOTH success and failure, so give it its own 256-byte buffer - a
+           smaller one overflows and smashes the stack. */
+        static char growbuf[256];
+        growbuf[0] = '\0';
+        PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
+        if (!FFS_GrowPartition(dbd, drdb, dst, dst->low_cyl, src_count / spb,
+                               growbuf, progress_fn, progress_ud)) {
+            strncpy(err_buf, growbuf, ebsz - 1); err_buf[ebsz - 1] = '\0';
+            goto out;   /* ok stays FALSE */
+        }
+    } else if (SFS_IsSupportedType(src->dos_type)) {
         /* SFS root blocks store ABSOLUTE byte offsets - shift them from the
            source's physical position to the destination's. */
         PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));

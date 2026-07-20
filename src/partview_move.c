@@ -850,7 +850,7 @@ int offer_ffs_grow(struct Window *win, struct BlockDev *bd,
             no_unmount = TRUE;
         }
 
-        result = FFS_GrowPartition(bd, rdb, pi, old_hi, errbuf,
+        result = FFS_GrowPartition(bd, rdb, pi, old_hi, 0, errbuf,
                                    ffs_grow_progress, &prog_ud);
         if (result) {
             struct EasyStruct ok_es;

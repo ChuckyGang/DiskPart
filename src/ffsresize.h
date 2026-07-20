@@ -40,8 +40,12 @@ typedef void (*FFS_ProgressFn)(void *ud, const char *msg);
  * progress_ud  : opaque value passed to progress_fn.
  * Returns TRUE on success.
  */
+/* old_blocks_ovr: 0 = derive the current FS size from old_high_cyl (normal
+   grow).  Non-zero = the EXACT current FS block count, for the clone path
+   where the source size is not a whole number of destination cylinders. */
 BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        const struct PartInfo *pi, ULONG old_high_cyl,
+                       ULONG old_blocks_ovr,
                        char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud);
 

@@ -161,6 +161,7 @@ static ULONG ffs_checksum(const ULONG *buf, ULONG nlongs)
 
 BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        const struct PartInfo *pi, ULONG old_high_cyl,
+                       ULONG old_blocks_ovr,
                        char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud)
 {
@@ -215,10 +216,14 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
 
     /* Device-block totals (heads/sectors are device-sectors per cyl/track). */
     ULONG part_abs       = pi->low_cyl * heads * sectors;
-    ULONG old_dev_blocks = (old_high_cyl - pi->low_cyl + 1) * heads * sectors;
     ULONG new_dev_blocks = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
-    /* FS-block totals - FFS rounds down: HighestBlock = total/spb - 1. */
-    ULONG old_blocks     = old_dev_blocks / spb;
+    /* FS-block totals - FFS rounds down: HighestBlock = total/spb - 1.
+       old_blocks_ovr (non-zero) gives the EXACT current FS size in FS blocks,
+       used by the partition-clone path where the source's block count is not
+       a whole number of destination cylinders (so it can't be expressed as
+       old_high_cyl); 0 = derive from old_high_cyl as usual. */
+    ULONG old_blocks     = old_blocks_ovr ? old_blocks_ovr
+                           : ((old_high_cyl - pi->low_cyl + 1) * heads * sectors / spb);
     ULONG new_blocks     = new_dev_blocks / spb;
 
     /* FS blocks per bitmap block: (nlongs-1)*32

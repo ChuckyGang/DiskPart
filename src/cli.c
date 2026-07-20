@@ -1532,7 +1532,7 @@ static LONG cmd_grow(const char *devname, ULONG unit, BOOL force,
                                    outbuf, cli_grow_progress, NULL);
             break;
         default:
-            ok = FFS_GrowPartition(bd, &s_rdb, pi, old_hi,
+            ok = FFS_GrowPartition(bd, &s_rdb, pi, old_hi, 0,
                                    outbuf, cli_grow_progress, NULL);
             break;
     }
