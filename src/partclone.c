@@ -206,20 +206,26 @@ BOOL PartClone_FindGap(const struct RDBInfo *drdb, ULONG cyl_span,
 }
 
 /* ------------------------------------------------------------------ */
-/* SFS position fixup: patch both root blocks' firstbyte/lastbyte from  */
-/* the source's absolute byte base to the destination's.  new_base/     */
-/* old_base are ABSOLUTE 512-byte block numbers.  Non-fatal-safe: the   */
-/* caller decides how to treat a FALSE return.                          */
+/* SFS position fixup: set both root blocks' firstbyte/lastbyte to the  */
+/* destination partition's ABSOLUTE byte range.  SmartFilesystem mounts */
+/* only when the root's firstbyte equals the DosEnvec-derived byte_low  */
+/* (= partition start * bytes_sector) and lastbyte == byte_high         */
+/* (firstbyte + totalblocks*blocksize).  dst_base_blk is the 512-byte   */
+/* device block where block 0 of the SFS was written = the partition    */
+/* start, so firstbyte MUST be dst_base_blk*512.  We set it DIRECTLY    */
+/* rather than shifting the source's stored value: across differing     */
+/* source/dest geometries the source firstbyte need not equal its own   */
+/* base*512, and a relative shift then lands off the partition.         */
+/* Non-fatal-safe: the caller decides how to treat a FALSE return.      */
 /* ------------------------------------------------------------------ */
-static BOOL pc_sfs_fixup(struct BlockDev *bd, ULONG new_base_blk,
-                         ULONG old_base_blk)
+static BOOL pc_sfs_fixup(struct BlockDev *bd, ULONG dst_base_blk)
 {
     UBYTE scratch[512];
     ULONG bsz, sphys, total, r;
     ULONG roots[2];
-    UQUAD delta_add, delta_sub;
+    UQUAD new_fb, new_lb;
 
-    if (!BlockDev_ReadBlock(bd, new_base_blk, scratch)) return FALSE;
+    if (!BlockDev_ReadBlock(bd, dst_base_blk, scratch)) return FALSE;
     if (sfs_getl(scratch, SFS_O_ID) != SFS_ROOT_ID_V) return FALSE;
     bsz = sfs_getl(scratch, SFS_O_BLOCKSIZE);
     if (bsz < 512 || (bsz & (bsz - 1)) || (bsz % 512)) return FALSE;
@@ -227,40 +233,29 @@ static BOOL pc_sfs_fixup(struct BlockDev *bd, ULONG new_base_blk,
     total = sfs_getl(scratch, SFS_O_TOTALBLOCKS);
     if (total < 2) return FALSE;
 
-    /* byte delta between old and new absolute positions */
-    if (new_base_blk >= old_base_blk) {
-        delta_add = (UQUAD)(new_base_blk - old_base_blk) * 512;
-        delta_sub = 0;
-    } else {
-        delta_add = 0;
-        delta_sub = (UQUAD)(old_base_blk - new_base_blk) * 512;
-    }
+    /* Absolute destination byte range (SFS lastbyte is exclusive:
+       byte_high = firstbyte + totalblocks * blocksize). */
+    new_fb = (UQUAD)dst_base_blk * 512;
+    new_lb = new_fb + (UQUAD)total * bsz;
 
     roots[0] = 0;
     roots[1] = total - 1;
     for (r = 0; r < 2; r++) {
         UBYTE *buf = (UBYTE *)AllocVec(bsz, MEMF_PUBLIC);
         ULONG  i;
-        UQUAD  fb, lb;
         BOOL   ok = TRUE;
         if (!buf) return FALSE;
         for (i = 0; i < sphys; i++)
-            if (!BlockDev_ReadBlock(bd, new_base_blk + roots[r] * sphys + i,
+            if (!BlockDev_ReadBlock(bd, dst_base_blk + roots[r] * sphys + i,
                                     buf + i * 512)) { ok = FALSE; break; }
         if (ok && sfs_getl(buf, SFS_O_ID) == SFS_ROOT_ID_V) {
-            fb = ((UQUAD)sfs_getl(buf, SFS_O_FIRSTBYTEH) << 32)
-               |  (UQUAD)sfs_getl(buf, SFS_O_FIRSTBYTE);
-            lb = ((UQUAD)sfs_getl(buf, SFS_O_LASTBYTEH) << 32)
-               |  (UQUAD)sfs_getl(buf, SFS_O_LASTBYTE);
-            fb = fb + delta_add - delta_sub;
-            lb = lb + delta_add - delta_sub;
-            sfs_setl(buf, SFS_O_FIRSTBYTEH, (ULONG)(fb >> 32));
-            sfs_setl(buf, SFS_O_FIRSTBYTE,  (ULONG)(fb & 0xFFFFFFFFUL));
-            sfs_setl(buf, SFS_O_LASTBYTEH,  (ULONG)(lb >> 32));
-            sfs_setl(buf, SFS_O_LASTBYTE,   (ULONG)(lb & 0xFFFFFFFFUL));
+            sfs_setl(buf, SFS_O_FIRSTBYTEH, (ULONG)(new_fb >> 32));
+            sfs_setl(buf, SFS_O_FIRSTBYTE,  (ULONG)(new_fb & 0xFFFFFFFFUL));
+            sfs_setl(buf, SFS_O_LASTBYTEH,  (ULONG)(new_lb >> 32));
+            sfs_setl(buf, SFS_O_LASTBYTE,   (ULONG)(new_lb & 0xFFFFFFFFUL));
             sfs_set_checksum(buf, bsz);
             for (i = 0; i < sphys; i++)
-                if (!BlockDev_WriteBlock(bd, new_base_blk + roots[r] * sphys + i,
+                if (!BlockDev_WriteBlock(bd, dst_base_blk + roots[r] * sphys + i,
                                          buf + i * 512)) { ok = FALSE; break; }
         }
         FreeVec(buf);
@@ -389,7 +384,6 @@ BOOL PartClone_RestoreToPart(struct BlockDev *bd, struct RDBInfo *rdb,
     BPTR   fh = 0;
     UBYTE *buf = NULL;
     ULONG  dst_blocks, dst_base, done = 0;
-    ULONG  src_base_at_dump;
     BOOL   ok = FALSE;
 
     if (!PartClone_ReadHeader(path, &h, err_buf, ebsz)) return FALSE;
@@ -415,8 +409,6 @@ BOOL PartClone_RestoreToPart(struct BlockDev *bd, struct RDBInfo *rdb,
         dst->high_cyl = new_high;
         dst_blocks = span * hh * ss * spb;
         dst_base   = dst->low_cyl * hh * ss * spb;
-        /* where the SFS roots in the dump think they live: source base */
-        src_base_at_dump = h.src_low_cyl * hh * ss * spb;
     }
     if (dst_blocks < h.block_count) {
         snprintf(err_buf, ebsz, GS(MSG_PC_DST_TOO_SMALL_FMT),
@@ -456,7 +448,7 @@ BOOL PartClone_RestoreToPart(struct BlockDev *bd, struct RDBInfo *rdb,
     pc_adopt_header(dst, &h);
     if (SFS_IsSupportedType(h.dos_type)) {
         PROG(h.block_count, h.block_count, GS(MSG_PC_UPDATING_SFS));
-        pc_sfs_fixup(bd, dst_base, src_base_at_dump);
+        pc_sfs_fixup(bd, dst_base);
     }
     ok = TRUE;
 out:
@@ -716,7 +708,7 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
         /* SFS root blocks store ABSOLUTE byte offsets - shift them from the
            source's physical position to the destination's. */
         PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
-        pc_sfs_fixup(dbd, dst_base, src_base);
+        pc_sfs_fixup(dbd, dst_base);
         /* SmartFilesystem mounts a partition ONLY when the root's stored
            total EXACTLY equals its DosEnvec-derived block count
            (Surfaces*BlocksPerTrack*ncyl / SectorPerBlock; verified against the
