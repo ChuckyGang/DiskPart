@@ -3777,3 +3777,9 @@ Cannot unmount %s: the volume is in use (%s).\nThis is normal for the boot parti
 MSG_PV_SHR_BUSY_GADGETS
 Shrink + Reboot|Cancel
 ;
+MSG_QF_ENS_NOT_IN_RDB_FMT
+no handler for 0x%08lX in FileSystem.resource or in this disk's RDB
+;
+MSG_QF_ENS_LOAD_FAIL_FMT
+the 0x%08lX handler could not be loaded (bad LSEG code / file missing)
+;

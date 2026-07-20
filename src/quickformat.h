@@ -26,6 +26,15 @@
 BOOL QuickFormat_Partition(struct BlockDev *bd, const struct PartInfo *pi,
                            char *mounted_name, char *errbuf, ULONG errlen);
 
+/* Make sure a handler for dostype exists in FileSystem.resource, loading
+ * and registering it from the RDB (FSHD/LSEG code, or the FSHD's handler
+ * file path) when it is not resident - the same thing the ROM strap does
+ * at boot.  Call before QuickFormat_Partition()/MountPartition() when an
+ * RDBInfo is at hand.  TRUE = handler available (already, or now).  The
+ * registered entry persists until reboot. */
+BOOL QuickFormat_EnsureHandler(const struct RDBInfo *rdb, ULONG dostype,
+                               char *errbuf, ULONG errlen);
+
 /* Mount the partition described by pi (with its current geometry) WITHOUT
  * formatting - used to remount after a resize so the handler picks up the new
  * cylinder range.  Returns TRUE on success; mounted_name (>=40 bytes, optional)

@@ -66,6 +66,11 @@ scripting interface.
    format" option in the Add dialog; VOLNAME= on the CLI / in scripts).  The
    partition is temp-mounted and formatted by its real filesystem handler, then
    left mounted - no reboot needed.  Real devices only (not image files).
+ * When the filesystem is not resident (e.g. formatting a PFS3 partition on a
+   system that booted without pfs3), the handler is loaded from the disk's own
+   RDB (the FSHD/LSEG code added with ADDFS - exactly what the ROM does at
+   boot) or from the FSHD's handler path (e.g. L:pfs3aio), and registered in
+   FileSystem.resource for the rest of the session.
  * Recommends a block size based on the partition size.
  * Symbolic cylinder values: LOW=START / NEXT, HIGH=END / +<size>.
  * Most flags are available even if the device does not technically support

@@ -436,3 +436,146 @@ BOOL UnmountPartition(struct BlockDev *bd, const char *name,
     set_err(errbuf, errlen, "");
     return TRUE;
 }
+
+/* ================================================================== */
+/* QuickFormat_EnsureHandler - make sure a filesystem handler for      */
+/* dostype exists in FileSystem.resource, loading it from the RDB if   */
+/* necessary (exactly what the ROM strap does at boot).                */
+/*                                                                     */
+/* Source 1: the RDB's own FSHD/LSEG code (RDB_Read keeps it in        */
+/*           FSInfo.code) - relocated into a SegList with              */
+/*           InternalLoadSeg() reading from memory.                    */
+/* Source 2: the handler path stored in the FSHD (e.g. "L:pfs3aio")    */
+/*           via plain LoadSeg(), when the RDB carries no code.        */
+/*                                                                     */
+/* On success a FileSysEntry (ln_Name "DiskPart") is added to the      */
+/* resource, so the existing find_filesys()/apply_patch() machinery -  */
+/* and every later mount until reboot - just works.  The entry, its    */
+/* name and the SegList are allocated with AllocMem and deliberately   */
+/* never freed: the resource owns them for the rest of this uptime,    */
+/* same as ROM-strap-loaded filesystems.                               */
+/* ================================================================== */
+
+/* Relocate raw LSEG hunk code into a SegList by round-tripping it
+   through a RAM-backed temp file and the OS's own LoadSeg() - the
+   loader that handles every hunk variant correctly.  (InternalLoadSeg
+   with memory-read hooks would avoid the file, but its hooks take
+   register arguments, which this toolchain cannot express in C.)
+   The temp file is deleted immediately; the SegList lives on. */
+static BPTR qf_loadseg_mem(const UBYTE *data, ULONG size)
+{
+    static const char *paths[] = {
+        "T:diskpart_fs.ldtmp", "RAM:diskpart_fs.ldtmp"
+    };
+    int i;
+    for (i = 0; i < 2; i++) {
+        BPTR fh = Open((CONST_STRPTR)paths[i], MODE_NEWFILE);
+        BPTR seg;
+        LONG wr;
+        if (!fh) continue;
+        wr = Write(fh, (APTR)data, (LONG)size);
+        Close(fh);
+        if (wr != (LONG)size) {
+            DeleteFile((CONST_STRPTR)paths[i]);
+            continue;
+        }
+        seg = LoadSeg((CONST_STRPTR)paths[i]);
+        DeleteFile((CONST_STRPTR)paths[i]);
+        if (seg) return seg;
+    }
+    return 0;
+}
+
+BOOL QuickFormat_EnsureHandler(const struct RDBInfo *rdb, ULONG dostype,
+                               char *errbuf, ULONG errlen)
+{
+    struct FileSysResource *fsr;
+    struct FileSysEntry    *fse;
+    const struct FSInfo    *fi = NULL;
+    BPTR   seg = 0;
+    char  *name;
+    UWORD  i;
+    char   msg[96];
+
+    set_err(errbuf, errlen, "");
+    fsr = (struct FileSysResource *)OpenResource("FileSystem.resource");
+    if (!fsr) {
+        set_err(errbuf, errlen, GS(MSG_QF_NO_EXPANSION));
+        return FALSE;
+    }
+
+    /* Already available?  Same matching rule as find_filesys(): exact
+       dostype, or any FFS-family entry for a DOS\x request. */
+    {
+        BOOL found = FALSE;
+        Forbid();
+        for (fse = (struct FileSysEntry *)fsr->fsr_FileSysEntries.lh_Head;
+             fse->fse_Node.ln_Succ;
+             fse = (struct FileSysEntry *)fse->fse_Node.ln_Succ) {
+            if (fse->fse_DosType == dostype ||
+                ((dostype & 0xFFFFFF00UL) == 0x444F5300UL &&
+                 (fse->fse_DosType & 0xFFFFFF00UL) == 0x444F5300UL)) {
+                found = TRUE;
+                break;
+            }
+        }
+        Permit();
+        if (found) return TRUE;
+    }
+
+    /* Not resident - find the filesystem in the RDB. */
+    if (rdb) {
+        for (i = 0; i < rdb->num_fs; i++) {
+            if (rdb->filesystems[i].dos_type == dostype) {
+                fi = &rdb->filesystems[i];
+                break;
+            }
+        }
+    }
+    if (!fi) {
+        DP_SNPRINTF(msg, GS(MSG_QF_ENS_NOT_IN_RDB_FMT),
+                    (unsigned long)dostype);
+        set_err(errbuf, errlen, msg);
+        return FALSE;
+    }
+
+    if (fi->code && fi->code_size)
+        seg = qf_loadseg_mem(fi->code, fi->code_size);
+    if (!seg && fi->fs_name[0])
+        seg = LoadSeg((CONST_STRPTR)fi->fs_name);
+    if (!seg) {
+        DP_SNPRINTF(msg, GS(MSG_QF_ENS_LOAD_FAIL_FMT),
+                    (unsigned long)dostype);
+        set_err(errbuf, errlen, msg);
+        return FALSE;
+    }
+
+    fse  = (struct FileSysEntry *)AllocMem(sizeof(*fse),
+                                           MEMF_PUBLIC | MEMF_CLEAR);
+    name = (char *)AllocMem(16, MEMF_PUBLIC);
+    if (!fse || !name) {
+        if (fse)  FreeMem(fse, sizeof(*fse));
+        if (name) FreeMem(name, 16);
+        UnLoadSeg(seg);
+        set_err(errbuf, errlen, GS(MSG_QF_ENS_LOAD_FAIL_FMT));
+        return FALSE;
+    }
+    memcpy(name, "DiskPart", 9);
+
+    fse->fse_Node.ln_Name = name;
+    fse->fse_DosType    = dostype;
+    fse->fse_Version    = fi->version;
+    /* FSHD patch flags say which fields the handler wants copied into
+       the DeviceNode; a zero (sloppy FSHD) falls back to the classic
+       SegList+GlobalVec pair. */
+    fse->fse_PatchFlags = fi->patch_flags ? fi->patch_flags : 0x0180;
+    fse->fse_SegList    = seg;
+    fse->fse_GlobalVec  = fi->global_vec ? fi->global_vec : -1;
+    fse->fse_StackSize  = fi->stack_size ? fi->stack_size : 4096;
+    fse->fse_Priority   = fi->priority;
+
+    Forbid();
+    AddHead(&fsr->fsr_FileSysEntries, &fse->fse_Node);
+    Permit();
+    return TRUE;
+}

@@ -1817,7 +1817,9 @@ static BOOL format_pending_partitions(struct Window *win, struct BlockDev *bd,
         } else {
             char err[80], mounted[40];
             err[0] = '\0';
-            if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
+            if (QuickFormat_EnsureHandler(rdb, pi->dos_type,
+                                          err, sizeof(err)) &&
+                QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
                 DP_SNPRINTF(line, GS(MSG_PV_FMT_FORMATTED),
                         mounted[0] ? mounted : pi->drive_name, pi->volume_name);
             } else {

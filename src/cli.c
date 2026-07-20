@@ -1312,7 +1312,9 @@ static LONG cmd_addpart(const char *devname, ULONG unit, BOOL force,
             pi->volume_name[sizeof(pi->volume_name) - 1] = '\0';
             if (!pi->heads)   pi->heads   = s_rdb.heads;
             if (!pi->sectors) pi->sectors = s_rdb.sectors;
-            if (QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
+            if (QuickFormat_EnsureHandler(&s_rdb, pi->dos_type,
+                                          err, sizeof(err)) &&
+                QuickFormat_Partition(bd, pi, mounted, err, sizeof(err))) {
                 DP_SNPRINTF(outbuf, GS(MSG_CLI_FORMATTED_AS),
                         mounted[0] ? mounted : pi->drive_name, pi->volume_name);
             } else {

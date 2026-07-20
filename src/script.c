@@ -1758,7 +1758,9 @@ static LONG do_write(ULONG ln)
             } else {
                 char err[80], mounted[40];
                 err[0] = '\0';
-                if (QuickFormat_Partition(s_st.bd, pi, mounted, err, sizeof(err))) {
+                if (QuickFormat_EnsureHandler(&s_st.rdb, pi->dos_type,
+                                              err, sizeof(err)) &&
+                    QuickFormat_Partition(s_st.bd, pi, mounted, err, sizeof(err))) {
                     DP_SNPRINTF(s_msg, GS(MSG_SCR_FORMATTED_FMT),
                             mounted[0] ? mounted : pi->drive_name,
                             pi->volume_name);

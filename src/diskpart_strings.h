@@ -1227,8 +1227,10 @@
 #define MSG_PV_SHR_FAIL_FMT          1221
 #define MSG_PV_SHR_BUSY_OFFER_FMT    1222
 #define MSG_PV_SHR_BUSY_GADGETS      1223
+#define MSG_QF_ENS_NOT_IN_RDB_FMT    1224
+#define MSG_QF_ENS_LOAD_FAIL_FMT     1225
 
-#define MSG_COUNT 1224
+#define MSG_COUNT 1226
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2464,5 +2466,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1221 MSG_PV_SHR_FAIL_FMT */ "Shrink failed:\n%s\n\nThe original size was restored.",
     /* 1222 MSG_PV_SHR_BUSY_OFFER_FMT */ "Cannot unmount %s: the volume is in use (%s).\nThis is normal for the boot partition.\n\nShrink it in place instead? The volume will be LOCKED and\nyou MUST reboot before using it - do not access it first.",
     /* 1223 MSG_PV_SHR_BUSY_GADGETS */ "Shrink + Reboot|Cancel",
+    /* 1224 MSG_QF_ENS_NOT_IN_RDB_FMT */ "no handler for 0x%08lX in FileSystem.resource or in this disk's RDB",
+    /* 1225 MSG_QF_ENS_LOAD_FAIL_FMT */ "the 0x%08lX handler could not be loaded (bad LSEG code / file missing)",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */
