@@ -1,0 +1,480 @@
+/*
+ * partclone.c - Partition dump-to-file, restore-from-file, clone.
+ * See partclone.h for the design.
+ */
+
+#include <exec/types.h>
+#include <exec/memory.h>
+#include <proto/exec.h>
+#include <dos/dos.h>
+#include <proto/dos.h>
+
+#include "clib.h"
+#include "rdb.h"
+#include "partmove.h"
+#include "sfsresize.h"      /* SFS_IsSupportedType */
+#include "sfs_util.h"
+#include "partclone.h"
+#include "locale_support.h"
+
+#define PC_CHUNK_BLOCKS 256          /* device blocks per copy batch */
+
+/* SFS root-block field offsets (same as partmove.c). */
+#define SFS_ROOT_ID_V   0x53465300UL
+#define SFS_O_ID        0
+#define SFS_O_FIRSTBYTEH 32
+#define SFS_O_FIRSTBYTE  36
+#define SFS_O_LASTBYTEH  40
+#define SFS_O_LASTBYTE   44
+#define SFS_O_TOTALBLOCKS 48
+#define SFS_O_BLOCKSIZE  52
+
+/* ------------------------------------------------------------------ */
+/* Big-endian header pack/unpack (fixed 512-byte block)               */
+/* ------------------------------------------------------------------ */
+static void pc_setl(UBYTE *b, ULONG o, ULONG v)
+{
+    b[o] = (UBYTE)(v >> 24); b[o+1] = (UBYTE)(v >> 16);
+    b[o+2] = (UBYTE)(v >> 8); b[o+3] = (UBYTE)v;
+}
+static ULONG pc_getl(const UBYTE *b, ULONG o)
+{
+    return ((ULONG)b[o] << 24) | ((ULONG)b[o+1] << 16)
+         | ((ULONG)b[o+2] << 8) | b[o+3];
+}
+
+/* Field layout inside the 512-byte header block (longword offsets * 4). */
+enum {
+    H_MAGIC = 0,  H_VERSION = 4,  H_DOSTYPE = 8,   H_BLKSIZE = 12,
+    H_SPB = 16,   H_RESERVED = 20, H_HEADS = 24,   H_SECTORS = 28,
+    H_LOWCYL = 32, H_HIGHCYL = 36, H_BLKCOUNT = 40, H_BOOTPRI = 44,
+    H_FLAGS = 48, H_DEVFLAGS = 52, H_MASK = 56,    H_MAXXFER = 60,
+    H_NUMBUF = 64, H_BUFMEM = 68, H_BOOTBLK = 72,  H_INTERLEAVE = 76,
+    H_CONTROL = 80, H_BAUD = 84,
+    H_NAME = 88,                  /* 32 bytes */
+    H_CHECKSUM = 508              /* last longword */
+};
+
+static ULONG pc_header_sum(const UBYTE *b)
+{
+    ULONG s = 0, i;
+    for (i = 0; i < 508; i += 4) s += pc_getl(b, i);
+    return s;
+}
+
+static void pc_pack_header(UBYTE *b, const struct PartInfo *pi,
+                           ULONG block_count)
+{
+    ULONG i;
+    for (i = 0; i < 512; i++) b[i] = 0;
+    pc_setl(b, H_MAGIC,     PARTDUMP_MAGIC);
+    pc_setl(b, H_VERSION,   PARTDUMP_VERSION);
+    pc_setl(b, H_DOSTYPE,   pi->dos_type);
+    pc_setl(b, H_BLKSIZE,   pi->block_size);
+    pc_setl(b, H_SPB,       pi->sectors_per_block);
+    pc_setl(b, H_RESERVED,  pi->reserved_blks);
+    pc_setl(b, H_HEADS,     pi->heads);
+    pc_setl(b, H_SECTORS,   pi->sectors);
+    pc_setl(b, H_LOWCYL,    pi->low_cyl);
+    pc_setl(b, H_HIGHCYL,   pi->high_cyl);
+    pc_setl(b, H_BLKCOUNT,  block_count);
+    pc_setl(b, H_BOOTPRI,   (ULONG)pi->boot_pri);
+    pc_setl(b, H_FLAGS,     pi->flags);
+    pc_setl(b, H_DEVFLAGS,  pi->dev_flags);
+    pc_setl(b, H_MASK,      pi->mask);
+    pc_setl(b, H_MAXXFER,   pi->max_transfer);
+    pc_setl(b, H_NUMBUF,    pi->num_buffer);
+    pc_setl(b, H_BUFMEM,    pi->buf_mem_type);
+    pc_setl(b, H_BOOTBLK,   pi->boot_blocks);
+    pc_setl(b, H_INTERLEAVE, pi->interleave);
+    pc_setl(b, H_CONTROL,   pi->control);
+    pc_setl(b, H_BAUD,      pi->baud);
+    for (i = 0; i < 31 && pi->drive_name[i]; i++) b[H_NAME + i] = pi->drive_name[i];
+    pc_setl(b, H_CHECKSUM,  pc_header_sum(b));
+}
+
+static void pc_unpack_header(const UBYTE *b, struct PartDumpHeader *h)
+{
+    ULONG i;
+    h->magic            = pc_getl(b, H_MAGIC);
+    h->version          = pc_getl(b, H_VERSION);
+    h->dos_type         = pc_getl(b, H_DOSTYPE);
+    h->block_size       = pc_getl(b, H_BLKSIZE);
+    h->sectors_per_block = pc_getl(b, H_SPB);
+    h->reserved_blks    = pc_getl(b, H_RESERVED);
+    h->heads            = pc_getl(b, H_HEADS);
+    h->sectors          = pc_getl(b, H_SECTORS);
+    h->src_low_cyl      = pc_getl(b, H_LOWCYL);
+    h->src_high_cyl     = pc_getl(b, H_HIGHCYL);
+    h->block_count      = pc_getl(b, H_BLKCOUNT);
+    h->boot_pri         = pc_getl(b, H_BOOTPRI);
+    h->flags            = pc_getl(b, H_FLAGS);
+    h->dev_flags        = pc_getl(b, H_DEVFLAGS);
+    h->mask             = pc_getl(b, H_MASK);
+    h->max_transfer     = pc_getl(b, H_MAXXFER);
+    h->num_buffer       = pc_getl(b, H_NUMBUF);
+    h->buf_mem_type     = pc_getl(b, H_BUFMEM);
+    h->boot_blocks      = pc_getl(b, H_BOOTBLK);
+    h->interleave       = pc_getl(b, H_INTERLEAVE);
+    h->control          = pc_getl(b, H_CONTROL);
+    h->baud             = pc_getl(b, H_BAUD);
+    for (i = 0; i < 31; i++) h->drive_name[i] = (char)b[H_NAME + i];
+    h->drive_name[31] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
+/* Geometry helpers                                                    */
+/* ------------------------------------------------------------------ */
+static ULONG pc_part_blocks(const struct PartInfo *pi, const struct RDBInfo *rdb)
+{
+    ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG spb   = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
+    return (pi->high_cyl - pi->low_cyl + 1) * heads * secs * spb;
+}
+static ULONG pc_part_base(const struct PartInfo *pi, const struct RDBInfo *rdb)
+{
+    ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG spb   = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
+    return pi->low_cyl * heads * secs * spb;
+}
+
+/* ------------------------------------------------------------------ */
+/* SFS position fixup: patch both root blocks' firstbyte/lastbyte from  */
+/* the source's absolute byte base to the destination's.  new_base/     */
+/* old_base are ABSOLUTE 512-byte block numbers.  Non-fatal-safe: the   */
+/* caller decides how to treat a FALSE return.                          */
+/* ------------------------------------------------------------------ */
+static BOOL pc_sfs_fixup(struct BlockDev *bd, ULONG new_base_blk,
+                         ULONG old_base_blk)
+{
+    UBYTE scratch[512];
+    ULONG bsz, sphys, total, r;
+    ULONG roots[2];
+    UQUAD delta_add, delta_sub;
+
+    if (!BlockDev_ReadBlock(bd, new_base_blk, scratch)) return FALSE;
+    if (sfs_getl(scratch, SFS_O_ID) != SFS_ROOT_ID_V) return FALSE;
+    bsz = sfs_getl(scratch, SFS_O_BLOCKSIZE);
+    if (bsz < 512 || (bsz & (bsz - 1)) || (bsz % 512)) return FALSE;
+    sphys = bsz / 512;
+    total = sfs_getl(scratch, SFS_O_TOTALBLOCKS);
+    if (total < 2) return FALSE;
+
+    /* byte delta between old and new absolute positions */
+    if (new_base_blk >= old_base_blk) {
+        delta_add = (UQUAD)(new_base_blk - old_base_blk) * 512;
+        delta_sub = 0;
+    } else {
+        delta_add = 0;
+        delta_sub = (UQUAD)(old_base_blk - new_base_blk) * 512;
+    }
+
+    roots[0] = 0;
+    roots[1] = total - 1;
+    for (r = 0; r < 2; r++) {
+        UBYTE *buf = (UBYTE *)AllocVec(bsz, MEMF_PUBLIC);
+        ULONG  i;
+        UQUAD  fb, lb;
+        BOOL   ok = TRUE;
+        if (!buf) return FALSE;
+        for (i = 0; i < sphys; i++)
+            if (!BlockDev_ReadBlock(bd, new_base_blk + roots[r] * sphys + i,
+                                    buf + i * 512)) { ok = FALSE; break; }
+        if (ok && sfs_getl(buf, SFS_O_ID) == SFS_ROOT_ID_V) {
+            fb = ((UQUAD)sfs_getl(buf, SFS_O_FIRSTBYTEH) << 32)
+               |  (UQUAD)sfs_getl(buf, SFS_O_FIRSTBYTE);
+            lb = ((UQUAD)sfs_getl(buf, SFS_O_LASTBYTEH) << 32)
+               |  (UQUAD)sfs_getl(buf, SFS_O_LASTBYTE);
+            fb = fb + delta_add - delta_sub;
+            lb = lb + delta_add - delta_sub;
+            sfs_setl(buf, SFS_O_FIRSTBYTEH, (ULONG)(fb >> 32));
+            sfs_setl(buf, SFS_O_FIRSTBYTE,  (ULONG)(fb & 0xFFFFFFFFUL));
+            sfs_setl(buf, SFS_O_LASTBYTEH,  (ULONG)(lb >> 32));
+            sfs_setl(buf, SFS_O_LASTBYTE,   (ULONG)(lb & 0xFFFFFFFFUL));
+            sfs_set_checksum(buf, bsz);
+            for (i = 0; i < sphys; i++)
+                if (!BlockDev_WriteBlock(bd, new_base_blk + roots[r] * sphys + i,
+                                         buf + i * 512)) { ok = FALSE; break; }
+        }
+        FreeVec(buf);
+        if (!ok) return FALSE;
+    }
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dump                                                                */
+/* ------------------------------------------------------------------ */
+BOOL PartClone_DumpToFile(struct BlockDev *bd, const struct PartInfo *pi,
+                          const char *path,
+                          MoveProgressFn progress_fn, void *progress_ud,
+                          char *err_buf, ULONG ebsz)
+{
+#define PROG(d,t,ph) do { if (progress_fn) progress_fn(progress_ud,(d),(t),(ph)); } while(0)
+    BPTR   fh;
+    UBYTE *hdr = NULL, *buf = NULL;
+    ULONG  base, count, done = 0;
+    BOOL   ok = FALSE;
+    struct RDBInfo tmp; memset(&tmp, 0, sizeof(tmp));
+    tmp.heads = pi->heads; tmp.sectors = pi->sectors;
+
+    base  = pc_part_base(pi, &tmp);
+    count = pc_part_blocks(pi, &tmp);
+    if (count == 0) { snprintf(err_buf, ebsz, GS(MSG_PC_NOT_FOUND_FMT), pi->drive_name); return FALSE; }
+
+    hdr = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+    buf = (UBYTE *)AllocVec((ULONG)PC_CHUNK_BLOCKS * 512, MEMF_PUBLIC);
+    if (!hdr || !buf) { snprintf(err_buf, ebsz, GS(MSG_PC_OOM)); goto out; }
+
+    fh = Open((CONST_STRPTR)path, MODE_NEWFILE);
+    if (!fh) { snprintf(err_buf, ebsz, GS(MSG_PC_CANNOT_CREATE_FMT), path); goto out; }
+
+    pc_pack_header(hdr, pi, count);
+    if (Write(fh, hdr, 512) != 512) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_WRITE_ERR)); Close(fh); goto out;
+    }
+
+    PROG(0, count, GS(MSG_PC_COPYING));
+    while (done < count) {
+        ULONG batch = count - done;
+        ULONG i;
+        if (batch > PC_CHUNK_BLOCKS) batch = PC_CHUNK_BLOCKS;
+        for (i = 0; i < batch; i++) {
+            if (!BlockDev_ReadBlock(bd, base + done + i, buf + i * 512)) {
+                /* zero-fill unreadable blocks, like the image copiers */
+                memset(buf + i * 512, 0, 512);
+            }
+        }
+        if (Write(fh, buf, (LONG)(batch * 512)) != (LONG)(batch * 512)) {
+            snprintf(err_buf, ebsz, GS(MSG_PC_WRITE_ERR)); Close(fh); goto out;
+        }
+        done += batch;
+        PROG(done, count, GS(MSG_PC_COPYING));
+    }
+    Close(fh);
+    ok = TRUE;
+out:
+    if (hdr) FreeVec(hdr);
+    if (buf) FreeVec(buf);
+    return ok;
+#undef PROG
+}
+
+/* ------------------------------------------------------------------ */
+/* Read header only                                                    */
+/* ------------------------------------------------------------------ */
+BOOL PartClone_ReadHeader(const char *path, struct PartDumpHeader *hdr,
+                          char *err_buf, ULONG ebsz)
+{
+    BPTR  fh;
+    UBYTE *b = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
+    BOOL  ok = FALSE;
+    if (!b) { snprintf(err_buf, ebsz, GS(MSG_PC_OOM)); return FALSE; }
+    fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    if (!fh) { snprintf(err_buf, ebsz, GS(MSG_PC_CANNOT_OPEN_FMT), path); FreeVec(b); return FALSE; }
+    if (Read(fh, b, 512) != 512) { snprintf(err_buf, ebsz, GS(MSG_PC_SHORT_FILE)); goto out; }
+    if (pc_getl(b, H_MAGIC) != PARTDUMP_MAGIC ||
+        pc_getl(b, H_CHECKSUM) != pc_header_sum(b)) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_BAD_MAGIC)); goto out;
+    }
+    if (pc_getl(b, H_VERSION) != PARTDUMP_VERSION) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_BAD_VERSION_FMT),
+                 (unsigned long)pc_getl(b, H_VERSION)); goto out;
+    }
+    pc_unpack_header(b, hdr);
+    ok = TRUE;
+out:
+    Close(fh); FreeVec(b);
+    return ok;
+}
+
+/* Copy the DosEnvec fields (everything but location/name) from a dump
+   header into a PartInfo. */
+static void pc_adopt_header(struct PartInfo *dst, const struct PartDumpHeader *h)
+{
+    dst->dos_type          = h->dos_type;
+    dst->block_size        = h->block_size;
+    dst->sectors_per_block = h->sectors_per_block;
+    dst->reserved_blks     = h->reserved_blks;
+    dst->heads             = h->heads;
+    dst->sectors           = h->sectors;
+    dst->flags             = h->flags;
+    dst->dev_flags         = h->dev_flags;
+    dst->mask              = h->mask;
+    dst->max_transfer      = h->max_transfer;
+    dst->num_buffer        = h->num_buffer;
+    dst->buf_mem_type      = h->buf_mem_type;
+    dst->boot_blocks       = h->boot_blocks;
+    dst->interleave        = h->interleave;
+    dst->control           = h->control;
+    dst->baud              = h->baud;
+    dst->boot_pri          = (LONG)h->boot_pri;
+}
+
+/* ------------------------------------------------------------------ */
+/* Restore file -> existing partition                                  */
+/* ------------------------------------------------------------------ */
+BOOL PartClone_RestoreToPart(struct BlockDev *bd, struct RDBInfo *rdb,
+                             struct PartInfo *dst, const char *path,
+                             MoveProgressFn progress_fn, void *progress_ud,
+                             char *err_buf, ULONG ebsz)
+{
+#define PROG(d,t,ph) do { if (progress_fn) progress_fn(progress_ud,(d),(t),(ph)); } while(0)
+    struct PartDumpHeader h;
+    BPTR   fh = 0;
+    UBYTE *buf = NULL;
+    ULONG  dst_blocks, dst_base, done = 0;
+    ULONG  src_base_at_dump;
+    BOOL   ok = FALSE;
+
+    if (!PartClone_ReadHeader(path, &h, err_buf, ebsz)) return FALSE;
+
+    /* destination capacity uses the DUMP's geometry (what it will become) */
+    {
+        ULONG spb  = (h.block_size >= 1024) ? (h.block_size / 512) : 1;
+        ULONG hh   = h.heads   > 0 ? h.heads   : rdb->heads;
+        ULONG ss   = h.sectors > 0 ? h.sectors : rdb->sectors;
+        dst_blocks = (dst->high_cyl - dst->low_cyl + 1) * hh * ss * spb;
+        dst_base   = dst->low_cyl * hh * ss * spb;
+        /* where the SFS roots in the dump think they live: source base */
+        src_base_at_dump = h.src_low_cyl * hh * ss * spb;
+    }
+    if (dst_blocks < h.block_count) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_DST_TOO_SMALL_FMT),
+                 dst->drive_name, (unsigned long)dst_blocks,
+                 (unsigned long)h.block_count);
+        return FALSE;
+    }
+
+    buf = (UBYTE *)AllocVec((ULONG)PC_CHUNK_BLOCKS * 512, MEMF_PUBLIC);
+    if (!buf) { snprintf(err_buf, ebsz, GS(MSG_PC_OOM)); return FALSE; }
+    fh = Open((CONST_STRPTR)path, MODE_OLDFILE);
+    if (!fh) { snprintf(err_buf, ebsz, GS(MSG_PC_CANNOT_OPEN_FMT), path); FreeVec(buf); return FALSE; }
+    /* skip the 512-byte header */
+    if (Read(fh, buf, 512) != 512) { snprintf(err_buf, ebsz, GS(MSG_PC_SHORT_FILE)); goto out; }
+
+    PROG(0, h.block_count, GS(MSG_PC_COPYING));
+    while (done < h.block_count) {
+        ULONG batch = h.block_count - done;
+        LONG  want, got;
+        ULONG i;
+        if (batch > PC_CHUNK_BLOCKS) batch = PC_CHUNK_BLOCKS;
+        want = (LONG)(batch * 512);
+        got = Read(fh, buf, want);
+        if (got != want) { snprintf(err_buf, ebsz, GS(MSG_PC_SHORT_FILE)); goto out; }
+        for (i = 0; i < batch; i++) {
+            if (!BlockDev_WriteBlock(bd, dst_base + done + i, buf + i * 512)) {
+                snprintf(err_buf, ebsz, GS(MSG_PC_READ_ERR_FMT),
+                         (unsigned long)(dst_base + done + i)); goto out;
+            }
+        }
+        done += batch;
+        PROG(done, h.block_count, GS(MSG_PC_COPYING));
+    }
+    Close(fh); fh = 0;
+
+    /* Adopt the dumped geometry, then fix SFS absolute offsets. */
+    pc_adopt_header(dst, &h);
+    if (SFS_IsSupportedType(h.dos_type)) {
+        PROG(h.block_count, h.block_count, GS(MSG_PC_UPDATING_SFS));
+        pc_sfs_fixup(bd, dst_base, src_base_at_dump);
+    }
+    ok = TRUE;
+out:
+    if (fh) Close(fh);
+    if (buf) FreeVec(buf);
+    return ok;
+#undef PROG
+}
+
+/* ------------------------------------------------------------------ */
+/* Direct partition -> partition                                       */
+/* ------------------------------------------------------------------ */
+BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
+                          struct BlockDev *dbd, struct RDBInfo *drdb,
+                          struct PartInfo *dst,
+                          MoveProgressFn progress_fn, void *progress_ud,
+                          char *err_buf, ULONG ebsz)
+{
+#define PROG(d,t,ph) do { if (progress_fn) progress_fn(progress_ud,(d),(t),(ph)); } while(0)
+    UBYTE *buf = NULL;
+    ULONG  src_base, src_count, dst_base, dst_blocks, done = 0;
+    struct RDBInfo stmp; memset(&stmp, 0, sizeof(stmp));
+    struct RDBInfo dtmp; memset(&dtmp, 0, sizeof(dtmp));
+    BOOL   ok = FALSE;
+
+    stmp.heads = src->heads; stmp.sectors = src->sectors;
+    src_base  = pc_part_base(src, &stmp);
+    src_count = pc_part_blocks(src, &stmp);
+
+    /* destination sized with the SOURCE geometry it will adopt */
+    {
+        ULONG spb = (src->block_size >= 1024) ? (src->block_size / 512) : 1;
+        ULONG hh  = src->heads   > 0 ? src->heads   : drdb->heads;
+        ULONG ss  = src->sectors > 0 ? src->sectors : drdb->sectors;
+        dst_blocks = (dst->high_cyl - dst->low_cyl + 1) * hh * ss * spb;
+        dst_base   = dst->low_cyl * hh * ss * spb;
+    }
+    if (src_count == 0) { snprintf(err_buf, ebsz, GS(MSG_PC_NOT_FOUND_FMT), src->drive_name); return FALSE; }
+    if (dst_blocks < src_count) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_DST_TOO_SMALL_FMT),
+                 dst->drive_name, (unsigned long)dst_blocks,
+                 (unsigned long)src_count);
+        return FALSE;
+    }
+
+    buf = (UBYTE *)AllocVec((ULONG)PC_CHUNK_BLOCKS * 512, MEMF_PUBLIC);
+    if (!buf) { snprintf(err_buf, ebsz, GS(MSG_PC_OOM)); return FALSE; }
+
+    PROG(0, src_count, GS(MSG_PC_COPYING));
+    while (done < src_count) {
+        ULONG batch = src_count - done;
+        ULONG i;
+        if (batch > PC_CHUNK_BLOCKS) batch = PC_CHUNK_BLOCKS;
+        for (i = 0; i < batch; i++) {
+            if (!BlockDev_ReadBlock(sbd, src_base + done + i, buf + i * 512))
+                memset(buf + i * 512, 0, 512);
+        }
+        for (i = 0; i < batch; i++) {
+            if (!BlockDev_WriteBlock(dbd, dst_base + done + i, buf + i * 512)) {
+                snprintf(err_buf, ebsz, GS(MSG_PC_READ_ERR_FMT),
+                         (unsigned long)(dst_base + done + i)); goto out;
+            }
+        }
+        done += batch;
+        PROG(done, src_count, GS(MSG_PC_COPYING));
+    }
+
+    {
+        char saved[32];
+        ULONG i;
+        for (i = 0; i < 32; i++) saved[i] = dst->drive_name[i];
+        /* adopt source geometry+dostype; keep dst's own name + location */
+        dst->dos_type = src->dos_type; dst->block_size = src->block_size;
+        dst->sectors_per_block = src->sectors_per_block;
+        dst->reserved_blks = src->reserved_blks;
+        dst->heads = src->heads; dst->sectors = src->sectors;
+        dst->flags = src->flags; dst->dev_flags = src->dev_flags;
+        dst->mask = src->mask; dst->max_transfer = src->max_transfer;
+        dst->num_buffer = src->num_buffer; dst->buf_mem_type = src->buf_mem_type;
+        dst->boot_blocks = src->boot_blocks; dst->interleave = src->interleave;
+        dst->control = src->control; dst->baud = src->baud;
+        dst->boot_pri = src->boot_pri;
+        for (i = 0; i < 32; i++) dst->drive_name[i] = saved[i];
+    }
+    if (SFS_IsSupportedType(src->dos_type)) {
+        ULONG spb = (src->block_size >= 1024) ? (src->block_size / 512) : 1;
+        ULONG hh  = src->heads > 0 ? src->heads : stmp.heads;
+        ULONG ss  = src->sectors > 0 ? src->sectors : stmp.sectors;
+        ULONG src_base_blk = src->low_cyl * hh * ss * spb;
+        PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
+        pc_sfs_fixup(dbd, dst_base, src_base_blk);
+    }
+    ok = TRUE;
+out:
+    if (buf) FreeVec(buf);
+    return ok;
+#undef PROG
+}

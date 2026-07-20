@@ -33,6 +33,14 @@
 #include "sfsresize.h"
 #include "pfsresize.h"
 #include "shrinkinfo.h"
+#include "partclone.h"
+
+/* Progress state shared by the image copiers and partition clone (defined
+   here so the clone command handlers above cmd_imageout can use it). */
+struct CliProg {
+    ULONG last_pct;
+    ULONG last_blocks;
+};
 #include "locale_support.h"
 #include "cli.h"
 
@@ -61,7 +69,7 @@ extern struct DosLibrary *DOSBase;
     "GROW/M,"                                                     \
     "ZEROPART/S,"                                                  \
     "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S,"    \
-    "SHRINKINFO/K,SHRINK/K"
+    "SHRINKINFO/K,SHRINK/K,PARTOUT/K,PARTIN/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -113,6 +121,8 @@ enum {
     ARG_ACTIVE,
     ARG_SHRINKINFO,
     ARG_SHRINK,
+    ARG_PARTOUT,
+    ARG_PARTIN,
     ARG_COUNT
 };
 
@@ -1849,6 +1859,132 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
 }
 
 /* ------------------------------------------------------------------ */
+/* PARTOUT - dump a partition to a self-describing file                */
+/*   PARTOUT=<drive> FILE=<path>                                       */
+/* PARTIN  - restore a dump into an existing partition (overwrite)     */
+/*   PARTIN=<path> NAME=<drive>                                        */
+/* ------------------------------------------------------------------ */
+
+static void cli_move_progress(void *ud, ULONG done, ULONG total,
+                              const char *phase)
+{
+    struct CliProg *p = (struct CliProg *)ud;
+    if (total == 0) return;
+    {
+        ULONG pct = (done * 100UL) / total;
+        if (done != total && pct < p->last_pct + 10) return;
+        p->last_pct = pct;
+        DP_SNPRINTF(outbuf, "  %s: %lu%%\n", phase, (unsigned long)pct);
+        cli_puts(outbuf);
+        Flush(Output());
+    }
+}
+
+static struct PartInfo *cli_find_part(const char *name_s, char *namebuf)
+{
+    UWORD i, nlen;
+    strncpy(namebuf, name_s, 30); namebuf[30] = '\0';
+    nlen = (UWORD)strlen(namebuf);
+    if (nlen > 0 && namebuf[nlen - 1] == ':') namebuf[--nlen] = '\0';
+    if (nlen == 0) return NULL;
+    for (i = 0; i < s_rdb.num_parts; i++)
+        if (str_eq_ci(s_rdb.parts[i].drive_name, namebuf))
+            return &s_rdb.parts[i];
+    return NULL;
+}
+
+static LONG cmd_partout(const char *devname, ULONG unit,
+                        const char *drive_s, const char *file_s)
+{
+    struct BlockDev *bd;
+    struct PartInfo *pi;
+    struct CliProg prog;
+    char   name[32], err[80], szbuf[20];
+
+    if (!file_s || !file_s[0]) { cli_puts(GS(MSG_SCR_PARTOUT_USAGE)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    pi = cli_find_part(drive_s, name);
+    if (!pi) {
+        DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    if (!pi->heads)   pi->heads   = s_rdb.heads;
+    if (!pi->sectors) pi->sectors = s_rdb.sectors;
+
+    prog.last_pct = 0; prog.last_blocks = 0; err[0] = '\0';
+    if (!PartClone_DumpToFile(bd, pi, file_s,
+                              cli_move_progress, &prog, err, sizeof(err))) {
+        cli_puts(err);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    FormatDosType(pi->dos_type, szbuf);
+    DP_SNPRINTF(outbuf, GS(MSG_PC_DUMP_OK_FMT), pi->drive_name, szbuf, file_s);
+    cli_puts(outbuf);
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+}
+
+static LONG cmd_partin(const char *devname, ULONG unit, BOOL force,
+                       const char *file_s, const char *name_s)
+{
+    struct BlockDev *bd;
+    struct PartInfo *pi;
+    struct CliProg prog;
+    char   name[32], err[128];
+
+    if (!name_s || !name_s[0]) { cli_puts(GS(MSG_SCR_PARTIN_USAGE)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    pi = cli_find_part(name_s, name);
+    if (!pi) {
+        DP_SNPRINTF(outbuf, GS(MSG_PC_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    DP_SNPRINTF(outbuf, GS(MSG_PC_RESTORE_ASK), pi->drive_name);
+    if (!ask_yn(outbuf, force)) {
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    }
+
+    prog.last_pct = 0; prog.last_blocks = 0; err[0] = '\0';
+    if (!PartClone_RestoreToPart(bd, &s_rdb, pi, file_s,
+                                 cli_move_progress, &prog, err, sizeof(err))) {
+        cli_puts(err);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
+    if (!RDB_Write(bd, &s_rdb)) {
+        cli_puts(GS(MSG_CLI_FAILED));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_OK));
+    DP_SNPRINTF(outbuf, GS(MSG_PC_RESTORE_OK_FMT), name, pi->drive_name);
+    cli_puts(outbuf);
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* ADDFS - add filesystem entry, then write RDB                       */
 /* ------------------------------------------------------------------ */
 
@@ -2574,11 +2710,6 @@ static LONG cmd_init(const char *devname, ULONG unit,
 /* CLI progress callback: prints percentage every 5% when total is known,
  * or one line per ~50 MB of data when total is unknown. Also checks
  * Ctrl+C between batches and returns FALSE to cancel the copy. */
-struct CliProg {
-    ULONG last_pct;
-    ULONG last_blocks;
-};
-
 static BOOL cli_prog_cb(void *ud, ULONG cur, ULONG total)
 {
     struct CliProg *p = (struct CliProg *)ud;
@@ -2885,7 +3016,8 @@ LONG cli_run(void)
         !args[ARG_CHECK]   && !args[ARG_CREATE]   &&
         !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW] &&
         !args[ARG_ZEROPART] && !args[ARG_ADDMBR] && !args[ARG_DELMBR] &&
-        !args[ARG_SHRINKINFO] && !args[ARG_SHRINK]) {
+        !args[ARG_SHRINKINFO] && !args[ARG_SHRINK] &&
+        !args[ARG_PARTOUT] && !args[ARG_PARTIN]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -2925,7 +3057,8 @@ LONG cli_run(void)
          args[ARG_DELPART]   || args[ARG_CHECK]   ||
          args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW] ||
          args[ARG_ZEROPART]  || args[ARG_ADDMBR]  || args[ARG_DELMBR] ||
-         args[ARG_SHRINKINFO] || args[ARG_SHRINK])) {
+         args[ARG_SHRINKINFO] || args[ARG_SHRINK] ||
+         args[ARG_PARTOUT] || args[ARG_PARTIN])) {
 
         char  devname[64];
         ULONG unit;
@@ -2996,6 +3129,16 @@ LONG cli_run(void)
                                 (const char *)args[ARG_SHRINK],
                                 (const char *)args[ARG_SIZE],
                                 (BOOL)args[ARG_NOUNMOUNT]);
+
+            if (rc == RETURN_OK && args[ARG_PARTOUT])
+                rc = cmd_partout(devname, unit,
+                                 (const char *)args[ARG_PARTOUT],
+                                 (const char *)args[ARG_FILE]);
+
+            if (rc == RETURN_OK && args[ARG_PARTIN])
+                rc = cmd_partin(devname, unit, force,
+                                (const char *)args[ARG_PARTIN],
+                                (const char *)args[ARG_NAME]);
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,

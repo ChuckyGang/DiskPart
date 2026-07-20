@@ -1231,8 +1231,26 @@
 #define MSG_QF_ENS_LOAD_FAIL_FMT     1225
 #define MSG_CLI_FAT_SUPERFLOPPY      1226
 #define MSG_PV_FAT_FOUND_BODY        1227
+#define MSG_PC_CANNOT_CREATE_FMT     1228
+#define MSG_PC_CANNOT_OPEN_FMT       1229
+#define MSG_PC_WRITE_ERR             1230
+#define MSG_PC_READ_ERR_FMT          1231
+#define MSG_PC_SHORT_FILE            1232
+#define MSG_PC_BAD_MAGIC             1233
+#define MSG_PC_BAD_VERSION_FMT       1234
+#define MSG_PC_OOM                   1235
+#define MSG_PC_DST_TOO_SMALL_FMT     1236
+#define MSG_PC_COPYING               1237
+#define MSG_PC_UPDATING_SFS          1238
+#define MSG_PC_DUMP_OK_FMT           1239
+#define MSG_PC_RESTORE_OK_FMT        1240
+#define MSG_PC_CLONE_OK_FMT          1241
+#define MSG_SCR_PARTOUT_USAGE        1242
+#define MSG_SCR_PARTIN_USAGE         1243
+#define MSG_PC_NOT_FOUND_FMT         1244
+#define MSG_PC_RESTORE_ASK           1245
 
-#define MSG_COUNT 1228
+#define MSG_COUNT 1246
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2472,5 +2490,23 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1225 MSG_QF_ENS_LOAD_FAIL_FMT */ "the 0x%08lX handler could not be loaded (bad LSEG code / file missing)",
     /* 1226 MSG_CLI_FAT_SUPERFLOPPY */ "FAT-formatted disk (superfloppy - FAT boot sector at block 0, no partition table).\n",
     /* 1227 MSG_PV_FAT_FOUND_BODY */ "This disk is FAT-formatted without a partition\ntable (superfloppy).  Erase its FAT boot sector?\nThe FAT contents will become unreachable.",
+    /* 1228 MSG_PC_CANNOT_CREATE_FMT */ "Cannot create \"%s\".\n",
+    /* 1229 MSG_PC_CANNOT_OPEN_FMT */ "Cannot open \"%s\".\n",
+    /* 1230 MSG_PC_WRITE_ERR */ "Write error (disk full?).\n",
+    /* 1231 MSG_PC_READ_ERR_FMT */ "Read error at block %lu.\n",
+    /* 1232 MSG_PC_SHORT_FILE */ "Dump file is truncated or not a partition dump.\n",
+    /* 1233 MSG_PC_BAD_MAGIC */ "Not a DiskPart partition dump (bad header).\n",
+    /* 1234 MSG_PC_BAD_VERSION_FMT */ "Unsupported dump version %lu.\n",
+    /* 1235 MSG_PC_OOM */ "Out of memory.\n",
+    /* 1236 MSG_PC_DST_TOO_SMALL_FMT */ "Destination %s holds %lu blocks; the dump needs %lu - choose a larger partition.\n",
+    /* 1237 MSG_PC_COPYING */ "Copying partition data",
+    /* 1238 MSG_PC_UPDATING_SFS */ "Updating SFS location",
+    /* 1239 MSG_PC_DUMP_OK_FMT */ "Dumped %s (%s) to %s.\n",
+    /* 1240 MSG_PC_RESTORE_OK_FMT */ "Restored %s into %s.  Write the RDB and reboot.\n",
+    /* 1241 MSG_PC_CLONE_OK_FMT */ "Cloned %s -> %s.  Write the RDB and reboot.\n",
+    /* 1242 MSG_SCR_PARTOUT_USAGE */ "Usage: PARTOUT <drive> <file>\n",
+    /* 1243 MSG_SCR_PARTIN_USAGE */ "Usage: PARTIN <file> <drive>   (restore a dump into an existing partition)\n",
+    /* 1244 MSG_PC_NOT_FOUND_FMT */ "No partition named \"%s\" on this disk.\n",
+    /* 1245 MSG_PC_RESTORE_ASK */ "Overwrite partition %s with the dump? Its current contents are lost",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

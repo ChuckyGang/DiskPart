@@ -3789,3 +3789,60 @@ FAT-formatted disk (superfloppy - FAT boot sector at block 0, no partition table
 MSG_PV_FAT_FOUND_BODY
 This disk is FAT-formatted without a partition\ntable (superfloppy).  Erase its FAT boot sector?\nThe FAT contents will become unreachable.
 ;
+;==========================================================================
+; Partition dump / restore / clone
+;==========================================================================
+MSG_PC_CANNOT_CREATE_FMT
+Cannot create "%s".\n
+;
+MSG_PC_CANNOT_OPEN_FMT
+Cannot open "%s".\n
+;
+MSG_PC_WRITE_ERR
+Write error (disk full?).\n
+;
+MSG_PC_READ_ERR_FMT
+Read error at block %lu.\n
+;
+MSG_PC_SHORT_FILE
+Dump file is truncated or not a partition dump.\n
+;
+MSG_PC_BAD_MAGIC
+Not a DiskPart partition dump (bad header).\n
+;
+MSG_PC_BAD_VERSION_FMT
+Unsupported dump version %lu.\n
+;
+MSG_PC_OOM
+Out of memory.\n
+;
+MSG_PC_DST_TOO_SMALL_FMT
+Destination %s holds %lu blocks; the dump needs %lu - choose a larger partition.\n
+;
+MSG_PC_COPYING
+Copying partition data
+;
+MSG_PC_UPDATING_SFS
+Updating SFS location
+;
+MSG_PC_DUMP_OK_FMT
+Dumped %s (%s) to %s.\n
+;
+MSG_PC_RESTORE_OK_FMT
+Restored %s into %s.  Write the RDB and reboot.\n
+;
+MSG_PC_CLONE_OK_FMT
+Cloned %s -> %s.  Write the RDB and reboot.\n
+;
+MSG_SCR_PARTOUT_USAGE
+Usage: PARTOUT <drive> <file>\n
+;
+MSG_SCR_PARTIN_USAGE
+Usage: PARTIN <file> <drive>   (restore a dump into an existing partition)\n
+;
+MSG_PC_NOT_FOUND_FMT
+No partition named "%s" on this disk.\n
+;
+MSG_PC_RESTORE_ASK
+Overwrite partition %s with the dump? Its current contents are lost
+;

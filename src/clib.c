@@ -106,7 +106,13 @@ static int do_fmt(char *buf, size_t size, const char *fmt, va_list ap)
 #define PUT(c) do { if (out < end) *out++ = (c); } while(0)
 
     while (*f) {
-        if (*f != '%') { PUT(*f++); continue; }
+        /* Advance f UNCONDITIONALLY: PUT() only writes when out < end, so
+           putting *f++ directly inside PUT would stop advancing f once the
+           buffer fills (the increment lives inside PUT's `if`), leaving
+           `while (*f)` spinning forever whenever the output exceeds the
+           buffer.  Latent since this formatter was written - never hit
+           because every caller sized its buffer to fit until now. */
+        if (*f != '%') { char litc = *f++; PUT(litc); continue; }
         f++;
 
         int left = 0;
