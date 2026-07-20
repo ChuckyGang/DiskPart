@@ -1283,8 +1283,13 @@
 #define MSG_PC_GEOM_MISMATCH_FMT     1277
 #define MSG_PC_BLKSIZE_MISMATCH      1278
 #define MSG_PC_FFS_EXACT_FMT         1279
+#define MSG_PC_FS_SRC_NONE           1280
+#define MSG_PC_FS_NOROOM             1281
+#define MSG_PCP_FS_ASK_FMT           1282
+#define MSG_PCP_FS_ASK_GADGETS       1283
+#define MSG_PC_FS_COPIED_FMT         1284
 
-#define MSG_COUNT 1280
+#define MSG_COUNT 1285
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2567,14 +2572,19 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1268 MSG_PCP_CONFIRM_FMT */ "Clone partition %s ONTO %s on %s,\noverwriting everything in %s?\n\nThis cannot be undone.",
     /* 1269 MSG_PCP_CONFIRM_GADGETS */ "Clone|Cancel",
     /* 1270 MSG_PCP_PROG_FMT */ "Cloning onto %s",
-    /* 1271 MSG_PCP_OK_FMT */ "Cloned %s onto %s.  The RDB has been written; reboot to use it.\n\nThe clone has the SAME volume name as the source, so the two\ncannot both be mounted at once - relabel one first\n(e.g. CLI: Relabel %s: NewName).",
+    /* 1271 MSG_PCP_OK_FMT */ "Cloned %s onto %s.  The RDB has been written; reboot to use it.\n\nThe cloned volume was renamed \"CL-...\" so it does not clash\nwith the source volume's name (rename it as you like afterward).",
     /* 1272 MSG_PCP_FAIL_FMT */ "Clone failed:\n%s",
     /* 1273 MSG_PC_OVERLAP_FMT */ "The clone would overlap %s (cyl %lu-%lu) or run past the disk.\n",
     /* 1274 MSG_PC_NOGAP_FMT */ "No free gap of %lu cylinders on the destination disk.\n",
     /* 1275 MSG_PCP_NEW_ENTRY */ "[ Create a new partition ]",
-    /* 1276 MSG_PCP_NEW_OK_FMT */ "Created %s and cloned into it.  Reboot to use it.\n\nThe clone has the SAME volume name as the source, so the two\ncannot both be mounted at once - relabel one first\n(e.g. CLI: Relabel %s: NewName).",
+    /* 1276 MSG_PCP_NEW_OK_FMT */ "Created %s and cloned into it.  Reboot to use it.\n\nThe cloned volume was renamed \"CL-...\" so it does not clash\nwith the source volume's name (rename it as you like afterward).",
     /* 1277 MSG_PC_GEOM_MISMATCH_FMT */ "Source geometry (%lu heads x %lu sectors) differs from the destination\n(%lu x %lu).  A partition clone needs both disks to share the same\nheads/sectors geometry.\n",
     /* 1278 MSG_PC_BLKSIZE_MISMATCH */ "Source and destination use different block sizes (%lu vs %lu).\nRecreate the destination with a %lu-byte block size.\n",
     /* 1279 MSG_PC_FFS_EXACT_FMT */ "FFS/OFS needs a same-size destination: %s has %lu blocks,\nthe source has %lu.  (SFS/PFS3 can clone into a bigger one.)\n",
+    /* 1280 MSG_PC_FS_SRC_NONE */ "The source disk has no filesystem driver for this partition to copy.\n",
+    /* 1281 MSG_PC_FS_NOROOM */ "No room for another filesystem entry on the destination RDB.\n",
+    /* 1282 MSG_PCP_FS_ASK_FMT */ "The destination disk has no %s filesystem driver in its RDB.\nWithout it the cloned partition will not mount there.\n\nCopy the driver from the source disk into the destination RDB?",
+    /* 1283 MSG_PCP_FS_ASK_GADGETS */ "Copy driver|Skip",
+    /* 1284 MSG_PC_FS_COPIED_FMT */ "Copied the %s filesystem driver to the destination.\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

@@ -431,6 +431,23 @@ BOOL copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         }
     }
 
+    /* If the destination disk has no driver for this filesystem, offer to
+       copy it from the source RDB so the clone will actually mount. */
+    if (PartClone_DestNeedsFS(rdb, &drdb, src->dos_type) == 1) {
+        struct EasyStruct es;
+        char dt[16];
+        FormatDosType(src->dos_type, dt);
+        DP_SNPRINTF(body, GS(MSG_PCP_FS_ASK_FMT), dt);
+        es.es_StructSize = sizeof(es); es.es_Flags = 0;
+        es.es_Title = (UBYTE *)GS(MSG_PCP_TITLE);
+        es.es_TextFormat = (UBYTE *)body;
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_PCP_FS_ASK_GADGETS);
+        if (EasyRequest(win, &es, NULL) == 1) {
+            if (!PartClone_CopyFS(rdb, &drdb, src->dos_type, err, sizeof(err)))
+                pcp_msg(win, GS(MSG_PCP_TITLE), err);   /* non-fatal; warn */
+        }
+    }
+
     BOOL wrote = FALSE;
     {
         static struct ProgressWin prog;

@@ -490,6 +490,52 @@ static void pc_pfs_clear_sizefield(struct BlockDev *bd, ULONG part_base_blk,
 }
 
 /* ------------------------------------------------------------------ */
+/* Filesystem-driver copy between RDBs                                  */
+/* ------------------------------------------------------------------ */
+int PartClone_DestNeedsFS(const struct RDBInfo *srdb,
+                          const struct RDBInfo *drdb, ULONG dostype)
+{
+    UWORD i;
+    /* ROM handles the DOS\0..DOS\7 family without an on-disk driver. */
+    if ((dostype & 0xFFFFFF00UL) == 0x444F5300UL) return 0;
+    for (i = 0; i < drdb->num_fs; i++)
+        if (drdb->filesystems[i].dos_type == dostype) return 0;
+    for (i = 0; i < srdb->num_fs; i++)
+        if (srdb->filesystems[i].dos_type == dostype) return 1;
+    return -1;
+}
+
+BOOL PartClone_CopyFS(const struct RDBInfo *srdb, struct RDBInfo *drdb,
+                      ULONG dostype, char *err_buf, ULONG ebsz)
+{
+    const struct FSInfo *sfi = NULL;
+    struct FSInfo *dfi;
+    UWORD i;
+
+    for (i = 0; i < srdb->num_fs; i++)
+        if (srdb->filesystems[i].dos_type == dostype) { sfi = &srdb->filesystems[i]; break; }
+    if (!sfi) { snprintf(err_buf, ebsz, GS(MSG_PC_FS_SRC_NONE)); return FALSE; }
+    if (drdb->num_fs >= MAX_FILESYSTEMS) {
+        snprintf(err_buf, ebsz, GS(MSG_PC_FS_NOROOM)); return FALSE;
+    }
+    dfi = &drdb->filesystems[drdb->num_fs];
+    *dfi = *sfi;                       /* copy scalar fields + fs_name */
+    dfi->code = NULL;
+    if (sfi->code && sfi->code_size) {
+        dfi->code = (UBYTE *)AllocVec(sfi->code_size, MEMF_PUBLIC);
+        if (!dfi->code) { snprintf(err_buf, ebsz, GS(MSG_PC_OOM)); return FALSE; }
+        { ULONG b; for (b = 0; b < sfi->code_size; b++) dfi->code[b] = sfi->code[b]; }
+        dfi->code_size = sfi->code_size;
+    }
+    /* RDB_Write assigns the on-disk block numbers / LSEG chain. */
+    dfi->block_num    = 0;
+    dfi->next_fshd    = 0;
+    dfi->seg_list_blk = RDB_END_MARK;
+    drdb->num_fs++;
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
 /* Relabel the just-cloned volume with a "CL-" prefix so it does not    */
 /* clash with the source's volume name (AmigaDOS can't mount two        */
 /* volumes with the same label at once).  Best-effort; the FS-specific  */

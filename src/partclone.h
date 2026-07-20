@@ -90,6 +90,21 @@ BOOL PartClone_ValidateFootprint(const struct RDBInfo *drdb,
 BOOL PartClone_FindGap(const struct RDBInfo *drdb, ULONG cyl_span,
                        ULONG h, ULONG s, ULONG *low_out);
 
+/* Does the destination disk need the filesystem driver for dostype copied
+   from the source?  Returns:
+     0 = not needed (ROM FFS family, or the dest RDB already has a driver)
+     1 = source RDB has a driver and the dest RDB does not (offer to copy)
+    -1 = neither RDB carries a driver (nothing to copy). */
+int  PartClone_DestNeedsFS(const struct RDBInfo *srdb,
+                           const struct RDBInfo *drdb, ULONG dostype);
+
+/* Copy the source RDB's filesystem driver (FSHD + LSEG code) for dostype
+   into drdb->filesystems[].  The caller RDB_Write(drdb)s afterward.  The
+   code buffer is duplicated (both RDBs later RDB_FreeCode independently).
+   Returns TRUE on success. */
+BOOL PartClone_CopyFS(const struct RDBInfo *srdb, struct RDBInfo *drdb,
+                      ULONG dostype, char *err_buf, ULONG ebsz);
+
 /* Direct clone of partition src -> partition dst (same disk: sbd==dbd; or
    two disks).  dst must be at least as large as src.  dst's DosEnvec is set
    from src; SFS offsets fixed up for dst's location.  The caller writes

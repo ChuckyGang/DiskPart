@@ -2067,6 +2067,17 @@ static LONG cmd_partclone(const char *devname, ULONG unit, BOOL force,
                               cli_move_progress, &prog, err, sizeof(err))) {
         cli_puts(err); goto cleanup;
     }
+    /* Bring the filesystem driver along if the destination lacks it. */
+    if (cross && PartClone_DestNeedsFS(&s_rdb, drdb, src->dos_type) == 1) {
+        char dt[16];
+        if (PartClone_CopyFS(&s_rdb, drdb, src->dos_type, err, sizeof(err))) {
+            FormatDosType(src->dos_type, dt);
+            DP_SNPRINTF(outbuf, GS(MSG_PC_FS_COPIED_FMT), dt);
+            cli_puts(outbuf);
+        } else {
+            cli_puts(err);   /* non-fatal - clone still written */
+        }
+    }
     cli_puts(GS(MSG_CLI_WRITING_RDB));
     if (!RDB_Write(dbd, drdb)) { cli_puts(GS(MSG_CLI_FAILED)); goto cleanup; }
     cli_puts(GS(MSG_CLI_OK));

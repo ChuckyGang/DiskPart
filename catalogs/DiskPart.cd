@@ -3948,3 +3948,18 @@ Source and destination use different block sizes (%lu vs %lu).\nRecreate the des
 MSG_PC_FFS_EXACT_FMT
 FFS/OFS needs a same-size destination: %s has %lu blocks,\nthe source has %lu.  (SFS/PFS3 can clone into a bigger one.)\n
 ;
+MSG_PC_FS_SRC_NONE
+The source disk has no filesystem driver for this partition to copy.\n
+;
+MSG_PC_FS_NOROOM
+No room for another filesystem entry on the destination RDB.\n
+;
+MSG_PCP_FS_ASK_FMT
+The destination disk has no %s filesystem driver in its RDB.\nWithout it the cloned partition will not mount there.\n\nCopy the driver from the source disk into the destination RDB?
+;
+MSG_PCP_FS_ASK_GADGETS
+Copy driver|Skip
+;
+MSG_PC_FS_COPIED_FMT
+Copied the %s filesystem driver to the destination.\n
+;
