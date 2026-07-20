@@ -542,7 +542,8 @@ done:
 /*                                                                     */
 /* Unlike the grow above (which never needs to look at bitmap blocks - */
 /* PFS3 auto-creates them), this walks the real allocation bitmap:     */
-/* rootblock idx.large.bitmapindex[] -> bitmap index blocks ('MI') ->  */
+/* rootblock bitmapindex[] (idx.small and idx.large both start at byte */
+/* 96, capacities 5 vs 104) -> bitmap index blocks ('MI') ->           */
 /* bitmap blocks ('BM'), verified against pfs3aio allocation.c:        */
 /* bits are MSB-first (1<<(31-i)), 1 = free, coverage starts at        */
 /* bitmapstart = lastreserved+1.  Block numbers are partition-relative */
@@ -604,14 +605,6 @@ BOOL PFS_ShrinkInfo(struct BlockDev *bd, const struct RDBInfo *rdb,
                 (unsigned)reserved_blksize);
         return FALSE;
     }
-    /* Without MODE_SUPERINDEX the bitmapindex[] does not live at the
-       idx.large offset this code reads - refuse rather than misread.
-       (Essentially every pfs3 HD partition has it set - see the grow
-       comments above.) */
-    if (!(options & PFS_MODE_SUPERINDEX)) {
-        sprintf(err_buf, GS(MSG_SI_PFS_SMALLIDX));
-        return FALSE;
-    }
     if (disksize == 0) {
         sprintf(err_buf, GS(MSG_PFS_METADATA_CORRUPT),
                 (unsigned long)0, (unsigned long)0, pi->drive_name);
@@ -626,9 +619,22 @@ BOOL PFS_ShrinkInfo(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG idxperblk   = longsperbmb;
     ULONG num_idxb    = (num_bmb == 0) ? 0
                         : (num_bmb + idxperblk - 1) / idxperblk;
-    if (num_idxb > PFS_MAX_BITMAPINDEX) {
-        sprintf(err_buf, GS(MSG_PFS_SUPERINDEX), (unsigned long)options);
-        return FALSE;
+    /* Small-index and supermode share the SAME layout at the same offset
+       (pfs3aio blocks.h: bitmapindex is the first member of both idx
+       union variants at byte 96) and the same two-level walk - only the
+       array capacity differs: 5 entries (MAXSMALLBITMAPINDEX+1) without
+       MODE_SUPERINDEX, 104 with it.  Real-world small PFS3 partitions DO
+       lack MODE_SUPERINDEX (found on user's A3000 DH3 2026-07-20 - the
+       "supermode is always set" assumption from the grow comments only
+       holds for large partitions).  Beyond 104 the real top level is the
+       3-level extension superindex - refuse, same as the grow. */
+    {
+        ULONG max_idx = (options & PFS_MODE_SUPERINDEX)
+                        ? (ULONG)PFS_MAX_BITMAPINDEX : 5UL;
+        if (num_idxb > max_idx) {
+            sprintf(err_buf, GS(MSG_PFS_SUPERINDEX), (unsigned long)options);
+            return FALSE;
+        }
     }
 
     UWORD n_phys = (UWORD)(reserved_blksize / 512);
