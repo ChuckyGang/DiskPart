@@ -2575,6 +2575,6 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1276 MSG_PCP_NEW_OK_FMT */ "Created %s and cloned into it.\nThe destination RDB has been written -\nreboot that disk before using the volume.",
     /* 1277 MSG_PC_GEOM_MISMATCH_FMT */ "Source geometry (%lu heads x %lu sectors) differs from the destination\n(%lu x %lu).  A partition clone needs both disks to share the same\nheads/sectors geometry.\n",
     /* 1278 MSG_PC_BLKSIZE_MISMATCH */ "Source and destination use different block sizes (%lu vs %lu).\nRecreate the destination with a %lu-byte block size.\n",
-    /* 1279 MSG_PC_FFS_EXACT_FMT */ "An FFS/OFS clone needs a destination of EXACTLY %lu blocks; %s has %lu.\nFFS stores its size in its layout, so it cannot go into a bigger or\nsmaller partition.  Make a same-size destination, or use SFS/PFS3.\n",
+    /* 1279 MSG_PC_FFS_EXACT_FMT */ "FFS/OFS needs a same-size destination: %s has %lu blocks,\nthe source has %lu.  (SFS/PFS3 can clone into a bigger one.)\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

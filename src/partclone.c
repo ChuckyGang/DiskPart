@@ -536,8 +536,8 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
     if (FFS_IsSupportedType(src->dos_type)) {
         if (dst_blocks != src_count) {
             snprintf(err_buf, ebsz, GS(MSG_PC_FFS_EXACT_FMT),
-                     (unsigned long)src_count, dst->drive_name,
-                     (unsigned long)dst_blocks);
+                     dst->drive_name, (unsigned long)dst_blocks,
+                     (unsigned long)src_count);
             return FALSE;
         }
     } else if (dst_blocks < src_count) {
