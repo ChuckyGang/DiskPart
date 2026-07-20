@@ -1280,8 +1280,9 @@
 #define MSG_PC_NOGAP_FMT             1274
 #define MSG_PCP_NEW_ENTRY            1275
 #define MSG_PCP_NEW_OK_FMT           1276
+#define MSG_PC_GEOM_MISMATCH_FMT     1277
 
-#define MSG_COUNT 1277
+#define MSG_COUNT 1278
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2570,5 +2571,6 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1274 MSG_PC_NOGAP_FMT */ "No free gap of %lu cylinders on the destination disk.\n",
     /* 1275 MSG_PCP_NEW_ENTRY */ "[ Create a new partition ]",
     /* 1276 MSG_PCP_NEW_OK_FMT */ "Created %s and cloned into it.\nThe destination RDB has been written -\nreboot that disk before using the volume.",
+    /* 1277 MSG_PC_GEOM_MISMATCH_FMT */ "Source geometry (%lu heads x %lu sectors) differs from the destination\n(%lu x %lu).  A partition clone needs both disks to share the same\nheads/sectors geometry.\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

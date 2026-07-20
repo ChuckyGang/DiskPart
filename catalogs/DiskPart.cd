@@ -3939,3 +3939,6 @@ MSG_PCP_NEW_ENTRY
 MSG_PCP_NEW_OK_FMT
 Created %s and cloned into it.\nThe destination RDB has been written -\nreboot that disk before using the volume.
 ;
+MSG_PC_GEOM_MISMATCH_FMT
+Source geometry (%lu heads x %lu sectors) differs from the destination\n(%lu x %lu).  A partition clone needs both disks to share the same\nheads/sectors geometry.\n
+;

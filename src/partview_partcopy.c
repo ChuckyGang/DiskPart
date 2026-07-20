@@ -345,6 +345,23 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         BlockDev_Close(dest); return;
     }
 
+    /* A partition's cylinder range only means the same physical thing on
+       both disks when they share heads x sectors; the RDB stores
+       partitions in disk-geometry cylinders, so a clone across different
+       geometries can't be cylinder-aligned (and would break FFS, whose
+       size comes from geometry).  Refuse clearly rather than mis-scale. */
+    {
+        ULONG sh = src->heads   > 0 ? src->heads   : rdb->heads;
+        ULONG ss = src->sectors > 0 ? src->sectors : rdb->sectors;
+        if (sh != drdb.heads || ss != drdb.sectors) {
+            DP_SNPRINTF(body, GS(MSG_PC_GEOM_MISMATCH_FMT),
+                        (unsigned long)sh, (unsigned long)ss,
+                        (unsigned long)drdb.heads, (unsigned long)drdb.sectors);
+            pcp_msg(win, GS(MSG_PCP_TITLE), body);
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+        }
+    }
+
     if (!src->heads)   src->heads   = rdb->heads;
     if (!src->sectors) src->sectors = rdb->sectors;
 
