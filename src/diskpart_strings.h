@@ -1187,8 +1187,28 @@
 #define MSG_SI_PFS_SMALLIDX          1181
 #define MSG_PV_MENU_SHRINKINFO       1182
 #define MSG_PV_SHRINK_TITLE          1183
+#define MSG_SHR_USAGE                1184
+#define MSG_SHR_NOT_FOUND_FMT        1185
+#define MSG_SHR_UNSUPPORTED_FMT      1186
+#define MSG_SHR_BAD_SIZE_FMT         1187
+#define MSG_SHR_NOTHING_FMT          1188
+#define MSG_SHR_CLAMP_FMT            1189
+#define MSG_SHR_PLAN_FMT             1190
+#define MSG_SHR_ASK                  1191
+#define MSG_SHR_SCANNING             1192
+#define MSG_SHR_FAIL_FMT             1193
+#define MSG_SHR_UNMOUNT_FAIL_FMT     1194
+#define MSG_SHR_REMOUNTED_FMT        1195
+#define MSG_SHR_REBOOT_FMT           1196
+#define MSG_SHR_DRYRUN               1197
+#define MSG_FFS_SHR_TOO_SMALL_FMT    1198
+#define MSG_FFS_SHR_TAIL_USED_FMT    1199
+#define MSG_FFS_SHR_TARGET_USED_FMT  1200
+#define MSG_FFS_SHR_NO_FREE_FMT      1201
+#define MSG_FFS_PROG_SHR_VERIFY      1202
+#define MSG_FFS_PROG_SHR_BITMAP      1203
 
-#define MSG_COUNT 1184
+#define MSG_COUNT 1204
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2372,8 +2392,8 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1169 MSG_SI_MIN_FMT */ "  Minimum size : %lu cylinders = %s  (HighCyl >= %lu)\n",
     /* 1170 MSG_SI_RECLAIM_FMT */ "  Reclaimable  : %lu cylinders = %s\n",
     /* 1171 MSG_SI_RECLAIM_NONE */ "  Reclaimable  : nothing - no room to shrink\n",
-    /* 1172 MSG_SI_META_NOTE_FMT */ "  Note: movable FS metadata near block %lu excluded (a SHRINK would relocate it).\n",
-    /* 1173 MSG_SI_SFS_DELETED_FMT */ "  Note: %lu blocks held by deleted (recycle-bin) files still count as used.\n",
+    /* 1172 MSG_SI_META_NOTE_FMT */ "  Note: top block %lu is movable metadata; SHRINK relocates it.\n",
+    /* 1173 MSG_SI_SFS_DELETED_FMT */ "  Note: %lu blocks in deleted (recycle-bin) files count as used.\n",
     /* 1174 MSG_SI_FLUSH_CAVEAT */ "  Note: numbers reflect the state last flushed to disk.\n",
     /* 1175 MSG_SI_UNSUPPORTED_FMT */ "%s: SHRINKINFO supports FFS/OFS, SFS and PFS3 only (dostype 0x%08lx).\n",
     /* 1176 MSG_SI_FAIL_FMT */ "SHRINKINFO %s failed: %s\n",
@@ -2384,5 +2404,25 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1181 MSG_SI_PFS_SMALLIDX */ "PFS small-index layout (no MODE_SUPERINDEX) is not supported",
     /* 1182 MSG_PV_MENU_SHRINKINFO */ "Shrink Report...",
     /* 1183 MSG_PV_SHRINK_TITLE */ "Shrink Report",
+    /* 1184 MSG_SHR_USAGE */ "Usage: SHRINK <drive> <size[KMG]|MIN> [NOUNMOUNT]   (size = amount to remove)\n",
+    /* 1185 MSG_SHR_NOT_FOUND_FMT */ "SHRINK: no partition named \"%s\" on this disk.\n",
+    /* 1186 MSG_SHR_UNSUPPORTED_FMT */ "SHRINK: %s: only FFS/OFS is supported so far (dostype 0x%08lx).\n",
+    /* 1187 MSG_SHR_BAD_SIZE_FMT */ "SHRINK: bad size \"%s\".\n",
+    /* 1188 MSG_SHR_NOTHING_FMT */ "SHRINK: %s is already at its minimum - nothing to shrink.\n",
+    /* 1189 MSG_SHR_CLAMP_FMT */ "SHRINK: clamped to the minimum from the scan - removing %s.\n",
+    /* 1190 MSG_SHR_PLAN_FMT */ "SHRINK plan for %s: HighCyl %lu -> %lu, removing %s.\n",
+    /* 1191 MSG_SHR_ASK */ "Shrink \"%s\" now? Filesystem metadata will be rewritten",
+    /* 1192 MSG_SHR_SCANNING */ "Verifying the removed area is free (allocation scan)...\n",
+    /* 1193 MSG_SHR_FAIL_FMT */ "SHRINK failed: %s\n",
+    /* 1194 MSG_SHR_UNMOUNT_FAIL_FMT */ "SHRINK: cannot unmount %s (%s) - in use; aborted.\n",
+    /* 1195 MSG_SHR_REMOUNTED_FMT */ "SHRINK: %s shrunk and remounted - available now.\n",
+    /* 1196 MSG_SHR_REBOOT_FMT */ "SHRINK: %s shrunk. Reboot before using this volume.\n",
+    /* 1197 MSG_SHR_DRYRUN */ "SHRINK: dry run - no changes made.\n",
+    /* 1198 MSG_FFS_SHR_TOO_SMALL_FMT */ "new size (%lu blocks) is below the filesystem minimum",
+    /* 1199 MSG_FFS_SHR_TAIL_USED_FMT */ "block %lu in the removed area is in use - shrink less, or move/delete data",
+    /* 1200 MSG_FFS_SHR_TARGET_USED_FMT */ "new root position (block %lu) holds data - choose a slightly different size",
+    /* 1201 MSG_FFS_SHR_NO_FREE_FMT */ "no free block below the new end to relocate bitmap block %lu to",
+    /* 1202 MSG_FFS_PROG_SHR_VERIFY */ "Verifying the removed area is free",
+    /* 1203 MSG_FFS_PROG_SHR_BITMAP */ "Rewriting the allocation bitmap for the new size",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

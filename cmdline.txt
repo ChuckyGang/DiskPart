@@ -264,6 +264,24 @@ SHRINKINFO=<drive>
     DiskPart DEV uaehf.device:3 SHRINKINFO=DH1
     DiskPart IMAGE=disk.hdf SHRINKINFO=DH0
 
+SHRINK=<drive> SIZE=<amount[KMG]|MIN>  [NOUNMOUNT] [FORCE]
+  EXPERIMENTAL - FFS/OFS only so far (PFS3 and SFS follow).  Shrink a
+  partition and its filesystem in one step: the removed range is verified
+  free first (same scan as SHRINKINFO; any data block there = clean
+  refusal), then the root block is relocated to the new computed centre,
+  the bitmap chain is truncated, direct children are re-parented, and the
+  RDB is written.  SIZE is the amount to REMOVE (mirrors GROW's amount to
+  add), clamped to the scan floor; SIZE=MIN shrinks as far as possible.
+  The freed cylinders appear after the partition - ready for ADDPART.
+  bm_flag is set to 0, so FFS revalidates the volume on the next mount;
+  mount it once before shrinking the same partition again.
+  NOUNMOUNT works like GROW's: shrink in place, volume locked, reboot
+  mandatory.
+
+  Examples:
+    DiskPart DEV scsi.device:3 SHRINK=DH4 SIZE=20M
+    DiskPart DEV scsi.device:3 SHRINK=DH4 SIZE=MIN FORCE
+
 ZEROPART NAME=<drive>
   Overwrite every block of the named partition with zeros.  Does not change
   the RDB or partition table — only the partition's data blocks are written.
@@ -424,6 +442,18 @@ GROW <drive> <size[KMG]|END> [NOUNMOUNT]
     GROW DH1 100M       ; add 100 MB (clamped to free space if less)
     GROW DH1 END        ; or: use all the free space after DH1
     GROW DH0 END NOUNMOUNT   ; boot partition: grow in place, then reboot
+    CLOSE
+
+SHRINK <drive> <amount[KMG]|MIN> [NOUNMOUNT]
+  EXPERIMENTAL - FFS/OFS only so far.  Script form of the CLI SHRINK
+  command (see CLI COMMANDS above for the full description).  <amount>
+  is the size to REMOVE, clamped to the scan floor; MIN shrinks as far
+  as possible.  Commits on its own like GROW - no separate WRITE needed.
+  In DRYRUN mode it prints the plan and changes nothing.
+
+    OPEN uaehf.device 3
+    SHRINK DH1 20M       ; remove 20 MB (clamped to the floor if less)
+    SHRINK DH1 MIN       ; shrink as far as the data allows
     CLOSE
 
 SHRINKINFO <drive>

@@ -3651,3 +3651,66 @@ Shrink Report...
 MSG_PV_SHRINK_TITLE
 Shrink Report
 ;
+;==========================================================================
+; SHRINK (partition + filesystem shrink)
+;==========================================================================
+MSG_SHR_USAGE
+Usage: SHRINK <drive> <size[KMG]|MIN> [NOUNMOUNT]   (size = amount to remove)\n
+;
+MSG_SHR_NOT_FOUND_FMT
+SHRINK: no partition named "%s" on this disk.\n
+;
+MSG_SHR_UNSUPPORTED_FMT
+SHRINK: %s: only FFS/OFS is supported so far (dostype 0x%08lx).\n
+;
+MSG_SHR_BAD_SIZE_FMT
+SHRINK: bad size "%s".\n
+;
+MSG_SHR_NOTHING_FMT
+SHRINK: %s is already at its minimum - nothing to shrink.\n
+;
+MSG_SHR_CLAMP_FMT
+SHRINK: clamped to the minimum from the scan - removing %s.\n
+;
+MSG_SHR_PLAN_FMT
+SHRINK plan for %s: HighCyl %lu -> %lu, removing %s.\n
+;
+MSG_SHR_ASK
+Shrink "%s" now? Filesystem metadata will be rewritten
+;
+MSG_SHR_SCANNING
+Verifying the removed area is free (allocation scan)...\n
+;
+MSG_SHR_FAIL_FMT
+SHRINK failed: %s\n
+;
+MSG_SHR_UNMOUNT_FAIL_FMT
+SHRINK: cannot unmount %s (%s) - in use; aborted.\n
+;
+MSG_SHR_REMOUNTED_FMT
+SHRINK: %s shrunk and remounted - available now.\n
+;
+MSG_SHR_REBOOT_FMT
+SHRINK: %s shrunk. Reboot before using this volume.\n
+;
+MSG_SHR_DRYRUN
+SHRINK: dry run - no changes made.\n
+;
+MSG_FFS_SHR_TOO_SMALL_FMT
+new size (%lu blocks) is below the filesystem minimum
+;
+MSG_FFS_SHR_TAIL_USED_FMT
+block %lu in the removed area is in use - shrink less, or move/delete data
+;
+MSG_FFS_SHR_TARGET_USED_FMT
+new root position (block %lu) holds data - choose a slightly different size
+;
+MSG_FFS_SHR_NO_FREE_FMT
+no free block below the new end to relocate bitmap block %lu to
+;
+MSG_FFS_PROG_SHR_VERIFY
+Verifying the removed area is free
+;
+MSG_FFS_PROG_SHR_BITMAP
+Rewriting the allocation bitmap for the new size
+;

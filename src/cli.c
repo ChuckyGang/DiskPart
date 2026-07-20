@@ -61,7 +61,7 @@ extern struct DosLibrary *DOSBase;
     "GROW/M,"                                                     \
     "ZEROPART/S,"                                                  \
     "ADDMBR/S,DELMBR/S,MBRTYPE/K,STARTCYL/K,ENDCYL/K,ACTIVE/S,"    \
-    "SHRINKINFO/K"
+    "SHRINKINFO/K,SHRINK/K"
 
 enum {
     ARG_LISTDEV = 0,
@@ -112,6 +112,7 @@ enum {
     ARG_ENDCYL,
     ARG_ACTIVE,
     ARG_SHRINKINFO,
+    ARG_SHRINK,
     ARG_COUNT
 };
 
@@ -1590,6 +1591,197 @@ static LONG cmd_shrinkinfo(const char *devname, ULONG unit,
 }
 
 /* ------------------------------------------------------------------ */
+/* SHRINK - shrink a partition + its filesystem                       */
+/*   SHRINK=<drive> SIZE=<amount[KMG]|MIN> [NOUNMOUNT] [FORCE]        */
+/* ------------------------------------------------------------------ */
+
+static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
+                       const char *drive_s, const char *size_s,
+                       BOOL no_unmount)
+{
+    struct BlockDev *bd;
+    struct PartInfo *pi = NULL;
+    struct ShrinkReport rep;
+    char   name[32], szbuf[20], step[80], umerr[80], rmerr[80], mnt[40];
+    char   scanerr[256];
+    UWORD  nlen, i;
+    ULONG  heads, sectors, blks_cyl, ncyl, bpc_fs, min_cyls, min_high;
+    ULONG  old_hi, new_hi;
+    BOOL   to_min, ok;
+
+    if (!drive_s || !drive_s[0] || !size_s || !size_s[0])
+        { cli_puts(GS(MSG_SHR_USAGE)); return RETURN_WARN; }
+
+    strncpy(name, drive_s, 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) { cli_puts(GS(MSG_SHR_USAGE)); return RETURN_WARN; }
+
+    DP_SNPRINTF(outbuf, GS(MSG_CLI_OPENING), devname, unit);
+    cli_puts(outbuf);
+    bd = cli_open_target(devname, unit);
+    if (!bd) return RETURN_ERROR;
+
+    memset(&s_rdb, 0, sizeof(s_rdb));
+    if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
+        cli_puts(GS(MSG_CLI_NO_RDB_RUN_INIT));
+        BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    for (i = 0; i < s_rdb.num_parts; i++)
+        if (str_eq_ci(s_rdb.parts[i].drive_name, name)) { pi = &s_rdb.parts[i]; break; }
+    if (!pi) {
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_NOT_FOUND_FMT), name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    /* Filesystem-by-filesystem rollout: FFS first, PFS/SFS to follow. */
+    if (!FFS_IsSupportedType(pi->dos_type)) {
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_UNSUPPORTED_FMT),
+                pi->drive_name, (unsigned long)pi->dos_type);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    heads    = pi->heads   > 0 ? pi->heads   : s_rdb.heads;
+    sectors  = pi->sectors > 0 ? pi->sectors : s_rdb.sectors;
+    blks_cyl = heads * sectors;
+    ncyl     = pi->high_cyl - pi->low_cyl + 1;
+    if (blks_cyl == 0 || ncyl == 0) {
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    /* Read-only scan first: establishes the floor and gives the user
+       the same numbers SHRINKINFO would.  The engine re-verifies the
+       tail under Inhibit anyway (defense in depth). */
+    cli_puts(GS(MSG_SHR_SCANNING));
+    memset(&rep, 0, sizeof(rep)); scanerr[0] = '\0';
+    if (!FFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr)) {
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_FAIL_FMT), scanerr);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    bpc_fs   = (rep.total_blocks >= ncyl) ? rep.total_blocks / ncyl : 0;
+    if (bpc_fs == 0) {
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    min_cyls = (rep.min_blocks + bpc_fs - 1) / bpc_fs;
+    if (min_cyls == 0) min_cyls = 1;
+    min_high = pi->low_cyl + min_cyls - 1;
+
+    old_hi = pi->high_cyl;
+    if (min_high >= old_hi) {
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_NOTHING_FMT), pi->drive_name);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    }
+
+    to_min = str_eq_ci(size_s, "MIN");
+    if (to_min) {
+        new_hi = min_high;
+    } else {
+        UQUAD bytes = parse_size_bytes(size_s);
+        ULONG rem_cyls;
+        if (bytes == 0) {
+            DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+        rem_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
+        if (rem_cyls == 0) {
+            DP_SNPRINTF(outbuf, GS(MSG_SHR_BAD_SIZE_FMT), size_s);
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+        new_hi = (rem_cyls < old_hi - pi->low_cyl) ? old_hi - rem_cyls
+                                                   : min_high;
+        if (new_hi < min_high) {
+            new_hi = min_high;
+            FormatSize((UQUAD)(old_hi - new_hi) * blks_cyl * 512UL, szbuf);
+            DP_SNPRINTF(outbuf, GS(MSG_SHR_CLAMP_FMT), szbuf);
+            cli_puts(outbuf);
+        }
+    }
+
+    FormatSize((UQUAD)(old_hi - new_hi) * blks_cyl * 512UL, szbuf);
+    DP_SNPRINTF(outbuf, GS(MSG_SHR_PLAN_FMT),
+            pi->drive_name, (ULONG)old_hi, (ULONG)new_hi, szbuf);
+    cli_puts(outbuf);
+
+    DP_SNPRINTF(outbuf, GS(MSG_SHR_ASK), pi->drive_name);
+    if (!ask_yn(outbuf, force)) {
+        cli_puts(GS(MSG_CLI_ABORTED_NO_CHANGES));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+    }
+
+    umerr[0] = rmerr[0] = '\0';
+    pi->high_cyl = new_hi;
+
+    /* Same unmount / NOUNMOUNT model as GROW (see cmd_grow). */
+    if (!no_unmount) {
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+        cli_grow_progress(NULL, step);
+        if (!UnmountPartition(bd, pi->drive_name,
+                              cli_grow_progress, NULL, umerr, sizeof(umerr))) {
+            pi->high_cyl = old_hi;
+            DP_SNPRINTF(outbuf, GS(MSG_SHR_UNMOUNT_FAIL_FMT),
+                    pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+        }
+    }
+
+    ok = FFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
+                             outbuf, cli_grow_progress, NULL);
+
+    if (!ok) {
+        char diag[200];
+        strncpy(diag, outbuf, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
+        pi->high_cyl = old_hi;
+        if (!no_unmount)
+            MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+        DP_SNPRINTF(outbuf, GS(MSG_SHR_FAIL_FMT), diag);
+        cli_puts(outbuf);
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+
+    cli_grow_progress(NULL, GS(MSG_GROW_PROG_WRITING_RDB));
+    cli_puts(GS(MSG_CLI_WRITING_RDB));
+    if (!RDB_Write(bd, &s_rdb)) {
+        cli_puts(GS(MSG_CLI_FAILED));
+        RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
+    }
+    cli_puts(GS(MSG_CLI_OK));
+
+    if (!no_unmount) {
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+        cli_grow_progress(NULL, step);
+        if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
+            MaterializeVolume(mnt);
+            DP_SNPRINTF(outbuf, GS(MSG_SHR_REMOUNTED_FMT), pi->drive_name);
+            cli_puts(outbuf);
+            RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+        }
+    }
+
+    /* NOUNMOUNT (or remount failed): lock the volume until reboot,
+       exactly like GROW - the live handler still has the OLD geometry. */
+    if (no_unmount) {
+        char inh[40];
+        DP_SNPRINTF(inh, "%s:", pi->drive_name);
+        Inhibit((STRPTR)inh, DOSTRUE);
+    }
+    DP_SNPRINTF(outbuf, GS(MSG_SHR_REBOOT_FMT), pi->drive_name);
+    cli_puts(outbuf);
+    RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* ADDFS - add filesystem entry, then write RDB                       */
 /* ------------------------------------------------------------------ */
 
@@ -2626,7 +2818,7 @@ LONG cli_run(void)
         !args[ARG_CHECK]   && !args[ARG_CREATE]   &&
         !args[ARG_IMAGEOUT] && !args[ARG_IMAGEIN] && !args[ARG_GROW] &&
         !args[ARG_ZEROPART] && !args[ARG_ADDMBR] && !args[ARG_DELMBR] &&
-        !args[ARG_SHRINKINFO]) {
+        !args[ARG_SHRINKINFO] && !args[ARG_SHRINK]) {
         FreeArgs(rdargs);
         return CLI_NO_ARGS;
     }
@@ -2666,7 +2858,7 @@ LONG cli_run(void)
          args[ARG_DELPART]   || args[ARG_CHECK]   ||
          args[ARG_IMAGEOUT]  || args[ARG_IMAGEIN]  || args[ARG_GROW] ||
          args[ARG_ZEROPART]  || args[ARG_ADDMBR]  || args[ARG_DELMBR] ||
-         args[ARG_SHRINKINFO])) {
+         args[ARG_SHRINKINFO] || args[ARG_SHRINK])) {
 
         char  devname[64];
         ULONG unit;
@@ -2731,6 +2923,12 @@ LONG cli_run(void)
             if (rc == RETURN_OK && args[ARG_SHRINKINFO])
                 rc = cmd_shrinkinfo(devname, unit,
                                     (const char *)args[ARG_SHRINKINFO]);
+
+            if (rc == RETURN_OK && args[ARG_SHRINK])
+                rc = cmd_shrink(devname, unit, force,
+                                (const char *)args[ARG_SHRINK],
+                                (const char *)args[ARG_SIZE],
+                                (BOOL)args[ARG_NOUNMOUNT]);
 
             if (rc == RETURN_OK && args[ARG_DELPART])
                 rc = cmd_delpart(devname, unit, force,

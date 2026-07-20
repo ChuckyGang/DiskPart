@@ -45,4 +45,17 @@ BOOL FFS_GrowPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
                        char *err_buf,
                        FFS_ProgressFn progress_fn, void *progress_ud);
 
+/*
+ * Shrink the filesystem to a smaller cylinder range.
+ * pi->high_cyl must already be set to the NEW (smaller) value;
+ * old_high_cyl is the value it had before the edit.  Refuses unless
+ * every allocated block in the removed range is movable metadata.
+ * Same write-order contract as grow: call this FIRST, write the RDB
+ * only after it succeeds.
+ */
+BOOL FFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
+                         const struct PartInfo *pi, ULONG old_high_cyl,
+                         char *err_buf,
+                         FFS_ProgressFn progress_fn, void *progress_ud);
+
 #endif /* FFSRESIZE_H */

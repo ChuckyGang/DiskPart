@@ -1336,3 +1336,508 @@ done:
     if (meta)     FreeVec(meta);
     return ok;
 }
+
+/* ================================================================== */
+/* FFS_ShrinkPartition - shrink the filesystem to a smaller cylinder  */
+/* range.  EXPERIMENTAL - writes filesystem metadata directly.        */
+/*                                                                     */
+/* Mirror of FFS_GrowPartition's proven machinery with the direction  */
+/* inverted, plus two shrink-specific rules:                          */
+/*                                                                     */
+/* 1. TAIL-FREE GATE: every allocated block in the removed range      */
+/*    [new_blocks, old_blocks) must be movable metadata (the root,    */
+/*    bitmap or ext blocks - all relocated/truncated here).  A single */
+/*    data block there = clean refusal.  This re-verifies on the spot */
+/*    what SHRINKINFO reported, under Inhibit.                        */
+/*                                                                     */
+/* 2. ONLY-MARK-USED: the rewritten bitmap content never clears a     */
+/*    used bit.  Between our writes and the reboot/remount the old-   */
+/*    geometry FFS may still mount this volume (NOUNMOUNT window) and */
+/*    - because Phase 9c stamps its root bm_flag=VALID - would trust  */
+/*    any bit we cleared and allocate over live structures.  Bits we  */
+/*    leak as "used" (the vacated old root/bm positions below the new */
+/*    end) are reclaimed automatically after reboot: the NEW root has */
+/*    bm_flag=0, so FFS rebuilds the whole bitmap from the directory  */
+/*    tree.                                                            */
+/*                                                                     */
+/* Reversibility: all writes before the root goes down at new_root    */
+/* touch only bitmap-free blocks or add used-marks; the volume stays  */
+/* fully mountable at its OLD geometry until the caller writes the    */
+/* RDB (FFS computes the root position from the DosEnvec, so the      */
+/* "switch" to the shrunk filesystem happens exactly at RDB write).   */
+/* ================================================================== */
+
+/* Find a block that is FREE per the on-disk bitmap, below 'limit',
+   not in claimed[]/nclaimed and not skip1/skip2.  Searches upward from
+   'hint', then downward.  Returns 0 when nothing is free (0 is always
+   < reserved, so it can double as the failure sentinel). */
+static ULONG ffs_shr_find_free(struct BlockDev *bd, ULONG part_abs,
+                               ULONG spb, ULONG nlongs, ULONG reserved,
+                               ULONG bpbm,
+                               const ULONG *bm_chain, ULONG bm_chain_n,
+                               ULONG limit, ULONG hint,
+                               const ULONG *claimed, ULONG nclaimed,
+                               ULONG skip1, ULONG skip2, ULONG *scr)
+{
+    ULONG cached = 0xFFFFFFFFUL;
+    for (int pass = 0; pass < 2; pass++) {
+        ULONG b   = (pass == 0) ? hint : (hint > reserved ? hint - 1 : reserved);
+        LONG  dir = (pass == 0) ? 1 : -1;
+        while (b >= reserved && b < limit) {
+            ULONG idx = (b - reserved) / bpbm;
+            if (idx >= bm_chain_n) break;
+            if (idx != cached) {
+                if (!read_fs_block(bd, part_abs, bm_chain[idx], spb, scr))
+                    return 0;
+                cached = idx;
+            }
+            if (BM_TESTFREE(scr, (b - reserved) % bpbm) &&
+                b != skip1 && b != skip2) {
+                ULONG c;
+                for (c = 0; c < nclaimed; c++)
+                    if (claimed[c] == b) break;
+                if (c == nclaimed) return b;
+            }
+            if (dir < 0 && b == reserved) break;
+            b += dir;
+        }
+    }
+    return 0;
+}
+
+BOOL FFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
+                         const struct PartInfo *pi, ULONG old_high_cyl,
+                         char *err_buf,
+                         FFS_ProgressFn progress_fn, void *progress_ud)
+{
+#define FFS_SPROG(msg) do { if (progress_fn) progress_fn(progress_ud, (msg)); } while(0)
+    ULONG *boot_buf = NULL, *root_buf = NULL, *bm_buf = NULL, *scr_buf = NULL;
+    ULONG *bm_blknums = NULL;   /* old bm chain, coverage order          */
+    ULONG *final_bm   = NULL;   /* new bm chain positions                */
+    ULONG *claimed    = NULL;   /* freshly allocated positions this run  */
+    ULONG *meta       = NULL;   /* sorted movable-metadata set           */
+    ULONG  bm_count = 0, nclaimed = 0, meta_n = 0;
+    ULONG  ext_relblk[MAX_EXT_CHAIN], ext_count = 0;
+    ULONG  final_ext[MAX_EXT_CHAIN];
+    BOOL   ok = FALSE, did_inhibit = FALSE;
+    char   inh_name[36];
+    ULONG  new_root = 0, root_blk = 0;
+
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG dev_bsz = (pi->block_size > 0) ? pi->block_size : 512;
+    ULONG spb     = (pi->sectors_per_block > 0) ? pi->sectors_per_block : 1;
+    ULONG eff_bsz = dev_bsz * spb;
+    ULONG nlongs  = eff_bsz / 4;
+
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_FFS_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+    if (dev_bsz != 512) {
+        sprintf(err_buf, GS(MSG_FFS_ONLY_512_SECTORS), (unsigned long)dev_bsz);
+        return FALSE;
+    }
+    if (eff_bsz < 512 || eff_bsz > 16384 || (eff_bsz & (eff_bsz - 1)) != 0) {
+        sprintf(err_buf, GS(MSG_FFS_UNSUPPORTED_BLOCKSIZE),
+                (unsigned long)eff_bsz, (unsigned long)spb);
+        return FALSE;
+    }
+
+    ULONG part_abs   = pi->low_cyl * heads * sectors;
+    ULONG old_blocks = (old_high_cyl - pi->low_cyl + 1) * heads * sectors / spb;
+    ULONG new_blocks = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors / spb;
+    ULONG bpbm       = (nlongs - 1) * 32;
+    ULONG reserved   = (pi->reserved_blks > 0) ? pi->reserved_blks : 2UL;
+
+    if (new_blocks >= old_blocks) {
+        sprintf(err_buf, GS(MSG_FFS_PART_TOO_SMALL),
+                (unsigned long)new_blocks, (unsigned long)old_blocks);
+        return FALSE;
+    }
+    if (new_blocks <= reserved + 4) {
+        sprintf(err_buf, GS(MSG_FFS_SHR_TOO_SMALL_FMT),
+                (unsigned long)new_blocks);
+        return FALSE;
+    }
+
+    ULONG ext_slots   = EXT_BM_MAX(nlongs);
+    ULONG max_bm_list = (ULONG)(ROOT_BM_MAX + MAX_EXT_CHAIN * ext_slots);
+    ULONG old_bm_need = (bpbm - 2 + old_blocks - reserved) / bpbm;
+    ULONG new_bm_need = (bpbm - 2 + new_blocks - reserved) / bpbm;
+
+    boot_buf   = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    root_buf   = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    bm_buf     = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    scr_buf    = (ULONG *)AllocVec(eff_bsz, MEMF_PUBLIC | MEMF_CLEAR);
+    bm_blknums = (ULONG *)AllocVec(max_bm_list * sizeof(ULONG),
+                                   MEMF_PUBLIC | MEMF_CLEAR);
+    final_bm   = (ULONG *)AllocVec(max_bm_list * sizeof(ULONG),
+                                   MEMF_PUBLIC | MEMF_CLEAR);
+    claimed    = (ULONG *)AllocVec((max_bm_list + MAX_EXT_CHAIN + 2) *
+                                   sizeof(ULONG), MEMF_PUBLIC | MEMF_CLEAR);
+    meta       = (ULONG *)AllocVec((max_bm_list + MAX_EXT_CHAIN + 1) *
+                                   sizeof(ULONG), MEMF_PUBLIC | MEMF_CLEAR);
+    if (!boot_buf || !root_buf || !bm_buf || !scr_buf ||
+        !bm_blknums || !final_bm || !claimed || !meta) {
+        sprintf(err_buf, GS(MSG_FFS_OUT_OF_MEMORY));
+        goto done;
+    }
+
+    DP_SNPRINTF(inh_name, "%s:", pi->drive_name);
+    FFS_SPROG(GS(MSG_FFS_PROG_INHIBITING));
+    did_inhibit = Inhibit((STRPTR)inh_name, DOSTRUE);
+
+    /* ---- Phase 1/2: boot + root (old geometry), same rules as grow ---- */
+    FFS_SPROG(GS(MSG_FFS_PROG_READING_BOOT));
+    if (!read_fs_block(bd, part_abs, 0, spb, boot_buf)) {
+        sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_BOOT), (unsigned long)part_abs);
+        goto done;
+    }
+    if ((boot_buf[BL_DOSTYPE] & 0xFFFFFF00UL) != 0x444F5300UL) {
+        sprintf(err_buf, GS(MSG_FFS_BOOT_DOSTYPE_MISMATCH),
+                (unsigned long)boot_buf[BL_DOSTYPE]);
+        goto done;
+    }
+    root_blk = boot_buf[BL_ROOT_BLK];
+    if (root_blk == 0 || root_blk >= old_blocks)
+        root_blk = old_blocks / 2;
+
+    FFS_SPROG(GS(MSG_FFS_PROG_READING_ROOT));
+    if (!read_fs_block(bd, part_abs, root_blk, spb, root_buf)) {
+        sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_ROOT),
+                (unsigned long)(part_abs + root_blk * spb),
+                (unsigned long)root_blk);
+        goto done;
+    }
+    if (root_buf[RL_TYPE] != T_SHORT ||
+        root_buf[RL_SEC_TYPE(nlongs)] != ST_ROOT) {
+        sprintf(err_buf, GS(MSG_FFS_ROOT_WRONG_TYPE),
+                (unsigned long)root_buf[RL_TYPE],
+                (unsigned long)root_buf[RL_SEC_TYPE(nlongs)],
+                (unsigned long)part_abs,
+                (unsigned long)boot_buf[BL_ROOT_BLK],
+                (unsigned long)root_blk,
+                (unsigned long)old_blocks,
+                (unsigned long)spb);
+        goto done;
+    }
+    {
+        ULONG save = root_buf[RL_CHKSUM];
+        root_buf[RL_CHKSUM] = 0;
+        ULONG csum = ffs_checksum(root_buf, nlongs);
+        root_buf[RL_CHKSUM] = save;
+        if (csum != save) {
+            sprintf(err_buf, GS(MSG_FFS_ROOT_CHECKSUM_INVALID),
+                    (unsigned long)save, (unsigned long)csum);
+            goto done;
+        }
+    }
+    if (root_buf[RL_BM_FLAG(nlongs)] != BM_VALID) {
+        sprintf(err_buf, GS(MSG_FFS_BITMAP_NOT_VALID),
+                (unsigned long)root_buf[RL_BM_FLAG(nlongs)]);
+        goto done;
+    }
+
+    /* ---- Phase 3: collect old bm chain + movable-metadata set ---- */
+    FFS_SPROG(GS(MSG_FFS_PROG_READING_BITMAP));
+    meta[meta_n++] = root_blk;
+    for (ULONG i = 0; i < ROOT_BM_MAX; i++) {
+        ULONG p = root_buf[RL_BM_PAGES(nlongs) + i];
+        if (p == 0) break;
+        if (bm_count < max_bm_list) bm_blknums[bm_count++] = p;
+        meta[meta_n++] = p;
+    }
+    {
+        ULONG ext_blk = root_buf[RL_BM_EXT(nlongs)];
+        while (ext_blk != 0 && ext_count < MAX_EXT_CHAIN) {
+            if (!read_fs_block(bd, part_abs, ext_blk, spb, bm_buf)) {
+                sprintf(err_buf, GS(MSG_FFS_CANNOT_READ_EXT),
+                        (unsigned long)(part_abs + ext_blk * spb));
+                goto done;
+            }
+            ext_relblk[ext_count] = ext_blk;
+            meta[meta_n++] = ext_blk;
+            for (ULONG i = 0; i < ext_slots; i++) {
+                if (bm_buf[i] == 0) break;
+                if (bm_count < max_bm_list) bm_blknums[bm_count++] = bm_buf[i];
+                meta[meta_n++] = bm_buf[i];
+            }
+            ext_count++;
+            ext_blk = bm_buf[nlongs - 1];
+        }
+    }
+    if (bm_count < old_bm_need) {
+        sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT), (unsigned long)bm_count);
+        goto done;
+    }
+    ffs_sort_ulongs(meta, meta_n);
+
+    /* ---- Phase 4: TAIL-FREE GATE over [new_blocks, old_blocks) ---- */
+    FFS_SPROG(GS(MSG_FFS_PROG_SHR_VERIFY));
+    {
+        ULONG first_idx = (new_blocks - reserved) / bpbm;
+        for (ULONG bi = first_idx; bi < old_bm_need; bi++) {
+            if (!read_fs_block(bd, part_abs, bm_blknums[bi], spb, bm_buf)) {
+                sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                        (unsigned long)bm_blknums[bi]);
+                goto done;
+            }
+            if (ffs_checksum(bm_buf, nlongs) != 0) {
+                sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                        (unsigned long)bm_blknums[bi]);
+                goto done;
+            }
+            ULONG base = reserved + bi * bpbm;
+            for (ULONG li = 1; li < nlongs; li++) {
+                ULONG b0 = base + (li - 1) * 32;
+                if (b0 >= old_blocks) break;
+                ULONG v = bm_buf[li];
+                if (v == 0xFFFFFFFFUL) continue;
+                for (ULONG k = 0; k < 32; k++) {
+                    ULONG blk = b0 + k;
+                    if (blk >= old_blocks) break;
+                    if (blk < new_blocks) continue;
+                    if (!(v & (1UL << k)) &&
+                        !ffs_in_sorted(meta, meta_n, blk)) {
+                        sprintf(err_buf, GS(MSG_FFS_SHR_TAIL_USED_FMT),
+                                (unsigned long)blk);
+                        goto done;
+                    }
+                }
+            }
+        }
+    }
+
+    /* ---- Phase 5: plan the new bm/ext chain + root target ---- */
+    new_root = (reserved + new_blocks - 1) / 2;   /* FFS RootKey formula */
+    {
+        ULONG new_num_ext = (new_bm_need > ROOT_BM_MAX)
+            ? (new_bm_need - ROOT_BM_MAX + ext_slots - 1) / ext_slots : 0;
+
+        for (ULONG k = 0; k < new_bm_need; k++) {
+            if (bm_blknums[k] < new_blocks && bm_blknums[k] != new_root) {
+                final_bm[k] = bm_blknums[k];      /* keep in place */
+            } else {
+                ULONG p = ffs_shr_find_free(bd, part_abs, spb, nlongs,
+                                            reserved, bpbm,
+                                            bm_blknums, old_bm_need,
+                                            new_blocks, new_root + 1,
+                                            claimed, nclaimed,
+                                            new_root, root_blk, scr_buf);
+                if (p == 0) {
+                    sprintf(err_buf, GS(MSG_FFS_SHR_NO_FREE_FMT),
+                            (unsigned long)bm_blknums[k]);
+                    goto done;
+                }
+                final_bm[k]        = p;
+                claimed[nclaimed++] = p;
+            }
+        }
+        for (ULONG e = 0; e < new_num_ext; e++) {
+            if (e < ext_count && ext_relblk[e] < new_blocks &&
+                ext_relblk[e] != new_root) {
+                final_ext[e] = ext_relblk[e];
+            } else {
+                ULONG p = ffs_shr_find_free(bd, part_abs, spb, nlongs,
+                                            reserved, bpbm,
+                                            bm_blknums, old_bm_need,
+                                            new_blocks, new_root + 1,
+                                            claimed, nclaimed,
+                                            new_root, root_blk, scr_buf);
+                if (p == 0) {
+                    sprintf(err_buf, GS(MSG_FFS_SHR_NO_FREE_FMT),
+                            (unsigned long)(e < ext_count ? ext_relblk[e] : 0));
+                    goto done;
+                }
+                final_ext[e]       = p;
+                claimed[nclaimed++] = p;
+            }
+        }
+
+        /* Root target: must be the old root, movable metadata (its chain
+           entry was re-homed above via the != new_root checks), or a
+           bitmap-free block.  Anything else is user data - refuse. */
+        if (new_root != root_blk && !ffs_in_sorted(meta, meta_n, new_root)) {
+            ULONG idx = (new_root - reserved) / bpbm;
+            if (idx >= old_bm_need ||
+                !read_fs_block(bd, part_abs, bm_blknums[idx], spb, scr_buf)) {
+                sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                        (unsigned long)(idx < old_bm_need ? bm_blknums[idx] : 0));
+                goto done;
+            }
+            if (!BM_TESTFREE(scr_buf, (new_root - reserved) % bpbm)) {
+                sprintf(err_buf, GS(MSG_FFS_SHR_TARGET_USED_FMT),
+                        (unsigned long)new_root);
+                goto done;
+            }
+        }
+        claimed[nclaimed++] = new_root;
+
+        /* ---- Phase 6: rewrite bitmap content for the new size ----
+           Source content for coverage range k is the OLD bm block k
+           (coverage ranges do not shift).  Edits are ONLY-MARK-USED:
+           the out-of-range tail of the last block, plus every claimed
+           position (replacement bm/ext blocks and new_root). */
+        FFS_SPROG(GS(MSG_FFS_PROG_SHR_BITMAP));
+        for (ULONG k = 0; k < new_bm_need; k++) {
+            if (!read_fs_block(bd, part_abs, bm_blknums[k], spb, bm_buf)) {
+                sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                        (unsigned long)bm_blknums[k]);
+                goto done;
+            }
+            ULONG b_start = reserved + k * bpbm;
+            ULONG b_end   = reserved + (k + 1) * bpbm;   /* exclusive */
+            if (k == new_bm_need - 1) {
+                for (ULONG b = new_blocks; b < b_end; b++)
+                    BM_SETUSED(bm_buf, b - b_start);
+            }
+            for (ULONG c = 0; c < nclaimed; c++) {
+                if (claimed[c] >= b_start && claimed[c] < b_end &&
+                    claimed[c] < new_blocks)
+                    BM_SETUSED(bm_buf, claimed[c] - b_start);
+            }
+            bm_buf[0] = 0;
+            bm_buf[0] = ffs_checksum(bm_buf, nlongs);
+            if (!write_fs_block(bd, part_abs, final_bm[k], spb, bm_buf)) {
+                sprintf(err_buf, GS(MSG_FFS_WRITE_NEW_BM_FAIL),
+                        (unsigned long)final_bm[k],
+                        (unsigned long)(part_abs + final_bm[k] * spb));
+                goto done;
+            }
+        }
+
+        /* ---- Phase 7: write the new ext chain, update root fields ---- */
+        FFS_SPROG(GS(MSG_FFS_PROG_UPDATING_CHAIN));
+        for (ULONG e = 0; e < new_num_ext; e++) {
+            memset(bm_buf, 0, eff_bsz);
+            ULONG src = ROOT_BM_MAX + e * ext_slots;
+            for (ULONG s = 0; s < ext_slots && src + s < new_bm_need; s++)
+                bm_buf[s] = final_bm[src + s];
+            bm_buf[nlongs - 1] = (e + 1 < new_num_ext) ? final_ext[e + 1] : 0;
+            if (!write_fs_block(bd, part_abs, final_ext[e], spb, bm_buf)) {
+                sprintf(err_buf, GS(MSG_FFS_WRITE_NEW_EXT_FAIL),
+                        (unsigned long)final_ext[e],
+                        (unsigned long)(part_abs + final_ext[e] * spb));
+                goto done;
+            }
+        }
+        for (ULONG i = 0; i < ROOT_BM_MAX; i++)
+            root_buf[RL_BM_PAGES(nlongs) + i] =
+                (i < new_bm_need) ? final_bm[i] : 0;
+        root_buf[RL_BM_EXT(nlongs)] = new_num_ext ? final_ext[0] : 0;
+    }
+
+    /* ---- Phase 8: write the root at its new computed position ---- */
+    FFS_SPROG(GS(MSG_FFS_PROG_RELOCATING_ROOT));
+    root_buf[1] = 0;                              /* rb_OwnKey   */
+    root_buf[2] = 0;                              /* rb_SeqNum   */
+    root_buf[4] = 0;                              /* rb_Nothing1 */
+    root_buf[3] = RL_HT_SIZE(nlongs);             /* rb_HTSize   */
+    root_buf[RL_PARENT(nlongs)]  = 0;
+    root_buf[RL_BM_FLAG(nlongs)] = 0;   /* force validator rebuild - see grow */
+    root_buf[RL_CHKSUM]          = 0;
+    root_buf[RL_CHKSUM]          = ffs_checksum(root_buf, nlongs);
+    if (!write_fs_block(bd, part_abs, new_root, spb, root_buf)) {
+        sprintf(err_buf, GS(MSG_FFS_WRITE_ROOT_FAIL),
+                (unsigned long)new_root,
+                (unsigned long)(part_abs + new_root * spb));
+        goto done;
+    }
+    {
+        ULONG save_cs = root_buf[RL_CHKSUM];
+        if (!read_fs_block(bd, part_abs, new_root, spb, bm_buf)) {
+            sprintf(err_buf, GS(MSG_FFS_ROOT_WRITE_READBACK_FAIL),
+                    (unsigned long)(part_abs + new_root * spb));
+            goto done;
+        }
+        if (bm_buf[RL_TYPE]             != T_SHORT        ||
+            bm_buf[RL_SEC_TYPE(nlongs)] != (ULONG)ST_ROOT ||
+            bm_buf[RL_CHKSUM]           != save_cs) {
+            sprintf(err_buf, GS(MSG_FFS_ROOT_WRITE_VERIFY_FAIL),
+                    (unsigned long)(part_abs + new_root * spb),
+                    inh_name);
+            goto done;
+        }
+    }
+
+    /* ---- Phase 9b: re-parent the root's direct children (see grow) ---- */
+    FFS_SPROG(GS(MSG_FFS_PROG_UPDATING_PARENTS));
+    {
+        ULONG FHB_PARENT    = nlongs - 3;
+        ULONG FHB_HASHCHAIN = nlongs - 4;
+        ULONG ht_size       = RL_HT_SIZE(nlongs);
+        for (ULONG ht_i = 0; ht_i < ht_size; ht_i++) {
+            ULONG blkno = root_buf[RL_HT_START + ht_i];
+            ULONG depth = 0;
+            while (blkno != 0 && depth < 512) {
+                depth++;
+                if (!read_fs_block(bd, part_abs, blkno, spb, bm_buf))
+                    break;
+                if (bm_buf[0] != T_SHORT || bm_buf[1] != blkno)
+                    break;
+                ULONG next_blkno   = bm_buf[FHB_HASHCHAIN];
+                bm_buf[FHB_PARENT] = new_root;
+                bm_buf[RL_CHKSUM]  = 0;
+                bm_buf[RL_CHKSUM]  = ffs_checksum(bm_buf, nlongs);
+                if (!write_fs_block(bd, part_abs, blkno, spb, bm_buf)) {
+                    sprintf(err_buf, GS(MSG_FFS_UPDATE_PARENT_FAIL),
+                            (unsigned long)blkno,
+                            (unsigned long)(part_abs + blkno * spb));
+                    goto done;
+                }
+                blkno = next_blkno;
+            }
+        }
+    }
+
+    /* ---- Phase 9: boot block bb[2] -> new_root (see grow) ---- */
+    FFS_SPROG(GS(MSG_FFS_PROG_UPDATING_BOOT));
+    boot_buf[BL_ROOT_BLK] = new_root;
+    {
+        ULONG bbsum = 0;
+        boot_buf[1] = 0;
+        for (ULONG i = 0; i < nlongs; i++) {
+            ULONG prev = bbsum;
+            bbsum += boot_buf[i];
+            if (bbsum < prev) bbsum++;
+        }
+        boot_buf[1] = ~bbsum;
+    }
+    if (!write_fs_block(bd, part_abs, 0, spb, boot_buf)) {
+        sprintf(err_buf, GS(MSG_FFS_UPDATE_BOOT_FAIL),
+                (unsigned long)part_abs);
+        goto done;
+    }
+
+    /* ---- Phase 9c: stamp bm_flag=VALID on the OLD root (see grow -
+       protects the pre-reboot window where FFS still mounts with the
+       old geometry; non-fatal on failure) ---- */
+    if (new_root != root_blk) {
+        if (read_fs_block(bd, part_abs, root_blk, spb, bm_buf) &&
+            bm_buf[0]                   == T_SHORT &&
+            bm_buf[RL_SEC_TYPE(nlongs)] == (ULONG)ST_ROOT &&
+            bm_buf[RL_BM_FLAG(nlongs)]  != BM_VALID) {
+            bm_buf[RL_BM_FLAG(nlongs)] = BM_VALID;
+            bm_buf[RL_CHKSUM]          = 0;
+            bm_buf[RL_CHKSUM]          = ffs_checksum(bm_buf, nlongs);
+            (void)write_fs_block(bd, part_abs, root_blk, spb, bm_buf);
+        }
+    }
+
+    ok = TRUE;
+
+done:
+    if (did_inhibit) Inhibit((STRPTR)inh_name, DOSFALSE);
+    if (boot_buf)   FreeVec(boot_buf);
+    if (root_buf)   FreeVec(root_buf);
+    if (bm_buf)     FreeVec(bm_buf);
+    if (scr_buf)    FreeVec(scr_buf);
+    if (bm_blknums) FreeVec(bm_blknums);
+    if (final_bm)   FreeVec(final_bm);
+    if (claimed)    FreeVec(claimed);
+    if (meta)       FreeVec(meta);
+    return ok;
+#undef FFS_SPROG
+}

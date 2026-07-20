@@ -1379,6 +1379,192 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
+/* SHRINK - shrink a partition + its filesystem                       */
+/*   SHRINK <drive> <size[KMG]|MIN> [NOUNMOUNT]                       */
+/*                                                                     */
+/* size = amount to REMOVE (mirrors GROW's amount-to-add); MIN takes  */
+/* the partition down to the scan floor.  FFS only for now (PFS/SFS    */
+/* follow filesystem by filesystem).  Same offline model as GROW:     */
+/* unmount -> FS surgery -> RDB write -> remount (or NOUNMOUNT +      */
+/* mandatory reboot).                                                  */
+/* ------------------------------------------------------------------ */
+
+static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
+{
+    struct PartInfo *pi = NULL;
+    struct ShrinkReport rep;
+    const char *sizestr;
+    char  name[32], szbuf[20], step[80], umerr[80], rmerr[80], mnt[40];
+    char  scanerr[256];
+    UWORD nlen, i;
+    ULONG heads, sectors, blks_cyl, ncyl, bpc_fs, min_cyls, min_high;
+    ULONG old_hi, new_hi;
+    BOOL  to_min, ok, no_unmount = FALSE;
+
+    if (!s_st.bd)
+        { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
+    if (ntok < 3) { sc_puts(GS(MSG_SHR_USAGE)); return RETURN_ERROR; }
+    for (i = 3; i < ntok; i++)
+        if (ci_eq(tok[i], "NOUNMOUNT")) no_unmount = TRUE;
+
+    strncpy(name, tok[1], 30); name[30] = '\0';
+    nlen = (UWORD)strlen(name);
+    if (nlen > 0 && name[nlen - 1] == ':') name[--nlen] = '\0';
+    if (nlen == 0) { sc_puts(GS(MSG_SHR_USAGE)); return RETURN_ERROR; }
+    sizestr = tok[2];
+
+    for (i = 0; i < s_st.rdb.num_parts; i++)
+        if (ci_eq(s_st.rdb.parts[i].drive_name, name)) { pi = &s_st.rdb.parts[i]; break; }
+    if (!pi) {
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_NOT_FOUND_FMT), name);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    if (!FFS_IsSupportedType(pi->dos_type)) {
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_UNSUPPORTED_FMT),
+                pi->drive_name, (unsigned long)pi->dos_type);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    heads    = pi->heads   > 0 ? pi->heads   : s_st.rdb.heads;
+    sectors  = pi->sectors > 0 ? pi->sectors : s_st.rdb.sectors;
+    blks_cyl = heads * sectors;
+    ncyl     = pi->high_cyl - pi->low_cyl + 1;
+    if (blks_cyl == 0 || ncyl == 0) {
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_BAD_SIZE_FMT), sizestr);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    sc_puts(GS(MSG_SHR_SCANNING));
+    memset(&rep, 0, sizeof(rep)); scanerr[0] = '\0';
+    if (!FFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr)) {
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_FAIL_FMT), scanerr);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+    bpc_fs = (rep.total_blocks >= ncyl) ? rep.total_blocks / ncyl : 0;
+    if (bpc_fs == 0) {
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_BAD_SIZE_FMT), sizestr);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+    min_cyls = (rep.min_blocks + bpc_fs - 1) / bpc_fs;
+    if (min_cyls == 0) min_cyls = 1;
+    min_high = pi->low_cyl + min_cyls - 1;
+
+    old_hi = pi->high_cyl;
+    if (min_high >= old_hi) {
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_NOTHING_FMT), pi->drive_name);
+        sc_puts(s_msg);
+        return RETURN_OK;
+    }
+
+    to_min = ci_eq((char *)sizestr, "MIN");
+    if (to_min) {
+        new_hi = min_high;
+    } else {
+        UQUAD bytes = parse_size_bytes(sizestr);
+        ULONG rem_cyls;
+        if (bytes == 0) {
+            DP_SNPRINTF(s_msg, GS(MSG_SHR_BAD_SIZE_FMT), sizestr);
+            sc_puts(s_msg);
+            return RETURN_ERROR;
+        }
+        rem_cyls = (ULONG)(bytes / ((UQUAD)blks_cyl * 512UL));
+        if (rem_cyls == 0) {
+            DP_SNPRINTF(s_msg, GS(MSG_SHR_BAD_SIZE_FMT), sizestr);
+            sc_puts(s_msg);
+            return RETURN_ERROR;
+        }
+        new_hi = (rem_cyls < old_hi - pi->low_cyl) ? old_hi - rem_cyls
+                                                   : min_high;
+        if (new_hi < min_high) {
+            new_hi = min_high;
+            FormatSize((UQUAD)(old_hi - new_hi) * blks_cyl * 512UL, szbuf);
+            DP_SNPRINTF(s_msg, GS(MSG_SHR_CLAMP_FMT), szbuf);
+            sc_puts(s_msg);
+        }
+    }
+
+    FormatSize((UQUAD)(old_hi - new_hi) * blks_cyl * 512UL, szbuf);
+    DP_SNPRINTF(s_msg, GS(MSG_SHR_PLAN_FMT),
+            pi->drive_name, (ULONG)old_hi, (ULONG)new_hi, szbuf);
+    sc_puts(s_msg);
+
+    if (s_st.dryrun) {
+        sc_puts(GS(MSG_SHR_DRYRUN));
+        return RETURN_OK;
+    }
+
+    DP_SNPRINTF(s_msg, GS(MSG_SHR_ASK), pi->drive_name);
+    if (!sc_ask_yn(s_msg)) { sc_puts(GS(MSG_SCR_ABORTED)); return RETURN_ERROR; }
+
+    umerr[0] = rmerr[0] = '\0';
+    pi->high_cyl = new_hi;
+
+    if (!no_unmount) {
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+        script_grow_progress(NULL, step);
+        if (!UnmountPartition(s_st.bd, pi->drive_name,
+                              script_grow_progress, NULL, umerr, sizeof(umerr))) {
+            pi->high_cyl = old_hi;
+            DP_SNPRINTF(s_msg, GS(MSG_SHR_UNMOUNT_FAIL_FMT),
+                    pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+            sc_puts(s_msg);
+            return RETURN_ERROR;
+        }
+    }
+
+    ok = FFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                             s_msg, script_grow_progress, NULL);
+
+    if (!ok) {
+        char diag[200];
+        strncpy(diag, s_msg, sizeof(diag) - 1); diag[sizeof(diag) - 1] = '\0';
+        pi->high_cyl = old_hi;
+        if (!no_unmount)
+            MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr));
+        DP_SNPRINTF(s_msg, GS(MSG_SHR_FAIL_FMT), diag);
+        sc_puts(s_msg);
+        return RETURN_ERROR;
+    }
+
+    script_grow_progress(NULL, GS(MSG_GROW_PROG_WRITING_RDB));
+    sc_puts(GS(MSG_SCR_WRITING_RDB));
+    if (!RDB_Write(s_st.bd, &s_st.rdb)) {
+        sc_puts(GS(MSG_SCR_FAILED));
+        return RETURN_ERROR;
+    }
+    sc_puts(GS(MSG_SCR_OK_DOT));
+    s_st.dirty = FALSE;
+
+    if (!no_unmount) {
+        DP_SNPRINTF(step, GS(MSG_GROW_PROG_REMOUNTING_FMT), pi->drive_name);
+        script_grow_progress(NULL, step);
+        if (MountPartition(s_st.bd, pi, mnt, rmerr, sizeof(rmerr))) {
+            MaterializeVolume(mnt);
+            DP_SNPRINTF(s_msg, GS(MSG_SHR_REMOUNTED_FMT), pi->drive_name);
+            sc_puts(s_msg);
+            return RETURN_OK;
+        }
+    }
+
+    if (no_unmount) {
+        char inh[40];
+        DP_SNPRINTF(inh, "%s:", pi->drive_name);
+        Inhibit((STRPTR)inh, DOSTRUE);
+    }
+    DP_SNPRINTF(s_msg, GS(MSG_SHR_REBOOT_FMT), pi->drive_name);
+    sc_puts(s_msg);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* SHRINKINFO - read-only minimum-shrinkable-size report              */
 /*   SHRINKINFO <drive>                                               */
 /*                                                                     */
@@ -2051,6 +2237,7 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "VERIFYEXT")) return do_verifyext(ln, tok, ntok);
     if (ci_eq(tok[0], "ADDFS"))    return do_addfs(ln, tok, ntok);
     if (ci_eq(tok[0], "GROW"))     return do_grow(ln, tok, ntok);
+    if (ci_eq(tok[0], "SHRINK"))   return do_shrink(ln, tok, ntok);
     if (ci_eq(tok[0], "SHRINKINFO")) return do_shrinkinfo(ln, tok, ntok);
     if (ci_eq(tok[0], "ZEROPART")) return do_zeropart(ln, tok, ntok);
     if (ci_eq(tok[0], "WRITE"))   return do_write(ln);
