@@ -82,8 +82,9 @@ scripting interface.
  * FFS grow unmounts the volume first, grows it, then remounts with the new
    size - no reboot needed (unless the volume is in use, then it falls back to
    the grow-then-reboot path).  PFS and SFS grow still require a reboot.
- * SHRINK (EXPERIMENTAL, FFS/OFS and PFS3 so far - SFS to follow):
-   shrink a partition and its filesystem in one step.  CLI:
+ * SHRINK (EXPERIMENTAL): all three GROW filesystems supported -
+   FFS/OFS, PFS3 and SFS.  Shrinks a partition and its filesystem in
+   one step.  CLI:
    SHRINK=<drive> SIZE=<amount|MIN>; script: SHRINK <drive> <amount|MIN>
    [NOUNMOUNT].  Refuses unless every allocated block in the removed range
    is movable metadata (root/bitmap blocks - relocated automatically); the
@@ -96,6 +97,10 @@ scripting interface.
    pointer clamped; requires a reboot like PFS3 grow.  Caveat: undeleting
    a file that was deleted BEFORE the shrink may fail (its blocks may lie
    beyond the new end) - an error, never corruption.
+   SFS shrink: new end root written at the new size, bitmap truncated,
+   free-block cache recounted; the start-root write is the atomic commit.
+   Volumes whose bitmap was relocated high by a strategy-B grow are
+   refused.  Reboot required like SFS grow.
  * SHRINKINFO <drive> (CLI + script) reports how far a partition COULD
    shrink: scans the filesystem's own allocation bitmap (read-only, never
    writes) and prints the highest used block, the minimum size in cylinders

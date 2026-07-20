@@ -1426,6 +1426,7 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
     int fskind;
     if      (FFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_FFS;
     else if (PFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_PFS;
+    else if (SFS_IsSupportedType(pi->dos_type)) fskind = GROW_FS_SFS;
     else {
         DP_SNPRINTF(s_msg, GS(MSG_SHR_UNSUPPORTED_FMT),
                 pi->drive_name, (unsigned long)pi->dos_type);
@@ -1447,6 +1448,8 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
     memset(&rep, 0, sizeof(rep)); scanerr[0] = '\0';
     if (!((fskind == GROW_FS_PFS)
           ? PFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr)
+          : (fskind == GROW_FS_SFS)
+          ? SFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr)
           : FFS_ShrinkInfo(s_st.bd, &s_st.rdb, pi, &rep, scanerr))) {
         DP_SNPRINTF(s_msg, GS(MSG_SHR_FAIL_FMT), scanerr);
         sc_puts(s_msg);
@@ -1527,6 +1530,9 @@ static LONG do_shrink(ULONG ln, char **tok, UWORD ntok)
 
     ok = (fskind == GROW_FS_PFS)
          ? PFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
+                               s_msg, script_grow_progress, NULL)
+         : (fskind == GROW_FS_SFS)
+         ? SFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
                                s_msg, script_grow_progress, NULL)
          : FFS_ShrinkPartition(s_st.bd, &s_st.rdb, pi, old_hi,
                                s_msg, script_grow_progress, NULL);

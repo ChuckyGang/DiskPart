@@ -265,7 +265,7 @@ SHRINKINFO=<drive>
     DiskPart IMAGE=disk.hdf SHRINKINFO=DH0
 
 SHRINK=<drive> SIZE=<amount[KMG]|MIN>  [NOUNMOUNT] [FORCE]
-  EXPERIMENTAL - FFS/OFS and PFS3 so far (SFS follows).  Shrink a
+  EXPERIMENTAL - works on FFS/OFS, PFS3 and SFS (same set as GROW).  Shrink a
   partition and its filesystem in one step: the removed range is verified
   free first (same scan as SHRINKINFO; any data block there = clean
   refusal), then the filesystem is edited for the new size and the RDB
@@ -279,6 +279,9 @@ SHRINK=<drive> SIZE=<amount[KMG]|MIN>  [NOUNMOUNT] [FORCE]
   PFS3: disksize/blocksfree updated, out-of-range bitmap bits sealed,
   roving pointer clamped; reboot required (like PFS3 GROW).  Undeleting
   files deleted BEFORE the shrink may fail - error, never corruption.
+  SFS: new end root at the new size, bitmap truncated, free-block cache
+  recounted; start-root write is the atomic commit; reboot required.
+  Bitmaps relocated high by an earlier strategy-B grow are refused.
   NOUNMOUNT works like GROW's: shrink in place, volume locked, reboot
   mandatory.
 
@@ -449,7 +452,7 @@ GROW <drive> <size[KMG]|END> [NOUNMOUNT]
     CLOSE
 
 SHRINK <drive> <amount[KMG]|MIN> [NOUNMOUNT]
-  EXPERIMENTAL - FFS/OFS and PFS3 so far.  Script form of the CLI SHRINK
+  EXPERIMENTAL - FFS/OFS, PFS3 and SFS.  Script form of the CLI SHRINK
   command (see CLI COMMANDS above for the full description).  <amount>
   is the size to REMOVE, clamped to the scan floor; MIN shrinks as far
   as possible.  Commits on its own like GROW - no separate WRITE needed.

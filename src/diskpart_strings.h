@@ -1211,8 +1211,9 @@
 #define MSG_PFS_PROG_SHR_SEAL        1205
 #define MSG_PFS_PROG_SHR_VERIFY      1206
 #define MSG_PFS_PROG_SHR_ROOT        1207
+#define MSG_SFS_SHR_BITMAP_HIGH      1208
 
-#define MSG_COUNT 1208
+#define MSG_COUNT 1209
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2432,5 +2433,6 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1205 MSG_PFS_PROG_SHR_SEAL */ "Sealing out-of-range bitmap bits",
     /* 1206 MSG_PFS_PROG_SHR_VERIFY */ "Verifying the removed area is free",
     /* 1207 MSG_PFS_PROG_SHR_ROOT */ "Updating PFS rootblock (disksize/blocksfree)",
+    /* 1208 MSG_SFS_SHR_BITMAP_HIGH */ "the SFS bitmap lies above the new end - shrink less (bitmap relocation is not supported)",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

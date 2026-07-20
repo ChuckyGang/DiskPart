@@ -1139,3 +1139,407 @@ done:
     if (bm_buf)  FreeVec(bm_buf);
     return ok;
 }
+
+/* ================================================================== */
+/* SFS_ShrinkPartition - shrink the SmartFileSystem to a smaller      */
+/* cylinder range.  EXPERIMENTAL - writes filesystem metadata.        */
+/*                                                                     */
+/* Mirror of SFS_GrowPartition's proven machinery, direction inverted: */
+/*                                                                     */
+/*   1. TAIL-FREE GATE over [new_totalblocks, totalblocks): the only   */
+/*     allocated block allowed there is the old end root (replaced     */
+/*     here).  The new end root position (new_totalblocks-1) must be   */
+/*     free.  Anything else = clean refusal.                           */
+/*   2. v1 requires the whole bitmap (at its current bitmapbase, with  */
+/*     the new count) to lie below the new end root - true for every   */
+/*     normally-formatted volume; only strategy-B-grown volumes have   */
+/*     a relocated (high) bitmap, and those are refused.               */
+/*   3. PRE-COMMIT edits only ADD used-marks (slack tail of the last   */
+/*     kept bitmap block + the new end root's bit): a crash/power-loss */
+/*     before the start-root commit leaves a disk the OLD filesystem   */
+/*     state reads safely.  Freeing the truncated bitmap blocks' bits  */
+/*     happens post-commit (non-fatal), as do zeroing the old end      */
+/*     roots (warm-reboot stale-DosEnvec protection, same as grow) and */
+/*     the fsRootInfo.freeblocks recount.                              */
+/*                                                                     */
+/* Write order: seal/mark bitmap -> new end root at new_totalblocks-1  */
+/* (seqnum+1) -> START ROOT at block 0 (seqnum+2) = ATOMIC COMMIT ->   */
+/* free truncated bitmap bits -> zero old end root(s) -> recount        */
+/* freeblocks into the OBJC block -> verify.  Rollback restores the    */
+/* pre-commit bitmap edits; the caller writes the RDB only on success. */
+/* ================================================================== */
+
+BOOL SFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
+                         const struct PartInfo *pi, ULONG old_high_cyl,
+                         char *err_buf,
+                         FFS_ProgressFn progress_fn, void *progress_ud)
+{
+#define SFS_SPROG(msg) do { if (progress_fn) progress_fn(progress_ud,(msg)); } while(0)
+#define SFS_SHR_MAX_MOD 8
+    UBYTE  scratch[512];
+    UBYTE *buf_root0 = NULL, *buf_orig0 = NULL, *buf_newend = NULL;
+    UBYTE *buf_work  = NULL, *buf_read  = NULL;
+    UBYTE *mod_buf[SFS_SHR_MAX_MOD], *mod_orig[SFS_SHR_MAX_MOD];
+    ULONG  mod_idx[SFS_SHR_MAX_MOD];     /* bitmap block INDEX (k) */
+    int    mod_written[SFS_SHR_MAX_MOD];
+    ULONG  num_mod = 0;
+    BOOL   ok = FALSE, did_inhibit = FALSE;
+    int    root0_written = 0;
+    char   inh_name[44];
+    ULONG  i, k;
+
+    for (i = 0; i < SFS_SHR_MAX_MOD; i++) {
+        mod_buf[i] = mod_orig[i] = NULL;
+        mod_idx[i] = 0xFFFFFFFFUL; mod_written[i] = 0;
+    }
+
+    ULONG heads   = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    ULONG sectors = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    if (heads == 0 || sectors == 0) {
+        sprintf(err_buf, GS(MSG_SFS_INVALID_GEOMETRY),
+                (unsigned long)heads, (unsigned long)sectors);
+        return FALSE;
+    }
+    ULONG phys_per_lb = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
+    ULONG phys_base   = pi->low_cyl * heads * sectors * phys_per_lb;
+
+    if (!BlockDev_ReadBlock(bd, phys_base, scratch)) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_BLOCK0),
+                (unsigned long)phys_base);
+        return FALSE;
+    }
+    if (sfs_getl(scratch, SFS_RB_ID) != SFS_ROOT_ID) {
+        sprintf(err_buf, GS(MSG_SFS_BLOCK0_BAD_ID),
+                (unsigned long)sfs_getl(scratch, SFS_RB_ID),
+                (unsigned long)SFS_ROOT_ID,
+                (unsigned long)phys_base,
+                (unsigned long)pi->low_cyl,
+                (unsigned long)heads,
+                (unsigned long)sectors);
+        return FALSE;
+    }
+    ULONG sfs_blocksize = sfs_getl(scratch, SFS_RB_BLOCKSIZE);
+    if (sfs_blocksize < 512 || (sfs_blocksize & (sfs_blocksize - 1)) ||
+        (sfs_blocksize % 512) != 0) {
+        sprintf(err_buf, GS(MSG_SFS_BLOCKSIZE_INVALID),
+                (unsigned long)sfs_blocksize);
+        return FALSE;
+    }
+    ULONG sfs_phys = sfs_blocksize / 512;
+
+    buf_root0  = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
+    buf_orig0  = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
+    buf_newend = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
+    buf_work   = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
+    buf_read   = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC);
+    if (!buf_root0 || !buf_orig0 || !buf_newend || !buf_work || !buf_read) {
+        sprintf(err_buf, GS(MSG_SFS_OOM_BUFFERS), (unsigned long)sfs_blocksize);
+        goto done;
+    }
+
+    /* Inhibit BEFORE reading the root, exactly like the grow: the seqnum
+       on disk must be final so no SFS flush can race our root writes. */
+    SFS_SPROG(GS(MSG_SFS_INHIBITING));
+    if (pi->drive_name[0]) {
+        DP_SNPRINTF(inh_name, "%s:", pi->drive_name);
+        if (Inhibit((STRPTR)inh_name, DOSTRUE)) did_inhibit = TRUE;
+    }
+
+    /* ---- start root ---- */
+    if (!sfs_read_block(bd, phys_base, 0, sfs_phys, buf_root0)) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_READ_ROOT0)); goto done;
+    }
+    if (!sfs_verify_checksum(buf_root0, sfs_blocksize)) {
+        sprintf(err_buf, GS(MSG_SFS_ROOT0_BAD_CHECKSUM)); goto done;
+    }
+    if (sfs_getw(buf_root0, SFS_RB_VERSION) != 3) {
+        sprintf(err_buf, GS(MSG_SFS_ROOT_BAD_VERSION),
+                (unsigned)sfs_getw(buf_root0, SFS_RB_VERSION)); goto done;
+    }
+    if (sfs_getl(buf_root0, SFS_RB_OWNBLOCK) != 0) {
+        sprintf(err_buf, GS(MSG_SFS_ROOT0_BAD_OWNBLOCK),
+                (unsigned long)sfs_getl(buf_root0, SFS_RB_OWNBLOCK)); goto done;
+    }
+    ULONG totalblocks = sfs_getl(buf_root0, SFS_RB_TOTALBLOCKS);
+    ULONG lastbyteh   = sfs_getl(buf_root0, SFS_RB_LASTBYTEH);
+    ULONG lastbyte_lo = sfs_getl(buf_root0, SFS_RB_LASTBYTE);
+    ULONG bitmapbase  = sfs_getl(buf_root0, SFS_RB_BITMAPBASE);
+    ULONG rootobj     = sfs_getl(buf_root0, SFS_RB_ROOTOBJ);
+    UWORD seq_start   = sfs_getw(buf_root0, SFS_RB_SEQNUM);
+    for (k = 0; k < sfs_blocksize; k++) buf_orig0[k] = buf_root0[k];
+
+    /* ---- old end root -> seqnum base (same rule as grow) ---- */
+    SFS_SPROG(GS(MSG_SFS_READING_END_ROOT));
+    UWORD new_seqnum = seq_start;
+    if (sfs_read_block(bd, phys_base, totalblocks - 1, sfs_phys, buf_read) &&
+        sfs_verify_checksum(buf_read, sfs_blocksize) &&
+        sfs_getl(buf_read, SFS_RB_ID) == SFS_ROOT_ID &&
+        sfs_getw(buf_read, SFS_RB_VERSION) == 3 &&
+        sfs_getl(buf_read, SFS_RB_OWNBLOCK) == (totalblocks - 1)) {
+        UWORD seq_end = sfs_getw(buf_read, SFS_RB_SEQNUM);
+        if ((UWORD)(seq_end - seq_start) < 0x8000u)
+            new_seqnum = seq_end;
+    }
+
+    /* ---- sizes ---- */
+    ULONG old_ncyl = (old_high_cyl >= pi->low_cyl)
+                     ? (old_high_cyl - pi->low_cyl + 1) : 1;
+    ULONG cyl_diff = old_high_cyl - pi->high_cyl;
+    ULONG bpc      = (old_ncyl > 0 && totalblocks > 0)
+                     ? (totalblocks / old_ncyl) : 0;
+    if (bpc == 0 || cyl_diff == 0) {
+        sprintf(err_buf, GS(MSG_SFS_TOTALBLOCKS_SMALL),
+                (unsigned long)totalblocks);
+        goto done;
+    }
+    ULONG delta_sfs       = cyl_diff * bpc;
+    ULONG new_totalblocks = (delta_sfs < totalblocks)
+                            ? totalblocks - delta_sfs : 0;
+    ULONG new_lastbyteh, new_lastbyte_lo;
+    {
+        UQUAD old_lb = ((UQUAD)lastbyteh << 32) | (UQUAD)lastbyte_lo;
+        UQUAD new_lb = old_lb - (UQUAD)delta_sfs * (UQUAD)sfs_blocksize;
+        new_lastbyteh   = (ULONG)(new_lb >> 32);
+        new_lastbyte_lo = (ULONG)(new_lb & 0xFFFFFFFFUL);
+    }
+
+    ULONG bib     = (sfs_blocksize - (ULONG)SFS_BM_HEADER_SIZE) * 8;
+    ULONG old_bmb = (totalblocks     + bib - 1) / bib;
+    ULONG new_bmb = (new_totalblocks + bib - 1) / bib;
+
+    if (new_totalblocks < 8 || new_totalblocks <= bitmapbase + new_bmb) {
+        sprintf(err_buf, GS(MSG_FFS_SHR_TOO_SMALL_FMT),
+                (unsigned long)new_totalblocks);
+        goto done;
+    }
+    /* v1: the whole (new) bitmap must sit below the new end root. */
+    if (bitmapbase + new_bmb > new_totalblocks - 1) {
+        sprintf(err_buf, GS(MSG_SFS_SHR_BITMAP_HIGH));
+        goto done;
+    }
+
+    /* ---- TAIL-FREE GATE + new-end-root target check ---- */
+    SFS_SPROG(GS(MSG_PFS_PROG_SHR_VERIFY));
+    {
+        ULONG k_lo = (new_totalblocks - 1) / bib;   /* covers target too */
+        for (k = k_lo; k < old_bmb; k++) {
+            if (!sfs_read_block(bd, phys_base, bitmapbase + k, sfs_phys,
+                                buf_read)) {
+                sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                        (unsigned long)(bitmapbase + k));
+                goto done;
+            }
+            if (sfs_getl(buf_read, 0) != SFS_BITMAP_ID ||
+                !sfs_verify_checksum(buf_read, sfs_blocksize)) {
+                sprintf(err_buf, GS(MSG_SI_BM_BAD_FMT),
+                        (unsigned long)(bitmapbase + k));
+                goto done;
+            }
+            ULONG base = k * bib;
+            /* new end root target must be free */
+            if (new_totalblocks - 1 >= base &&
+                new_totalblocks - 1 < base + bib &&
+                !sfs_bm_is_free(buf_read, base, new_totalblocks - 1)) {
+                sprintf(err_buf, GS(MSG_FFS_SHR_TARGET_USED_FMT),
+                        (unsigned long)(new_totalblocks - 1));
+                goto done;
+            }
+            for (ULONG b = base; b < base + bib && b < totalblocks; b++) {
+                if (b < new_totalblocks) continue;
+                if (b == totalblocks - 1) continue;      /* old end root */
+                if (!sfs_bm_is_free(buf_read, base, b)) {
+                    sprintf(err_buf, GS(MSG_FFS_SHR_TAIL_USED_FMT),
+                            (unsigned long)b);
+                    goto done;
+                }
+            }
+        }
+    }
+
+    /* ---- helper: fetch (read+save) a modifiable bitmap block ---- */
+    /* (inline loop, C89-ish: find existing slot or load a new one)   */
+#define SFS_SHR_GETMOD(kidx, outp)                                        \
+    do {                                                                  \
+        ULONG _m;                                                         \
+        (outp) = NULL;                                                    \
+        for (_m = 0; _m < num_mod; _m++)                                  \
+            if (mod_idx[_m] == (kidx)) { (outp) = mod_buf[_m]; break; }   \
+        if (!(outp) && num_mod < SFS_SHR_MAX_MOD) {                       \
+            mod_buf[num_mod]  = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC); \
+            mod_orig[num_mod] = (UBYTE *)AllocVec(sfs_blocksize, MEMF_PUBLIC); \
+            if (mod_buf[num_mod] && mod_orig[num_mod] &&                  \
+                sfs_read_block(bd, phys_base, bitmapbase + (kidx),        \
+                               sfs_phys, mod_buf[num_mod])) {             \
+                ULONG _j;                                                 \
+                for (_j = 0; _j < sfs_blocksize; _j++)                    \
+                    mod_orig[num_mod][_j] = mod_buf[num_mod][_j];         \
+                mod_idx[num_mod] = (kidx);                                \
+                (outp) = mod_buf[num_mod];                                \
+                num_mod++;                                                \
+            }                                                             \
+        }                                                                 \
+    } while (0)
+
+    /* ---- PRE-COMMIT bitmap edits: only ADD used-marks ---- */
+    SFS_SPROG(GS(MSG_PFS_PROG_SHR_SEAL));
+    {
+        UBYTE *mb;
+        /* slack tail of the last kept bitmap block */
+        ULONG lastk = new_bmb - 1;
+        SFS_SHR_GETMOD(lastk, mb);
+        if (!mb) { sprintf(err_buf, GS(MSG_SFS_OOM_BMB_CACHE)); goto done; }
+        {
+            ULONG base = lastk * bib;
+            for (ULONG b = new_totalblocks; b < base + bib; b++)
+                sfs_bm_set_used(mb, base, b);
+        }
+        /* new end root position */
+        {
+            ULONG kidx = (new_totalblocks - 1) / bib;
+            SFS_SHR_GETMOD(kidx, mb);
+            if (!mb) { sprintf(err_buf, GS(MSG_SFS_OOM_BMB_CACHE)); goto done; }
+            sfs_bm_set_used(mb, kidx * bib, new_totalblocks - 1);
+        }
+        /* write all modified blocks */
+        for (i = 0; i < num_mod; i++) {
+            sfs_set_checksum(mod_buf[i], sfs_blocksize);
+            if (!sfs_write_block(bd, phys_base, bitmapbase + mod_idx[i],
+                                 sfs_phys, mod_buf[i])) {
+                sprintf(err_buf, GS(MSG_SI_BM_READ_FMT),
+                        (unsigned long)(bitmapbase + mod_idx[i]));
+                goto done;
+            }
+            mod_written[i] = 1;
+        }
+    }
+
+    /* ---- new end root (seqnum+1) ---- */
+    SFS_SPROG(GS(MSG_SFS_WRITING_NEW_END_ROOT));
+    for (k = 0; k < sfs_blocksize; k++) buf_newend[k] = buf_root0[k];
+    sfs_setl(buf_newend, SFS_RB_OWNBLOCK,    new_totalblocks - 1);
+    sfs_setl(buf_newend, SFS_RB_TOTALBLOCKS, new_totalblocks);
+    sfs_setl(buf_newend, SFS_RB_LASTBYTEH,   new_lastbyteh);
+    sfs_setl(buf_newend, SFS_RB_LASTBYTE,    new_lastbyte_lo);
+    sfs_setw(buf_newend, SFS_RB_SEQNUM, (UWORD)(new_seqnum + 1));
+    sfs_set_checksum(buf_newend, sfs_blocksize);
+    if (!sfs_write_block(bd, phys_base, new_totalblocks - 1, sfs_phys,
+                         buf_newend)) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_END_ROOT),
+                (unsigned long)(new_totalblocks - 1));
+        goto done;
+    }
+
+    /* ---- start root (seqnum+2) = ATOMIC COMMIT ---- */
+    SFS_SPROG(GS(MSG_SFS_WRITING_START_ROOT));
+    sfs_setl(buf_root0, SFS_RB_TOTALBLOCKS, new_totalblocks);
+    sfs_setl(buf_root0, SFS_RB_LASTBYTEH,   new_lastbyteh);
+    sfs_setl(buf_root0, SFS_RB_LASTBYTE,    new_lastbyte_lo);
+    sfs_setw(buf_root0, SFS_RB_SEQNUM, (UWORD)(new_seqnum + 2));
+    sfs_set_checksum(buf_root0, sfs_blocksize);
+    if (!sfs_write_block(bd, phys_base, 0, sfs_phys, buf_root0)) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_START_ROOT), pi->drive_name);
+        goto done;
+    }
+    root0_written = 1;
+
+    /* ================= COMMITTED - everything below is best-effort ==== */
+
+    /* free the truncated bitmap blocks (they were metadata, now space) */
+    if (old_bmb > new_bmb) {
+        UBYTE *mb;
+        for (ULONG b = bitmapbase + new_bmb; b < bitmapbase + old_bmb; b++) {
+            ULONG kidx = b / bib;
+            SFS_SHR_GETMOD(kidx, mb);
+            if (mb) sfs_bm_set_free(mb, kidx * bib, b);
+        }
+        for (i = 0; i < num_mod; i++) {
+            sfs_set_checksum(mod_buf[i], sfs_blocksize);
+            (void)sfs_write_block(bd, phys_base, bitmapbase + mod_idx[i],
+                                  sfs_phys, mod_buf[i]);
+        }
+    }
+
+    /* zero the old end root(s) - warm-reboot stale-DosEnvec protection,
+       ported from the grow (non-fatal) */
+    SFS_SPROG(GS(MSG_SFS_INVALIDATING_OLD_ROOT));
+    for (k = 0; k < sfs_blocksize; k++) buf_work[k] = 0;
+    (void)sfs_write_block(bd, phys_base, totalblocks - 1, sfs_phys, buf_work);
+    if (bitmapbase > 0 && (bitmapbase - 1) != (totalblocks - 1) &&
+        (bitmapbase - 1) != (new_totalblocks - 1)) {
+        ULONG older = bitmapbase - 1;
+        if (sfs_read_block(bd, phys_base, older, sfs_phys, buf_read) &&
+            sfs_getl(buf_read, SFS_RB_ID) == SFS_ROOT_ID &&
+            sfs_verify_checksum(buf_read, sfs_blocksize) &&
+            sfs_getl(buf_read, SFS_RB_OWNBLOCK) == older)
+            (void)sfs_write_block(bd, phys_base, older, sfs_phys, buf_work);
+    }
+
+    /* recount free blocks into fsRootInfo.freeblocks (non-fatal) */
+    SFS_SPROG(GS(MSG_SFS_UPDATING_FREE_CACHE));
+    {
+        ULONG freeblocks_off = sfs_blocksize - (ULONG)SFS_RI_FREEBLOCKS_FROM_END;
+        ULONG counted = 0, k2, j2;
+        for (k2 = 0; k2 < new_bmb; k2++) {
+            const ULONG *bm32;
+            ULONG n_ul = (sfs_blocksize - (ULONG)SFS_BM_HEADER_SIZE) / 4;
+            if (!sfs_read_block(bd, phys_base, bitmapbase + k2, sfs_phys,
+                                buf_work))
+                break;
+            bm32 = (const ULONG *)(buf_work + SFS_BM_HEADER_SIZE);
+            for (j2 = 0; j2 < n_ul; j2++) {
+                ULONG w = bm32[j2];
+                w = w - ((w >> 1) & 0x55555555UL);
+                w = (w & 0x33333333UL) + ((w >> 2) & 0x33333333UL);
+                w = (w + (w >> 4)) & 0x0F0F0F0FUL;
+                counted += (w * 0x01010101UL) >> 24;
+            }
+        }
+        if (k2 == new_bmb && rootobj != 0 && rootobj < new_totalblocks) {
+            if (sfs_read_block(bd, phys_base, rootobj, sfs_phys, buf_read) &&
+                sfs_verify_checksum(buf_read, sfs_blocksize) &&
+                sfs_getl(buf_read, 0) == SFS_OBJC_ID) {
+                sfs_setl(buf_read, freeblocks_off, counted);
+                sfs_set_checksum(buf_read, sfs_blocksize);
+                (void)sfs_write_block(bd, phys_base, rootobj, sfs_phys,
+                                      buf_read);
+            }
+        }
+    }
+
+    /* readback verify the commit */
+    SFS_SPROG(GS(MSG_SFS_VERIFYING_WRITES));
+    if (!sfs_read_block(bd, phys_base, 0, sfs_phys, buf_read) ||
+        sfs_getl(buf_read, SFS_RB_TOTALBLOCKS) != new_totalblocks) {
+        sprintf(err_buf, GS(MSG_SFS_CANNOT_WRITE_START_ROOT), pi->drive_name);
+        goto done;
+    }
+
+    ok = TRUE;
+
+done:
+    if (!ok && !root0_written) {
+        /* roll back the pre-commit bitmap edits */
+        for (i = 0; i < num_mod; i++)
+            if (mod_written[i] && mod_orig[i])
+                (void)sfs_write_block(bd, phys_base, bitmapbase + mod_idx[i],
+                                      sfs_phys, mod_orig[i]);
+    }
+    if (did_inhibit) {
+        /* flush cycle like the grow: Delay then release */
+        Delay(50);
+        Inhibit((STRPTR)inh_name, DOSFALSE);
+    }
+    if (buf_root0)  FreeVec(buf_root0);
+    if (buf_orig0)  FreeVec(buf_orig0);
+    if (buf_newend) FreeVec(buf_newend);
+    if (buf_work)   FreeVec(buf_work);
+    if (buf_read)   FreeVec(buf_read);
+    for (i = 0; i < SFS_SHR_MAX_MOD; i++) {
+        if (mod_buf[i])  FreeVec(mod_buf[i]);
+        if (mod_orig[i]) FreeVec(mod_orig[i]);
+    }
+    return ok;
+#undef SFS_SHR_GETMOD
+#undef SFS_SHR_MAX_MOD
+#undef SFS_SPROG
+}

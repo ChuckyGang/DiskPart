@@ -1636,10 +1636,11 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
         RDB_FreeCode(&s_rdb); BlockDev_Close(bd); return RETURN_ERROR;
     }
 
-    /* Filesystem-by-filesystem rollout: FFS + PFS3 so far, SFS follows. */
+    /* Full rollout: FFS, PFS3 and SFS - same set as GROW. */
     int fskind;
     if      (FFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_FFS;
     else if (PFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_PFS;
+    else if (SFS_IsSupportedType(pi->dos_type)) fskind = CLI_GROW_SFS;
     else {
         DP_SNPRINTF(outbuf, GS(MSG_SHR_UNSUPPORTED_FMT),
                 pi->drive_name, (unsigned long)pi->dos_type);
@@ -1664,6 +1665,8 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
     memset(&rep, 0, sizeof(rep)); scanerr[0] = '\0';
     if (!((fskind == CLI_GROW_PFS)
           ? PFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr)
+          : (fskind == CLI_GROW_SFS)
+          ? SFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr)
           : FFS_ShrinkInfo(bd, &s_rdb, pi, &rep, scanerr))) {
         DP_SNPRINTF(outbuf, GS(MSG_SHR_FAIL_FMT), scanerr);
         cli_puts(outbuf);
@@ -1743,6 +1746,9 @@ static LONG cmd_shrink(const char *devname, ULONG unit, BOOL force,
 
     ok = (fskind == CLI_GROW_PFS)
          ? PFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
+                               outbuf, cli_grow_progress, NULL)
+         : (fskind == CLI_GROW_SFS)
+         ? SFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
                                outbuf, cli_grow_progress, NULL)
          : FFS_ShrinkPartition(bd, &s_rdb, pi, old_hi,
                                outbuf, cli_grow_progress, NULL);
