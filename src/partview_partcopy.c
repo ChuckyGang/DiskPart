@@ -312,7 +312,7 @@ static void pcp_progress(void *ud, ULONG done, ULONG total, const char *phase)
     ProgressWin_Callback(ud, done, total);
 }
 
-void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
+BOOL copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
                             struct RDBInfo *rdb, struct PartInfo *src,
                             const char *cur_devname, ULONG cur_unit)
 {
@@ -324,25 +324,25 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
     struct PartInfo *dpi;
     char   body[400], err[128];
 
-    if (!src) { pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PV_PC_NO_SEL)); return; }
-    if (!bd)  { pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_IMG_DEV_NOT_ACCESSIBLE)); return; }
+    if (!src) { pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PV_PC_NO_SEL)); return FALSE; }
+    if (!bd)  { pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_IMG_DEV_NOT_ACCESSIBLE)); return FALSE; }
 
-    if (!pcp_pick_dest_disk(dest_devname, &dest_unit)) return;
+    if (!pcp_pick_dest_disk(dest_devname, &dest_unit)) return FALSE;
 
     dest = BlockDev_Open(dest_devname, dest_unit);
     if (!dest) {
         DP_SNPRINTF(body, GS(MSG_DC_OPEN_FAIL_FMT), dest_devname);
         pcp_msg(win, GS(MSG_PCP_TITLE), body);
-        return;
+        return FALSE;
     }
     if (dest->block_size != bd->block_size) {
         pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_DC_BLOCKSIZE_MISMATCH));
-        BlockDev_Close(dest); return;
+        BlockDev_Close(dest); return FALSE;
     }
     memset(&drdb, 0, sizeof(drdb));
     if (!RDB_Read(dest, &drdb) || !drdb.valid) {
         pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_RDB));
-        BlockDev_Close(dest); return;
+        BlockDev_Close(dest); return FALSE;
     }
 
 
@@ -350,7 +350,7 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
     if (!src->sectors) src->sectors = rdb->sectors;
 
     dpi_idx = pcp_pick_partition(win, &drdb, dest_devname);
-    if (dpi_idx < 0) { RDB_FreeCode(&drdb); BlockDev_Close(dest); return; }
+    if (dpi_idx < 0) { RDB_FreeCode(&drdb); BlockDev_Close(dest); return FALSE; }
 
     if (dpi_idx == PCP_CREATE_NEW) {
         /* Create a partition in the DESTINATION disk's geometry, sized to
@@ -369,12 +369,12 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
 
         if (drdb.num_parts >= MAX_PARTITIONS || cyl_span == 0) {
             pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_PARTS));
-            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return FALSE;
         }
         if (!PartClone_FindGap(&drdb, cyl_span, drdb.heads, drdb.sectors, &low)) {
             DP_SNPRINTF(body, GS(MSG_PC_NOGAP_FMT), (unsigned long)cyl_span);
             pcp_msg(win, GS(MSG_PCP_TITLE), body);
-            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return FALSE;
         }
         dpi = &drdb.parts[drdb.num_parts];
         memset(dpi, 0, sizeof(*dpi));
@@ -401,7 +401,7 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
                                          dpi->heads, dpi->sectors, -1,
                                          err, sizeof(err))) {
             pcp_msg(win, GS(MSG_PCP_TITLE), err);
-            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return FALSE;
         }
         drdb.num_parts++;
     } else {
@@ -411,7 +411,7 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
             dest_unit == cur_unit &&
             dpi->low_cyl == src->low_cyl && dpi->high_cyl == src->high_cyl) {
             pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PC_CLONE_SAME));
-            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return FALSE;
         }
         /* overwrite in place: destination footprint unchanged (the engine
            checks it is large enough / exact-size for FFS). */
@@ -427,10 +427,11 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         es.es_TextFormat = (UBYTE *)body;
         es.es_GadgetFormat = (UBYTE *)GS(MSG_PCP_CONFIRM_GADGETS);
         if (EasyRequest(win, &es, NULL) != 1) {
-            RDB_FreeCode(&drdb); BlockDev_Close(dest); return;
+            RDB_FreeCode(&drdb); BlockDev_Close(dest); return FALSE;
         }
     }
 
+    BOOL wrote = FALSE;
     {
         static struct ProgressWin prog;
         BOOL ok;
@@ -443,13 +444,17 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
             if (!RDB_Write(dest, &drdb)) {
                 ok = FALSE;
                 strncpy(err, "RDB write failed", sizeof(err) - 1);
+            } else {
+                wrote = TRUE;
             }
         }
         ProgressWin_Close(&prog);
         if (ok && dpi_idx == PCP_CREATE_NEW)
-            DP_SNPRINTF(body, GS(MSG_PCP_NEW_OK_FMT), dpi->drive_name);
+            DP_SNPRINTF(body, GS(MSG_PCP_NEW_OK_FMT),
+                        dpi->drive_name, dpi->drive_name);
         else if (ok)
-            DP_SNPRINTF(body, GS(MSG_PCP_OK_FMT), src->drive_name, dpi->drive_name);
+            DP_SNPRINTF(body, GS(MSG_PCP_OK_FMT),
+                        src->drive_name, dpi->drive_name, dpi->drive_name);
         else
             DP_SNPRINTF(body, GS(MSG_PCP_FAIL_FMT), err);
         pcp_msg(win, GS(MSG_PCP_TITLE), body);
@@ -457,4 +462,5 @@ void copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
 
     RDB_FreeCode(&drdb);
     BlockDev_Close(dest);
+    return wrote;
 }

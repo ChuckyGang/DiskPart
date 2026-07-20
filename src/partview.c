@@ -2393,7 +2393,11 @@ BOOL partview_run(const char *devname, ULONG unit)
                             struct PartInfo *sp =
                                 (sel >= 0 && rdb && sel < (WORD)rdb->num_parts)
                                 ? &rdb->parts[sel] : NULL;
-                            copy_partition_to_disk(win, bd, rdb, sp, devname, unit);
+                            /* The clone writes another disk's RDB; a reboot
+                               is needed for its new partition to mount. */
+                            if (copy_partition_to_disk(win, bd, rdb, sp,
+                                                       devname, unit))
+                                needs_reboot = TRUE;
                         }
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 23) {
                             if (sel >= 0 && bd && rdb && sel < (WORD)rdb->num_parts)
