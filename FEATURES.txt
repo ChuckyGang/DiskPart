@@ -84,7 +84,13 @@ scripting interface.
    the grow-then-reboot path).  PFS and SFS grow still require a reboot.
  * SHRINK (EXPERIMENTAL): all three GROW filesystems supported -
    FFS/OFS, PFS3 and SFS.  Shrinks a partition and its filesystem in
-   one step.  CLI:
+   one step.
+   GUI: drag a partition's end edge left in the map, or enter a smaller
+   size in the Edit dialog - the real shrink flow takes over (allocation
+   scan, confirmation, filesystem surgery, RDB written immediately).
+   If the requested size is below the data floor, a requester states the
+   minimum size and offers to shrink to that minimum instead.  Partitions
+   with other filesystems keep the old destructive-resize warning.  CLI:
    SHRINK=<drive> SIZE=<size|-amount|MIN> (target size, or relative
    with a leading '-'); script: SHRINK <drive> <size|-amount|MIN>
    [NOUNMOUNT].  Refuses unless every allocated block in the removed range

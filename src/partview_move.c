@@ -24,6 +24,7 @@
 #include "version.h"
 #include "ffsresize.h"
 #include "pfsresize.h"
+#include "shrinkinfo.h"
 #include "sfsresize.h"
 #include "partmove.h"
 #include "partview_internal.h"
@@ -1075,3 +1076,232 @@ int offer_sfs_grow(struct Window *win, struct BlockDev *bd,
     return GROW_NONE;
 }
 
+
+/* ================================================================== */
+/* offer_shrink - GUI shrink flow, shared by the partition-map drag    */
+/* and the Edit dialog.  Called after the user has set a SMALLER       */
+/* high_cyl (pi->high_cyl = requested new value, old_lo/old_hi = the   */
+/* values before the edit).                                            */
+/*                                                                     */
+/* Returns GROW_NONE when this is not a plain supported shrink (grown, */
+/* low_cyl moved, or not FFS/PFS3/SFS) - the caller falls back to its  */
+/* legacy handling.  On GROW_ABORTED pi->high_cyl has been restored.   */
+/*                                                                     */
+/* Flow per the user's spec: scan first; if the requested size is      */
+/* below the data floor, a requester states the minimum ("XX MB is     */
+/* minimum") with yes/no to shrink to that minimum instead.  On        */
+/* success the RDB is written IMMEDIATELY (all filesystems - unlike    */
+/* the FFS grow's deferred write): the GUI shrink is one committed     */
+/* operation, with no window where a discard could strand a shrunk     */
+/* filesystem behind a stale on-disk envelope.                         */
+/* ================================================================== */
+int offer_shrink(struct Window *win, struct BlockDev *bd,
+                 struct RDBInfo *rdb, struct PartInfo *pi,
+                 ULONG old_lo, ULONG old_hi)
+{
+    struct EasyStruct es;
+    struct ShrinkReport rep;
+    char  errbuf[256], umerr[80], rmerr[80], mnt[40];
+    char  sz1[20], sz2[20];
+    static char body[320];
+    int   fskind;                 /* 1=FFS 2=PFS 3=SFS */
+    BOOL  no_unmount = FALSE, can_remount;
+    ULONG requested, new_hi, ncyl_old, bpc_fs, min_cyls, min_high;
+    ULONG heads, sectors, blks_cyl;
+    int   rc = GROW_NEED_REBOOT;
+
+    if (pi->high_cyl >= old_hi) return GROW_NONE;
+    if (pi->low_cyl != old_lo)  return GROW_NONE;   /* moved start: legacy */
+    if (!bd) return GROW_NONE;
+    if      (FFS_IsSupportedType(pi->dos_type)) fskind = 1;
+    else if (PFS_IsSupportedType(pi->dos_type)) fskind = 2;
+    else if (SFS_IsSupportedType(pi->dos_type)) fskind = 3;
+    else return GROW_NONE;
+
+    umerr[0] = rmerr[0] = '\0';
+    heads    = pi->heads   > 0 ? pi->heads   : rdb->heads;
+    sectors  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    blks_cyl = heads * sectors;
+    if (blks_cyl == 0) return GROW_NONE;
+
+    /* The scanners size the volume from pi->high_cyl - restore the OLD
+       value for the scan, keep the user's request aside. */
+    requested    = pi->high_cyl;
+    pi->high_cyl = old_hi;
+    ncyl_old     = old_hi - pi->low_cyl + 1;
+
+    memset(&rep, 0, sizeof(rep)); errbuf[0] = '\0';
+    {
+        BOOL sok = (fskind == 2) ? PFS_ShrinkInfo(bd, rdb, pi, &rep, errbuf)
+                 : (fskind == 3) ? SFS_ShrinkInfo(bd, rdb, pi, &rep, errbuf)
+                 :                 FFS_ShrinkInfo(bd, rdb, pi, &rep, errbuf);
+        if (!sok) {
+            DP_SNPRINTF(body, GS(MSG_PV_SHR_SCANFAIL_FMT),
+                        pi->drive_name, errbuf);
+            es.es_StructSize   = sizeof(es);
+            es.es_Flags        = 0;
+            es.es_Title        = (UBYTE *)GS(MSG_PV_SHR_TITLE);
+            es.es_TextFormat   = (UBYTE *)body;
+            es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+            EasyRequest(win, &es, NULL);
+            return GROW_ABORTED;              /* pi->high_cyl already old */
+        }
+    }
+    bpc_fs = (ncyl_old > 0) ? rep.total_blocks / ncyl_old : 0;
+    if (bpc_fs == 0) { return GROW_ABORTED; }
+    min_cyls = (rep.min_blocks + bpc_fs - 1) / bpc_fs;
+    if (min_cyls == 0) min_cyls = 1;
+    min_high = pi->low_cyl + min_cyls - 1;
+
+    if (min_high >= old_hi) {
+        DP_SNPRINTF(body, GS(MSG_PV_SHR_ATMIN_FMT), pi->drive_name);
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)GS(MSG_PV_SHR_TITLE);
+        es.es_TextFormat   = (UBYTE *)body;
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+        EasyRequest(win, &es, NULL);
+        return GROW_ABORTED;
+    }
+
+    if (requested < min_high) {
+        /* Below the floor: state the minimum, offer it as the size. */
+        FormatSize((UQUAD)min_cyls * blks_cyl * 512UL, sz1);
+        DP_SNPRINTF(body, GS(MSG_PV_SHR_MIN_FMT),
+                    pi->drive_name, sz1, (unsigned long)min_high);
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)GS(MSG_PV_SHR_TITLE);
+        es.es_TextFormat   = (UBYTE *)body;
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_SHR_MIN_GADGETS);
+        if (EasyRequest(win, &es, NULL) != 1)
+            return GROW_ABORTED;
+        new_hi = min_high;
+    } else {
+        new_hi = requested;
+        FormatSize((UQUAD)(new_hi - pi->low_cyl + 1) * blks_cyl * 512UL, sz1);
+        FormatSize((UQUAD)(old_hi - new_hi) * blks_cyl * 512UL, sz2);
+        DP_SNPRINTF(body, GS(MSG_PV_SHR_CONFIRM_FMT),
+                    pi->drive_name, sz1, sz2);
+        es.es_StructSize   = sizeof(es);
+        es.es_Flags        = 0;
+        es.es_Title        = (UBYTE *)GS(MSG_PV_SHR_TITLE);
+        es.es_TextFormat   = (UBYTE *)body;
+        es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_SHR_GADGETS);
+        if (EasyRequest(win, &es, NULL) != 1)
+            return GROW_ABORTED;
+    }
+
+    pi->high_cyl = new_hi;
+    {
+        struct GrowProgUD prog_ud;
+        struct Window *prog_win;
+        BOOL result;
+
+        prog_win = grow_open_progress(win, GS(MSG_PV_SHR_PROG_TITLE),
+                                      &prog_ud, 16);
+
+        /* Offline like the CLI: unmount for every filesystem; a busy
+           volume gets the same shrink-in-place offer as the grow. */
+        grow_say(&prog_ud, GS(MSG_GROW_PROG_UNMOUNTING_FMT), pi->drive_name);
+        can_remount = UnmountDevice(pi->drive_name, umerr, sizeof(umerr));
+        if (!can_remount) {
+            struct EasyStruct offer_es;
+            static char offer_msg[256];
+            DP_SNPRINTF(offer_msg, GS(MSG_MOVE_BUSY_OFFER_FMT),
+                    pi->drive_name, umerr[0] ? umerr : GS(MSG_MOVE_IN_USE));
+            offer_es.es_StructSize   = sizeof(offer_es);
+            offer_es.es_Flags        = 0;
+            offer_es.es_Title        = (UBYTE *)GS(MSG_MOVE_BUSY_TITLE);
+            offer_es.es_TextFormat   = (UBYTE *)offer_msg;
+            offer_es.es_GadgetFormat = (UBYTE *)GS(MSG_MOVE_BUSY_OFFER_GADGETS);
+            if (EasyRequest(win, &offer_es, NULL) != 1) {
+                if (prog_win) CloseWindow(prog_win);
+                pi->high_cyl = old_hi;
+                return GROW_ABORTED;
+            }
+            no_unmount = TRUE;
+        }
+
+        result = (fskind == 2)
+                 ? PFS_ShrinkPartition(bd, rdb, pi, old_hi, errbuf,
+                                       ffs_grow_progress, &prog_ud)
+                 : (fskind == 3)
+                 ? SFS_ShrinkPartition(bd, rdb, pi, old_hi, errbuf,
+                                       ffs_grow_progress, &prog_ud)
+                 : FFS_ShrinkPartition(bd, rdb, pi, old_hi, errbuf,
+                                       ffs_grow_progress, &prog_ud);
+
+        if (result) {
+            struct EasyStruct ok_es;
+            static char ok_msg[512];
+            BOOL wrote_rdb;
+
+            /* Commit the new envelope NOW - the engines' reversibility
+               window closes here, exactly like the CLI. */
+            if (no_unmount) {
+                char inh[40];
+                DP_SNPRINTF(inh, "%s:", pi->drive_name);
+                Inhibit((STRPTR)inh, DOSTRUE);
+            }
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_WRITING_RDB), NULL);
+            wrote_rdb = RDB_Write(bd, rdb);
+
+            FormatSize((UQUAD)(new_hi - pi->low_cyl + 1) * blks_cyl * 512UL,
+                       sz1);
+            if (!wrote_rdb) {
+                rc = GROW_NEED_REBOOT;
+                DP_SNPRINTF(ok_msg, GS(MSG_PV_SHR_OK_RDBFAIL_FMT),
+                            pi->drive_name);
+            } else if (fskind == 1 && !no_unmount) {
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT),
+                         pi->drive_name);
+                if (MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr))) {
+                    grow_say(&prog_ud, GS(MSG_GROW_PROG_ONLINE), NULL);
+                    MaterializeVolume(mnt);
+                    rc = GROW_REMOUNTED;
+                    DP_SNPRINTF(ok_msg, GS(MSG_PV_SHR_OK_REMOUNT_FMT),
+                                pi->drive_name, sz1);
+                } else {
+                    rc = GROW_NEED_REBOOT;
+                    DP_SNPRINTF(ok_msg, GS(MSG_PV_SHR_OK_REBOOT_FMT),
+                                pi->drive_name, sz1);
+                }
+            } else {
+                rc = GROW_NEED_REBOOT;
+                DP_SNPRINTF(ok_msg, GS(MSG_PV_SHR_OK_REBOOT_FMT),
+                            pi->drive_name, sz1);
+            }
+            grow_say(&prog_ud, GS(MSG_GROW_PROG_DONE), NULL);
+            if (prog_win) CloseWindow(prog_win);
+
+            ok_es.es_StructSize   = sizeof(ok_es);
+            ok_es.es_Flags        = 0;
+            ok_es.es_Title        = (UBYTE *)GS(MSG_PV_SHR_TITLE);
+            ok_es.es_TextFormat   = (UBYTE *)ok_msg;
+            ok_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+            EasyRequest(win, &ok_es, NULL);
+        } else {
+            struct EasyStruct err_es;
+            static char full_msg[384];
+            /* Engine failed and rolled back - restore the size and (if we
+               unmounted) remount with the original envelope. */
+            pi->high_cyl = old_hi;
+            if (!no_unmount) {
+                grow_say(&prog_ud, GS(MSG_GROW_PROG_REMOUNTING_FMT),
+                         pi->drive_name);
+                MountPartition(bd, pi, mnt, rmerr, sizeof(rmerr));
+            }
+            if (prog_win) CloseWindow(prog_win);
+            rc = GROW_ABORTED;
+            DP_SNPRINTF(full_msg, GS(MSG_PV_SHR_FAIL_FMT), errbuf);
+            err_es.es_StructSize   = sizeof(err_es);
+            err_es.es_Flags        = 0;
+            err_es.es_Title        = (UBYTE *)GS(MSG_PV_SHR_TITLE);
+            err_es.es_TextFormat   = (UBYTE *)full_msg;
+            err_es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+            EasyRequest(win, &err_es, NULL);
+        }
+    }
+    return rc;
+}

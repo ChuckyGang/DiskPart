@@ -1213,8 +1213,20 @@
 #define MSG_PFS_PROG_SHR_ROOT        1207
 #define MSG_SFS_SHR_BITMAP_HIGH      1208
 #define MSG_SHR_NOT_SMALLER_FMT      1209
+#define MSG_PV_SHR_TITLE             1210
+#define MSG_PV_SHR_PROG_TITLE        1211
+#define MSG_PV_SHR_CONFIRM_FMT       1212
+#define MSG_PV_SHR_GADGETS           1213
+#define MSG_PV_SHR_MIN_FMT           1214
+#define MSG_PV_SHR_MIN_GADGETS       1215
+#define MSG_PV_SHR_ATMIN_FMT         1216
+#define MSG_PV_SHR_SCANFAIL_FMT      1217
+#define MSG_PV_SHR_OK_REMOUNT_FMT    1218
+#define MSG_PV_SHR_OK_REBOOT_FMT     1219
+#define MSG_PV_SHR_OK_RDBFAIL_FMT    1220
+#define MSG_PV_SHR_FAIL_FMT          1221
 
-#define MSG_COUNT 1210
+#define MSG_COUNT 1222
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2436,5 +2448,17 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1207 MSG_PFS_PROG_SHR_ROOT */ "Updating PFS rootblock (disksize/blocksfree)",
     /* 1208 MSG_SFS_SHR_BITMAP_HIGH */ "the SFS bitmap lies above the new end - shrink less (bitmap relocation is not supported)",
     /* 1209 MSG_SHR_NOT_SMALLER_FMT */ "SHRINK: %s: requested size is not smaller than the partition - nothing to do.\n",
+    /* 1210 MSG_PV_SHR_TITLE */ "Shrink Partition",
+    /* 1211 MSG_PV_SHR_PROG_TITLE */ "Shrinking partition",
+    /* 1212 MSG_PV_SHR_CONFIRM_FMT */ "Shrink \"%s\" to %s (freeing %s)?\n\nThe removed area was verified free of data.\nThe filesystem will be rewritten in place and\nthe RDB written immediately.",
+    /* 1213 MSG_PV_SHR_GADGETS */ "Shrink|Cancel",
+    /* 1214 MSG_PV_SHR_MIN_FMT */ "\"%s\" cannot shrink that far -\ndata pins the minimum size at %s\n(HighCyl %lu).\n\nShrink to that minimum instead?",
+    /* 1215 MSG_PV_SHR_MIN_GADGETS */ "Shrink to minimum|Cancel",
+    /* 1216 MSG_PV_SHR_ATMIN_FMT */ "\"%s\" is already at its minimum size -\nnothing can be reclaimed.",
+    /* 1217 MSG_PV_SHR_SCANFAIL_FMT */ "Cannot shrink \"%s\":\n%s",
+    /* 1218 MSG_PV_SHR_OK_REMOUNT_FMT */ "\"%s\" shrunk to %s and remounted -\navailable now.  The RDB has been written.",
+    /* 1219 MSG_PV_SHR_OK_REBOOT_FMT */ "\"%s\" shrunk to %s and the RDB written.\nReboot before using this volume.",
+    /* 1220 MSG_PV_SHR_OK_RDBFAIL_FMT */ "\"%s\": the filesystem was shrunk but the RDB\nwrite FAILED - use Write to retry, and do NOT\nreboot before it succeeds.",
+    /* 1221 MSG_PV_SHR_FAIL_FMT */ "Shrink failed:\n%s\n\nThe original size was restored.",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

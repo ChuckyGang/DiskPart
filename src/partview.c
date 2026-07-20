@@ -2555,6 +2555,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                     dbl_part = -1;
                                     {
                                         ULONG old_hi = rdb->parts[sel].high_cyl;
+                                        ULONG old_lo = rdb->parts[sel].low_cyl;
                                         if (partition_dialog(&rdb->parts[sel],
                                                              GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
                                             {
@@ -2564,6 +2565,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                            &rdb->parts[sel], old_hi);
                                             if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                            &rdb->parts[sel], old_hi);
+                                            if (g == GROW_NONE) g = offer_shrink(win, bd, rdb,
+                                                           &rdb->parts[sel], old_lo, old_hi);
                                             dirty        = TRUE;
                                             /* Clean FFS grow remounts live; else reboot. */
                                             if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
@@ -2735,6 +2738,27 @@ BOOL partview_run(const char *devname, ULONG unit)
                                    high_cyl grow only = safe; offer filesystem resize. */
                                 BOOL is_grow = (cur_lo == drag_orig_lo) &&
                                                (cur_hi  > drag_orig_hi);
+                                BOOL is_shrink = (cur_lo == drag_orig_lo) &&
+                                                 (cur_hi  < drag_orig_hi);
+                                int  sh = GROW_NONE;
+
+                                /* A plain end-shrink of an FFS/PFS3/SFS
+                                   partition goes through the real shrink
+                                   flow (scan + minimum requester + FS
+                                   surgery); anything it can't handle falls
+                                   back to the legacy destructive prompt. */
+                                if (is_shrink)
+                                    sh = offer_shrink(win, bd, rdb,
+                                            &rdb->parts[confirmed_part],
+                                            drag_orig_lo, drag_orig_hi);
+                                if (sh != GROW_NONE) {
+                                    if (sh != GROW_ABORTED) {
+                                        dirty = TRUE;
+                                        if (sh != GROW_REMOUNTED)
+                                            needs_reboot = TRUE;
+                                        refresh_all_gadgets(win, glist);
+                                    }
+                                } else {
 
                                 LONG r;
                                 if (is_grow) {
@@ -2782,6 +2806,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                                         needs_reboot = TRUE;
                                     }
                                 }
+                                }   /* end legacy (non-offer_shrink) path */
                             }
                             refresh_listview(win, lv_gad, rdb, sel);
                             draw_static(win, devname, unit, rdb, (bd ? bd->disk_brand : ""),
@@ -3009,6 +3034,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                             dbl_list_sel = -1;
                             if (sel < (WORD)rdb->num_parts && !part_is_mbr[sel]) {
                                 ULONG old_hi = rdb->parts[sel].high_cyl;
+                                ULONG old_lo = rdb->parts[sel].low_cyl;
                                 if (partition_dialog(&rdb->parts[sel],
                                                      GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
                                     {
@@ -3018,6 +3044,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                    &rdb->parts[sel], old_hi);
                                     if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                    &rdb->parts[sel], old_hi);
+                                    if (g == GROW_NONE) g = offer_shrink(win, bd, rdb,
+                                                   &rdb->parts[sel], old_lo, old_hi);
                                     dirty        = TRUE;
                                     if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;
                                     if (g != GROW_NONE) refresh_all_gadgets(win, glist);
@@ -3280,6 +3308,7 @@ BOOL partview_run(const char *devname, ULONG unit)
                     case GID_EDIT:
                         if (sel >= 0 && sel < (WORD)rdb->num_parts) {
                             ULONG old_hi = rdb->parts[sel].high_cyl;
+                            ULONG old_lo = rdb->parts[sel].low_cyl;
                             if (partition_dialog(&rdb->parts[sel],
                                                  GS(MSG_PV_DLG_EDIT_PART), rdb, FALSE)) {
                                 {
@@ -3289,6 +3318,8 @@ BOOL partview_run(const char *devname, ULONG unit)
                                                &rdb->parts[sel], old_hi);
                                 if (g == GROW_NONE) g = offer_sfs_grow(win, bd, rdb,
                                                &rdb->parts[sel], old_hi);
+                                if (g == GROW_NONE) g = offer_shrink(win, bd, rdb,
+                                               &rdb->parts[sel], old_lo, old_hi);
                                 dirty        = TRUE;
                                 /* Clean FFS grow remounts live; else reboot. */
                                 if (g != GROW_REMOUNTED && g != GROW_ABORTED) needs_reboot = TRUE;

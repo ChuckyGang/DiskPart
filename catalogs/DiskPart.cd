@@ -3732,3 +3732,42 @@ the SFS bitmap lies above the new end - shrink less (bitmap relocation is not su
 MSG_SHR_NOT_SMALLER_FMT
 SHRINK: %s: requested size is not smaller than the partition - nothing to do.\n
 ;
+;==========================================================================
+; GUI shrink (partition map drag + Edit dialog)
+;==========================================================================
+MSG_PV_SHR_TITLE
+Shrink Partition
+;
+MSG_PV_SHR_PROG_TITLE
+Shrinking partition
+;
+MSG_PV_SHR_CONFIRM_FMT
+Shrink "%s" to %s (freeing %s)?\n\nThe removed area was verified free of data.\nThe filesystem will be rewritten in place and\nthe RDB written immediately.
+;
+MSG_PV_SHR_GADGETS
+Shrink|Cancel
+;
+MSG_PV_SHR_MIN_FMT
+"%s" cannot shrink that far -\ndata pins the minimum size at %s\n(HighCyl %lu).\n\nShrink to that minimum instead?
+;
+MSG_PV_SHR_MIN_GADGETS
+Shrink to minimum|Cancel
+;
+MSG_PV_SHR_ATMIN_FMT
+"%s" is already at its minimum size -\nnothing can be reclaimed.
+;
+MSG_PV_SHR_SCANFAIL_FMT
+Cannot shrink "%s":\n%s
+;
+MSG_PV_SHR_OK_REMOUNT_FMT
+"%s" shrunk to %s and remounted -\navailable now.  The RDB has been written.
+;
+MSG_PV_SHR_OK_REBOOT_FMT
+"%s" shrunk to %s and the RDB written.\nReboot before using this volume.
+;
+MSG_PV_SHR_OK_RDBFAIL_FMT
+"%s": the filesystem was shrunk but the RDB\nwrite FAILED - use Write to retry, and do NOT\nreboot before it succeeds.
+;
+MSG_PV_SHR_FAIL_FMT
+Shrink failed:\n%s\n\nThe original size was restored.
+;
