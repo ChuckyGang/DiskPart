@@ -940,6 +940,17 @@ BOOL PFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
         ULONG delta_blocks = cyl_diff * bpc;
         ULONG new_disksize = (delta_blocks < cur_disksize)
                              ? cur_disksize - delta_blocks : 0;
+        /* Hard envelope clamp, same rationale as the SFS shrink: bpc
+           floors, so a non-cylinder-aligned disksize could shrink to a
+           value larger than the new partition envelope.  Never let the
+           filesystem exceed the RDB geometry. */
+        {
+            ULONG env = (pi->high_cyl - pi->low_cyl + 1) * heads * sectors;
+            if (new_disksize > env) {
+                delta_blocks += new_disksize - env;
+                new_disksize  = env;
+            }
+        }
         ULONG bitmapstart  = lastreserved + 1;
 
         if (bpc == 0 || new_disksize <= bitmapstart + 1) {

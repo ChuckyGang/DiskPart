@@ -1114,12 +1114,17 @@ BOOL SFS_ShrinkInfo(struct BlockDev *bd, const struct RDBInfo *rdb,
             deleted = sfs_getl(blk_buf, sfs_blocksize - 36);
     }
 
-    /* Floor: highest immovable block, +1 for the relocated end root,
-       + room for the relocated bitmap when it sits above the floor. */
+    /* Floor: highest immovable block, +1 for the relocated end root.
+       SFS_ShrinkPartition (v1) never RELOCATES the bitmap - it only
+       truncates it in place - so the whole bitmap must stay below the
+       new end root: the floor can never go below bitmapbase+num_bmb+1.
+       (2026-07-20: this used to assume a relocating shrink and reported
+       a floor the real shrink then refused on strategy-B-grown volumes,
+       whose bitmap sits high - found by the fuzz loop.) */
     ULONG floor_end = any_data ? highest_data + 1 : 2;
     ULONG minb      = floor_end + 1;             /* end root at minb-1 */
-    if (bitmapbase >= floor_end)
-        minb += num_bmb;
+    if (bitmapbase + num_bmb + 1 > minb)
+        minb = bitmapbase + num_bmb + 1;
     if (minb > totalblocks) minb = totalblocks;
 
     rep->total_blocks    = totalblocks;
@@ -1295,6 +1300,21 @@ BOOL SFS_ShrinkPartition(struct BlockDev *bd, const struct RDBInfo *rdb,
     ULONG delta_sfs       = cyl_diff * bpc;
     ULONG new_totalblocks = (delta_sfs < totalblocks)
                             ? totalblocks - delta_sfs : 0;
+    /* HARD ENVELOPE CLAMP (2026-07-20, found by the fuzz loop): bpc =
+       totalblocks/ncyl FLOORS, so with fractional SFS-blocks-per-cylinder
+       (e.g. 63 sectors x 1024-byte blocks = 31.5) the bpc-derived shrink
+       removes LESS than the envelope loses - leaving totalblocks (and the
+       end root written at new_totalblocks-1!) beyond the shrunk partition,
+       i.e. writing outside the envelope.  The RDB geometry defines the
+       partition: never let the filesystem exceed it.  (Grow is safe: the
+       same flooring under-ADDS there.) */
+    {
+        UQUAD env_dev = (UQUAD)(pi->high_cyl - pi->low_cyl + 1) *
+                        heads * sectors * phys_per_lb;
+        ULONG env_sfs = (ULONG)(env_dev / sfs_phys);
+        if (new_totalblocks > env_sfs) new_totalblocks = env_sfs;
+        delta_sfs = totalblocks - new_totalblocks;
+    }
     ULONG new_lastbyteh, new_lastbyte_lo;
     {
         UQUAD old_lb = ((UQUAD)lastbyteh << 32) | (UQUAD)lastbyte_lo;

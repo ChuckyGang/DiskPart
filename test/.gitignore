@@ -1,0 +1,5 @@
+fuzz*.hdf
+fail_it*.hdf
+testloop.log
+chkout/
+__pycache__/
