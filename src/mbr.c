@@ -115,19 +115,77 @@ BOOL MBR_Read(struct BlockDev *bd, struct MBRInfo *mbr)
         return TRUE;   /* mbr->valid stays FALSE */
     }
 
-    mbr->valid = TRUE;
-    for (i = 0; i < MBR_MAX_PARTS; i++) {
-        UBYTE *e = buf + 446 + i * 16;
-        struct MBRPart *p = &mbr->parts[i];
+    /* Parse the four entries with SANITY VALIDATION (2026-07-20): a FAT
+       boot sector also ends in 0x55AA, and bytes 446-509 are then boot
+       CODE - the old unvalidated parse showed them as phantom garbage
+       partitions.  An entry is sane when the boot flag is 0x00/0x80 and
+       its LBA range is non-empty and inside the disk; present entries
+       must also not overlap each other. */
+    {
+        UQUAD total_blocks = bd->total_bytes / 512;
+        BOOL  sane = TRUE;
+        UWORD npresent = 0;
 
-        p->type      = e[4];
-        p->present   = (p->type != MBRT_EMPTY);
-        p->active    = (e[0] == MBR_ACTIVE);
-        p->lba_start = (ULONG)e[8]  | ((ULONG)e[9]  << 8)
-                     | ((ULONG)e[10] << 16) | ((ULONG)e[11] << 24);
-        p->lba_size  = (ULONG)e[12] | ((ULONG)e[13] << 8)
-                     | ((ULONG)e[14] << 16) | ((ULONG)e[15] << 24);
-        snprintf(p->name, sizeof(p->name), "MBR%u", i + 1);
+        for (i = 0; i < MBR_MAX_PARTS && sane; i++) {
+            UBYTE *e = buf + 446 + i * 16;
+            struct MBRPart *p = &mbr->parts[i];
+
+            p->type      = e[4];
+            p->present   = (p->type != MBRT_EMPTY);
+            p->active    = (e[0] == MBR_ACTIVE);
+            p->lba_start = (ULONG)e[8]  | ((ULONG)e[9]  << 8)
+                         | ((ULONG)e[10] << 16) | ((ULONG)e[11] << 24);
+            p->lba_size  = (ULONG)e[12] | ((ULONG)e[13] << 8)
+                         | ((ULONG)e[14] << 16) | ((ULONG)e[15] << 24);
+            snprintf(p->name, sizeof(p->name), "MBR%u", i + 1);
+
+            if (!p->present) continue;
+            npresent++;
+            if (e[0] != 0x00 && e[0] != MBR_ACTIVE) { sane = FALSE; break; }
+            if (p->lba_start == 0 || p->lba_size == 0) { sane = FALSE; break; }
+            if (total_blocks > 0 &&
+                ((UQUAD)p->lba_start >= total_blocks ||
+                 (UQUAD)p->lba_start + p->lba_size > total_blocks)) {
+                sane = FALSE; break;
+            }
+            {
+                UWORD j;
+                for (j = 0; j < i; j++) {
+                    struct MBRPart *q = &mbr->parts[j];
+                    if (!q->present) continue;
+                    if (p->lba_start < q->lba_start + q->lba_size &&
+                        q->lba_start < p->lba_start + p->lba_size) {
+                        sane = FALSE; break;
+                    }
+                }
+            }
+        }
+
+        /* FAT BPB heuristics: x86 jump opcode + a sane bytes-per-sector
+           and sectors-per-cluster.  Only consulted when the entry table
+           did NOT validate (or is empty) - a real MBR with sane entries
+           always wins. */
+        {
+            BOOL bpb = (buf[0] == 0xEB || buf[0] == 0xE9);
+            if (bpb) {
+                UWORD bps = (UWORD)buf[11] | ((UWORD)buf[12] << 8);
+                UBYTE spc = buf[13];
+                if (!(bps == 512 || bps == 1024 || bps == 2048 || bps == 4096))
+                    bpb = FALSE;
+                if (spc == 0 || (spc & (spc - 1)) != 0)
+                    bpb = FALSE;
+            }
+            if (sane && npresent > 0) {
+                mbr->valid = TRUE;
+            } else if (bpb) {
+                mbr->superfloppy = TRUE;      /* FAT disk, no partition table */
+                memset(mbr->parts, 0, sizeof(mbr->parts));
+            } else if (sane) {
+                mbr->valid = TRUE;            /* empty-but-sane MBR (NEWMBR) */
+            } else {
+                memset(mbr->parts, 0, sizeof(mbr->parts));  /* garbage 55AA */
+            }
+        }
     }
 
     FreeVec(buf);

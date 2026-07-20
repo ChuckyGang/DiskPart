@@ -1229,8 +1229,10 @@
 #define MSG_PV_SHR_BUSY_GADGETS      1223
 #define MSG_QF_ENS_NOT_IN_RDB_FMT    1224
 #define MSG_QF_ENS_LOAD_FAIL_FMT     1225
+#define MSG_CLI_FAT_SUPERFLOPPY      1226
+#define MSG_PV_FAT_FOUND_BODY        1227
 
-#define MSG_COUNT 1226
+#define MSG_COUNT 1228
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2468,5 +2470,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1223 MSG_PV_SHR_BUSY_GADGETS */ "Shrink + Reboot|Cancel",
     /* 1224 MSG_QF_ENS_NOT_IN_RDB_FMT */ "no handler for 0x%08lX in FileSystem.resource or in this disk's RDB",
     /* 1225 MSG_QF_ENS_LOAD_FAIL_FMT */ "the 0x%08lX handler could not be loaded (bad LSEG code / file missing)",
+    /* 1226 MSG_CLI_FAT_SUPERFLOPPY */ "FAT-formatted disk (superfloppy - FAT boot sector at block 0, no partition table).\n",
+    /* 1227 MSG_PV_FAT_FOUND_BODY */ "This disk is FAT-formatted without a partition\ntable (superfloppy).  Erase its FAT boot sector?\nThe FAT contents will become unreachable.",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

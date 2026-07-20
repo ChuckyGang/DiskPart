@@ -3783,3 +3783,9 @@ no handler for 0x%08lX in FileSystem.resource or in this disk's RDB
 MSG_QF_ENS_LOAD_FAIL_FMT
 the 0x%08lX handler could not be loaded (bad LSEG code / file missing)
 ;
+MSG_CLI_FAT_SUPERFLOPPY
+FAT-formatted disk (superfloppy - FAT boot sector at block 0, no partition table).\n
+;
+MSG_PV_FAT_FOUND_BODY
+This disk is FAT-formatted without a partition\ntable (superfloppy).  Erase its FAT boot sector?\nThe FAT contents will become unreachable.
+;

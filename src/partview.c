@@ -3526,9 +3526,14 @@ BOOL partview_run(const char *devname, ULONG unit)
                             if (unmount_deleted_partitions(win, rdb))
                                 needs_reboot = TRUE;
                             /* Only offer to erase an MBR that we didn't put there
-                               ourselves (s_mbr->valid means we wrote/read it). */
+                               ourselves (s_mbr->valid means we wrote/read it).
+                               A FAT superfloppy (boot sector, no partition
+                               table) gets its own honest wording. */
                             if (!(s_mbr && s_mbr->valid) && BlockDev_HasMBR(bd)) {
-                                es.es_TextFormat   = (UBYTE *)GS(MSG_PV_MBR_FOUND_BODY);
+                                es.es_TextFormat = (UBYTE *)
+                                    ((s_mbr && s_mbr->superfloppy)
+                                     ? GS(MSG_PV_FAT_FOUND_BODY)
+                                     : GS(MSG_PV_MBR_FOUND_BODY));
                                 es.es_GadgetFormat = (UBYTE *)GS(MSG_PV_MBR_ERASE_KEEP);
                                 if (EasyRequest(win, &es, NULL) == 1)
                                     BlockDev_EraseMBR(bd);

@@ -37,12 +37,20 @@ struct MBRPart {
 };
 
 struct MBRInfo {
-    BOOL           valid;               /* block 0 has 0x55AA signature */
+    BOOL           valid;        /* block 0 holds a SANE partition table   */
+    BOOL           superfloppy;  /* block 0 is a FAT boot sector (BPB) -
+                                    a partition-table-less "superfloppy"
+                                    FAT disk, common on CF cards.  valid
+                                    is FALSE in that case.                */
     struct MBRPart parts[MBR_MAX_PARTS];
 };
 
-/* Read MBR from block 0.  Returns FALSE only on read failure.
-   If the signature is absent, mbr->valid is set FALSE (not an error). */
+/* Read + classify block 0.  Returns FALSE only on read failure.
+   valid=TRUE only when the 0x55AA signature is present AND the four
+   entries are sane (boot flag 0x00/0x80, in-disk LBA ranges, no
+   overlaps) - a FAT boot sector also ends in 0x55AA, and its boot code
+   would otherwise parse as garbage partitions.  Such a sector with a
+   plausible BPB sets superfloppy instead. */
 BOOL MBR_Read      (struct BlockDev *bd, struct MBRInfo *mbr);
 
 /* Write the current MBRInfo back to block 0, preserving bytes 0-445

@@ -734,6 +734,38 @@ static LONG cmd_info(const char *devname, ULONG unit)
     memset(&s_rdb, 0, sizeof(s_rdb));
     if (!RDB_Read(bd, &s_rdb) || !s_rdb.valid) {
         cli_puts(GS(MSG_CLI_NO_RDB_FOUND));
+        /* Still classify block 0 - a PC/FAT CF card is a common guest.
+           Geometry for the cylinder display comes from the device. */
+        {
+            struct MBRInfo mbr;
+            ULONG gc = 0, gh = 0, gs = 0;
+            memset(&mbr, 0, sizeof(mbr));
+            if (MBR_Read(bd, &mbr)) {
+                if (mbr.superfloppy) {
+                    cli_puts(GS(MSG_CLI_FAT_SUPERFLOPPY));
+                } else if (mbr.valid) {
+                    UBYTE mi;
+                    char  typebuf[12];
+                    BlockDev_GetGeometry(bd, &gc, &gh, &gs);
+                    DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_MBR_HDR_FMT),
+                            (unsigned)MBR_Count(&mbr));
+                    cli_puts(outbuf);
+                    for (mi = 0; mi < MBR_MAX_PARTS; mi++) {
+                        struct MBRPart *mp = &mbr.parts[mi];
+                        ULONG mlo, mhi;
+                        if (!mp->present) continue;
+                        MBR_TypeName(mp->type, typebuf);
+                        mlo = MBR_LBAToCyl(mp->lba_start, gh, gs);
+                        mhi = MBR_LBAToCyl(mp->lba_start + mp->lba_size - 1,
+                                           gh, gs);
+                        DP_SNPRINTF(outbuf, GS(MSG_CLI_INFO_MBR_ROW_FMT),
+                                mp->name, mlo, mhi, typebuf,
+                                mp->active ? "Active" : "");
+                        cli_puts(outbuf);
+                    }
+                }
+            }
+        }
         BlockDev_Close(bd);
         return RETURN_OK;
     }
