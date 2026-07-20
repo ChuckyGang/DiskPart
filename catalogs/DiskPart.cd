@@ -3616,10 +3616,10 @@ MSG_SI_RECLAIM_NONE
   Reclaimable  : nothing - no room to shrink\n
 ;
 MSG_SI_META_NOTE_FMT
-  Note: movable FS metadata near block %lu excluded (a SHRINK would relocate it).\n
+  Note: top block %lu is movable metadata; SHRINK relocates it.\n
 ;
 MSG_SI_SFS_DELETED_FMT
-  Note: %lu blocks held by deleted (recycle-bin) files still count as used.\n
+  Note: %lu blocks in deleted (recycle-bin) files count as used.\n
 ;
 MSG_SI_FLUSH_CAVEAT
   Note: numbers reflect the state last flushed to disk.\n
@@ -3644,4 +3644,10 @@ bitmap block %lu is invalid - run the disk validator/doctor first
 ;
 MSG_SI_PFS_SMALLIDX
 PFS small-index layout (no MODE_SUPERINDEX) is not supported
+;
+MSG_PV_MENU_SHRINKINFO
+Shrink Report...
+;
+MSG_PV_SHRINK_TITLE
+Shrink Report
 ;

@@ -105,6 +105,13 @@ void  offer_zero_partition(struct Window *win, struct BlockDev *bd,
                            const struct RDBInfo *rdb, struct PartInfo *pi);
 
 /* ------------------------------------------------------------------ */
+/* partview_shrink.c                                                    */
+/* ------------------------------------------------------------------ */
+
+void  pv_shrink_report(struct Window *win, struct BlockDev *bd,
+                       struct RDBInfo *rdb, struct PartInfo *pi);
+
+/* ------------------------------------------------------------------ */
 /* partview_mbr.c                                                       */
 /* ------------------------------------------------------------------ */
 

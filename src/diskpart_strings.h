@@ -1185,8 +1185,10 @@
 #define MSG_SI_BM_READ_FMT           1179
 #define MSG_SI_BM_BAD_FMT            1180
 #define MSG_SI_PFS_SMALLIDX          1181
+#define MSG_PV_MENU_SHRINKINFO       1182
+#define MSG_PV_SHRINK_TITLE          1183
 
-#define MSG_COUNT 1182
+#define MSG_COUNT 1184
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2380,5 +2382,7 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1179 MSG_SI_BM_READ_FMT */ "cannot read bitmap block %lu",
     /* 1180 MSG_SI_BM_BAD_FMT */ "bitmap block %lu is invalid - run the disk validator/doctor first",
     /* 1181 MSG_SI_PFS_SMALLIDX */ "PFS small-index layout (no MODE_SUPERINDEX) is not supported",
+    /* 1182 MSG_PV_MENU_SHRINKINFO */ "Shrink Report...",
+    /* 1183 MSG_PV_SHRINK_TITLE */ "Shrink Report",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */

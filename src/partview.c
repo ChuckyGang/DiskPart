@@ -1717,6 +1717,8 @@ static struct NewMenu partview_menu_def[] = {
     { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 19 */
     { NM_ITEM,  "Copy Whole Disk to Another Disk...", NULL, 0, 0, NULL },  /* ITEM 20 */
     { NM_ITEM,  "Copy Partition to Another Disk...",  NULL, NM_ITEMDISABLED, 0, NULL },  /* ITEM 21 */
+    { NM_ITEM,  NM_BARLABEL,             NULL,         0, 0, NULL },  /* ITEM 22 */
+    { NM_ITEM,  "Shrink Report...",      NULL,         0, 0, NULL },  /* ITEM 23 */
     /* Menu 2 - Health: disk diagnostics */
     { NM_TITLE, "Health",                NULL,         0, 0, NULL },
     { NM_ITEM,  "SMART Status",          NULL,         0, 0, NULL },  /* ITEM 0 */
@@ -1765,6 +1767,8 @@ static void localize_partview_menu(void)
         -1,                          /* NM_BARLABEL */
         MSG_PV_MENU_COPY_WHOLE_DISK,
         MSG_PV_MENU_COPY_PARTITION,
+        -1,                          /* NM_BARLABEL */
+        MSG_PV_MENU_SHRINKINFO,
         MSG_PV_MENU_HEALTH,
         MSG_PV_MENU_SMART,
         MSG_PV_MENU_BADBLOCK,
@@ -2377,6 +2381,19 @@ BOOL partview_run(const char *devname, ULONG unit)
                         }
                         else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 20)
                             copy_whole_disk_to_disk(win, bd, devname, unit);
+                        else if (MENUNUM(mcode) == 1 && ITEMNUM(mcode) == 23) {
+                            if (sel >= 0 && bd && rdb && sel < (WORD)rdb->num_parts)
+                                pv_shrink_report(win, bd, rdb, &rdb->parts[sel]);
+                            else {
+                                struct EasyStruct es;
+                                es.es_StructSize   = sizeof(es);
+                                es.es_Flags        = 0;
+                                es.es_Title        = (UBYTE *)GS(MSG_PV_SHRINK_TITLE);
+                                es.es_TextFormat   = (UBYTE *)GS(MSG_ZERO_NO_PART_SEL);
+                                es.es_GadgetFormat = (UBYTE *)GS(MSG_OK);
+                                EasyRequest(win, &es, NULL);
+                            }
+                        }
                         /* Health menu */
                         else if (MENUNUM(mcode) == 2 && ITEMNUM(mcode) == 0)
                             smart_status(win, bd);
