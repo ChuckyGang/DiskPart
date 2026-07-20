@@ -3922,7 +3922,7 @@ MSG_PCP_PROG_FMT
 Cloning onto %s
 ;
 MSG_PCP_OK_FMT
-Cloned %s onto %s.  The RDB has been written; reboot to use it.\n\nThe clone has the SAME volume name as the source, so the two\ncannot both be mounted at once - relabel one first\n(e.g. CLI: Relabel %s: NewName).
+Cloned %s onto %s.  The RDB has been written; reboot to use it.\n\nThe cloned volume was renamed "CL-..." so it does not clash\nwith the source volume's name (rename it as you like afterward).
 ;
 MSG_PCP_FAIL_FMT
 Clone failed:\n%s
@@ -3937,7 +3937,7 @@ MSG_PCP_NEW_ENTRY
 [ Create a new partition ]
 ;
 MSG_PCP_NEW_OK_FMT
-Created %s and cloned into it.  Reboot to use it.\n\nThe clone has the SAME volume name as the source, so the two\ncannot both be mounted at once - relabel one first\n(e.g. CLI: Relabel %s: NewName).
+Created %s and cloned into it.  Reboot to use it.\n\nThe cloned volume was renamed "CL-..." so it does not clash\nwith the source volume's name (rename it as you like afterward).
 ;
 MSG_PC_GEOM_MISMATCH_FMT
 Source geometry (%lu heads x %lu sectors) differs from the destination\n(%lu x %lu).  A partition clone needs both disks to share the same\nheads/sectors geometry.\n

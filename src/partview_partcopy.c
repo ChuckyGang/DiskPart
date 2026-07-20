@@ -450,11 +450,10 @@ BOOL copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         }
         ProgressWin_Close(&prog);
         if (ok && dpi_idx == PCP_CREATE_NEW)
-            DP_SNPRINTF(body, GS(MSG_PCP_NEW_OK_FMT),
-                        dpi->drive_name, dpi->drive_name);
+            DP_SNPRINTF(body, GS(MSG_PCP_NEW_OK_FMT), dpi->drive_name);
         else if (ok)
             DP_SNPRINTF(body, GS(MSG_PCP_OK_FMT),
-                        src->drive_name, dpi->drive_name, dpi->drive_name);
+                        src->drive_name, dpi->drive_name);
         else
             DP_SNPRINTF(body, GS(MSG_PCP_FAIL_FMT), err);
         pcp_msg(win, GS(MSG_PCP_TITLE), body);

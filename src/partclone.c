@@ -490,6 +490,85 @@ static void pc_pfs_clear_sizefield(struct BlockDev *bd, ULONG part_base_blk,
 }
 
 /* ------------------------------------------------------------------ */
+/* Relabel the just-cloned volume with a "CL-" prefix so it does not    */
+/* clash with the source's volume name (AmigaDOS can't mount two        */
+/* volumes with the same label at once).  Best-effort; the FS-specific  */
+/* label lives in the root block.                                       */
+/* ------------------------------------------------------------------ */
+
+/* Build "CL-" + old (capped to maxlen) into out[]; returns new length. */
+static ULONG pc_cl_name(UBYTE *out, const UBYTE *old, ULONG oldlen, ULONG maxlen)
+{
+    ULONG n = 0, i;
+    const char *pfx = "CL-";
+    for (i = 0; i < 3 && n < maxlen; i++) out[n++] = (UBYTE)pfx[i];
+    for (i = 0; i < oldlen && n < maxlen; i++) out[n++] = old[i];
+    return n;
+}
+
+/* FFS/OFS: BCPL volume name at longword (nlongs-20) in the root block;
+   root block number is in the boot block's bb[2].  Recompute the root
+   checksum (sum of all longwords == 0, checksum at longword 5). */
+static void pc_relabel_ffs(struct BlockDev *bd, ULONG dst_base,
+                           ULONG spb, ULONG nlongs)
+{
+    UBYTE boot[512];
+    UBYTE *rb;
+    ULONG root, eff = nlongs * 4, noff, i;
+    ULONG sum = 0;
+    UBYTE newname[32];
+    ULONG nl;
+
+    if (!BlockDev_ReadBlock(bd, dst_base, boot)) return;
+    root = pc_getl(boot, 8);                 /* bb[2] */
+    if (root == 0) return;
+
+    rb = (UBYTE *)AllocVec(eff, MEMF_PUBLIC);
+    if (!rb) return;
+    for (i = 0; i < spb; i++)
+        if (!BlockDev_ReadBlock(bd, dst_base + root * spb + i, rb + i * 512))
+            { FreeVec(rb); return; }
+    if (pc_getl(rb, 0) != 2 || pc_getl(rb, (nlongs - 1) * 4) != 1) {
+        FreeVec(rb); return;                 /* not a T_SHORT/ST_ROOT block */
+    }
+    noff = (nlongs - 20) * 4;
+    {
+        UBYTE oldlen = rb[noff];
+        if (oldlen > 30) oldlen = 30;
+        nl = pc_cl_name(newname, rb + noff + 1, oldlen, 30);
+    }
+    rb[noff] = (UBYTE)nl;
+    for (i = 0; i < nl; i++) rb[noff + 1 + i] = newname[i];
+    pc_setl(rb, 20, 0);                      /* clear checksum (longword 5) */
+    for (i = 0; i < nlongs; i++) sum += pc_getl(rb, i * 4);
+    pc_setl(rb, 20, (ULONG)(-(LONG)sum));
+    for (i = 0; i < spb; i++)
+        (void)BlockDev_WriteBlock(bd, dst_base + root * spb + i, rb + i * 512);
+    FreeVec(rb);
+}
+
+/* PFS3: BCPL diskname at byte 20 of the rootblock (no block checksum). */
+static void pc_relabel_pfs(struct BlockDev *bd, ULONG part_base,
+                           ULONG reserved, ULONG phys)
+{
+    UBYTE sec[512];
+    ULONG rb = part_base + (reserved ? reserved : 2) * phys;
+    UBYTE newname[32];
+    ULONG nl, i;
+    if (!BlockDev_ReadBlock(bd, rb, sec)) return;
+    if (pc_getl(sec, 0) != 0x50465301UL && pc_getl(sec, 0) != 0x50465302UL)
+        return;
+    {
+        UBYTE oldlen = sec[20];
+        if (oldlen > 28) oldlen = 28;        /* 31 max, minus "CL-" */
+        nl = pc_cl_name(newname, sec + 21, oldlen, 31);
+    }
+    sec[20] = (UBYTE)nl;
+    for (i = 0; i < nl; i++) sec[21 + i] = newname[i];
+    (void)BlockDev_WriteBlock(bd, rb, sec);
+}
+
+/* ------------------------------------------------------------------ */
 /* Direct partition -> partition                                       */
 /* ------------------------------------------------------------------ */
 BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
@@ -600,6 +679,17 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
         PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
         pc_pfs_clear_sizefield(dbd, dst_base, dst->reserved_blks,
                                (dst->block_size >= 1024) ? (dst->block_size / 512) : 1);
+    }
+
+    /* Rename the cloned volume "CL-<old>" so it does not clash with the
+       source's label (best-effort; FFS/OFS and PFS3 supported). */
+    {
+        ULONG spb    = (dst->block_size >= 1024) ? (dst->block_size / 512) : 1;
+        ULONG nlongs = ((dst->block_size >= 512) ? dst->block_size : 512) / 4;
+        if (FFS_IsSupportedType(dst->dos_type))
+            pc_relabel_ffs(dbd, dst_base, spb, nlongs);
+        else if (PFS_IsSupportedType(dst->dos_type))
+            pc_relabel_pfs(dbd, dst_base, dst->reserved_blks, spb);
     }
     ok = TRUE;
 out:
