@@ -125,17 +125,17 @@ static void pc_unpack_header(const UBYTE *b, struct PartDumpHeader *h)
 /* ------------------------------------------------------------------ */
 /* Geometry helpers                                                    */
 /* ------------------------------------------------------------------ */
-static ULONG pc_part_blocks(const struct PartInfo *pi, const struct RDBInfo *rdb)
+static ULONG pc_part_blocks(const struct PartInfo *pi, ULONG dh, ULONG ds)
 {
-    ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
-    ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG heads = pi->heads   > 0 ? pi->heads   : dh;
+    ULONG secs  = pi->sectors > 0 ? pi->sectors : ds;
     ULONG spb   = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
     return (pi->high_cyl - pi->low_cyl + 1) * heads * secs * spb;
 }
-static ULONG pc_part_base(const struct PartInfo *pi, const struct RDBInfo *rdb)
+static ULONG pc_part_base(const struct PartInfo *pi, ULONG dh, ULONG ds)
 {
-    ULONG heads = pi->heads   > 0 ? pi->heads   : rdb->heads;
-    ULONG secs  = pi->sectors > 0 ? pi->sectors : rdb->sectors;
+    ULONG heads = pi->heads   > 0 ? pi->heads   : dh;
+    ULONG secs  = pi->sectors > 0 ? pi->sectors : ds;
     ULONG spb   = (pi->block_size >= 1024) ? (pi->block_size / 512) : 1;
     return pi->low_cyl * heads * secs * spb;
 }
@@ -217,11 +217,9 @@ BOOL PartClone_DumpToFile(struct BlockDev *bd, const struct PartInfo *pi,
     UBYTE *hdr = NULL, *buf = NULL;
     ULONG  base, count, done = 0;
     BOOL   ok = FALSE;
-    struct RDBInfo tmp; memset(&tmp, 0, sizeof(tmp));
-    tmp.heads = pi->heads; tmp.sectors = pi->sectors;
 
-    base  = pc_part_base(pi, &tmp);
-    count = pc_part_blocks(pi, &tmp);
+    base  = pc_part_base(pi, pi->heads, pi->sectors);
+    count = pc_part_blocks(pi, pi->heads, pi->sectors);
     if (count == 0) { snprintf(err_buf, ebsz, GS(MSG_PC_NOT_FOUND_FMT), pi->drive_name); return FALSE; }
 
     hdr = (UBYTE *)AllocVec(512, MEMF_PUBLIC | MEMF_CLEAR);
@@ -401,13 +399,10 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
 #define PROG(d,t,ph) do { if (progress_fn) progress_fn(progress_ud,(d),(t),(ph)); } while(0)
     UBYTE *buf = NULL;
     ULONG  src_base, src_count, dst_base, dst_blocks, done = 0;
-    struct RDBInfo stmp; memset(&stmp, 0, sizeof(stmp));
-    struct RDBInfo dtmp; memset(&dtmp, 0, sizeof(dtmp));
     BOOL   ok = FALSE;
 
-    stmp.heads = src->heads; stmp.sectors = src->sectors;
-    src_base  = pc_part_base(src, &stmp);
-    src_count = pc_part_blocks(src, &stmp);
+    src_base  = pc_part_base(src, src->heads, src->sectors);
+    src_count = pc_part_blocks(src, src->heads, src->sectors);
 
     /* destination sized with the SOURCE geometry it will adopt */
     {
@@ -466,8 +461,8 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
     }
     if (SFS_IsSupportedType(src->dos_type)) {
         ULONG spb = (src->block_size >= 1024) ? (src->block_size / 512) : 1;
-        ULONG hh  = src->heads > 0 ? src->heads : stmp.heads;
-        ULONG ss  = src->sectors > 0 ? src->sectors : stmp.sectors;
+        ULONG hh  = src->heads > 0 ? src->heads : drdb->heads;
+        ULONG ss  = src->sectors > 0 ? src->sectors : drdb->sectors;
         ULONG src_base_blk = src->low_cyl * hh * ss * spb;
         PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
         pc_sfs_fixup(dbd, dst_base, src_base_blk);

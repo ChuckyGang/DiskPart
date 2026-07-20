@@ -46,6 +46,7 @@
 #include "sfsresize.h"
 #include "pfsresize.h"
 #include "shrinkinfo.h"
+#include "partclone.h"
 #include "script.h"
 
 extern struct ExecBase   *SysBase;
@@ -1638,6 +1639,96 @@ static LONG do_shrinkinfo(ULONG ln, char **tok, UWORD ntok)
 }
 
 /* ------------------------------------------------------------------ */
+/* PARTOUT <drive> <file>  - dump a partition to a self-describing file */
+/* PARTIN  <file> <drive>  - restore a dump into an existing partition  */
+/* ------------------------------------------------------------------ */
+
+static void script_move_progress(void *ud, ULONG done, ULONG total,
+                                 const char *phase)
+{
+    static ULONG last = 0;
+    ULONG pct;
+    (void)ud;
+    if (total == 0) return;
+    pct = (done * 100UL) / total;
+    if (done != total && pct < last + 20) return;
+    last = (done == total) ? 0 : pct;
+    DP_SNPRINTF(s_msg, GS(MSG_SCR_GROW_STEP_FMT), phase);
+    sc_puts(s_msg);
+}
+
+static struct PartInfo *sc_find_part(const char *name_s, char *namebuf)
+{
+    UWORD i, nlen;
+    strncpy(namebuf, name_s, 30); namebuf[30] = '\0';
+    nlen = (UWORD)strlen(namebuf);
+    if (nlen > 0 && namebuf[nlen - 1] == ':') namebuf[--nlen] = '\0';
+    if (nlen == 0) return NULL;
+    for (i = 0; i < s_st.rdb.num_parts; i++)
+        if (ci_eq(s_st.rdb.parts[i].drive_name, namebuf))
+            return &s_st.rdb.parts[i];
+    return NULL;
+}
+
+static LONG do_partout(ULONG ln, char **tok, UWORD ntok)
+{
+    struct PartInfo *pi;
+    char  name[32], err[128], dt[16];
+
+    if (!s_st.bd)  { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
+    if (ntok < 3) { sc_puts(GS(MSG_SCR_PARTOUT_USAGE)); return RETURN_ERROR; }
+
+    pi = sc_find_part(tok[1], name);
+    if (!pi) { DP_SNPRINTF(s_msg, GS(MSG_PC_NOT_FOUND_FMT), name); sc_puts(s_msg); return RETURN_ERROR; }
+    if (!pi->heads)   pi->heads   = s_st.rdb.heads;
+    if (!pi->sectors) pi->sectors = s_st.rdb.sectors;
+
+    if (s_st.dryrun) { sc_puts(GS(MSG_SHR_DRYRUN)); return RETURN_OK; }
+
+    err[0] = '\0';
+    if (!PartClone_DumpToFile(s_st.bd, pi, tok[2],
+                              script_move_progress, NULL, err, sizeof(err))) {
+        sc_puts(err); return RETURN_ERROR;
+    }
+    FormatDosType(pi->dos_type, dt);
+    DP_SNPRINTF(s_msg, GS(MSG_PC_DUMP_OK_FMT), pi->drive_name, dt, tok[2]);
+    sc_puts(s_msg);
+    return RETURN_OK;
+}
+
+static LONG do_partin(ULONG ln, char **tok, UWORD ntok)
+{
+    struct PartInfo *pi;
+    char  name[32], err[128];
+
+    if (!s_st.bd)  { sc_err(ln, GS(MSG_SCR_NO_DEV_OPEN)); return RETURN_ERROR; }
+    if (!s_st.rdb_ready || !s_st.rdb.valid)
+        { sc_err(ln, GS(MSG_SCR_NO_RDB_OPEN_INIT)); return RETURN_ERROR; }
+    if (ntok < 3) { sc_puts(GS(MSG_SCR_PARTIN_USAGE)); return RETURN_ERROR; }
+
+    pi = sc_find_part(tok[2], name);
+    if (!pi) { DP_SNPRINTF(s_msg, GS(MSG_PC_NOT_FOUND_FMT), name); sc_puts(s_msg); return RETURN_ERROR; }
+
+    if (s_st.dryrun) { sc_puts(GS(MSG_SHR_DRYRUN)); return RETURN_OK; }
+
+    err[0] = '\0';
+    if (!PartClone_RestoreToPart(s_st.bd, &s_st.rdb, pi, tok[1],
+                                 script_move_progress, NULL, err, sizeof(err))) {
+        sc_puts(err); return RETURN_ERROR;
+    }
+    script_grow_progress(NULL, GS(MSG_GROW_PROG_WRITING_RDB));
+    sc_puts(GS(MSG_SCR_WRITING_RDB));
+    if (!RDB_Write(s_st.bd, &s_st.rdb)) { sc_puts(GS(MSG_SCR_FAILED)); return RETURN_ERROR; }
+    sc_puts(GS(MSG_SCR_OK_DOT));
+    s_st.dirty = FALSE;
+    DP_SNPRINTF(s_msg, GS(MSG_PC_RESTORE_OK_FMT), name, pi->drive_name);
+    sc_puts(s_msg);
+    return RETURN_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* ZEROPART - overwrite every block in a partition with zeros         */
 /*   ZEROPART NAME=<drive>                                            */
 /* ------------------------------------------------------------------ */
@@ -2271,6 +2362,8 @@ static LONG run_line(char *line, ULONG ln)
     if (ci_eq(tok[0], "ADDFS"))    return do_addfs(ln, tok, ntok);
     if (ci_eq(tok[0], "GROW"))     return do_grow(ln, tok, ntok);
     if (ci_eq(tok[0], "SHRINK"))   return do_shrink(ln, tok, ntok);
+    if (ci_eq(tok[0], "PARTOUT"))  return do_partout(ln, tok, ntok);
+    if (ci_eq(tok[0], "PARTIN"))   return do_partin(ln, tok, ntok);
     if (ci_eq(tok[0], "SHRINKINFO")) return do_shrinkinfo(ln, tok, ntok);
     if (ci_eq(tok[0], "ZEROPART")) return do_zeropart(ln, tok, ntok);
     if (ci_eq(tok[0], "WRITE"))   return do_write(ln);
