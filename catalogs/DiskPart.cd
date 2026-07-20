@@ -3963,3 +3963,6 @@ Copy driver|Skip
 MSG_PC_FS_COPIED_FMT
 Copied the %s filesystem driver to the destination.\n
 ;
+MSG_PC_DST_BEYOND_DISK_FMT
+Destination %s ends at block %lu, which cannot be read.\nThe disk image is smaller than its RDB claims (truncated),\nso the clone would write into space that does not exist.\n
+;

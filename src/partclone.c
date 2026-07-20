@@ -661,6 +661,23 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
     buf = (UBYTE *)AllocVec((ULONG)PC_CHUNK_BLOCKS * 512, MEMF_PUBLIC);
     if (!buf) { snprintf(err_buf, ebsz, GS(MSG_PC_OOM)); return FALSE; }
 
+    /* Verify the destination partition physically exists.  A disk image whose
+       RDB declares more cylinders than the backing file actually has (e.g. a
+       truncated HDF) presents partitions that lie beyond the real end of the
+       device: the driver accepts writes to them but nothing persists, and the
+       cloned partition reads back as "no disk present" after a reboot.  Probe
+       the partition's LAST block - if it is not readable, refuse before
+       writing anything into empty space. */
+    {
+        ULONG last = dst_base + dst_blocks - 1;
+        if (!BlockDev_ReadBlock(dbd, last, buf)) {
+            snprintf(err_buf, ebsz, GS(MSG_PC_DST_BEYOND_DISK_FMT),
+                     dst->drive_name, (unsigned long)last);
+            FreeVec(buf);
+            return FALSE;
+        }
+    }
+
     PROG(0, src_count, GS(MSG_PC_COPYING));
     while (done < src_count) {
         ULONG batch = src_count - done;

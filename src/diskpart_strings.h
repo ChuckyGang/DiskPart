@@ -1288,8 +1288,9 @@
 #define MSG_PCP_FS_ASK_FMT           1282
 #define MSG_PCP_FS_ASK_GADGETS       1283
 #define MSG_PC_FS_COPIED_FMT         1284
+#define MSG_PC_DST_BEYOND_DISK_FMT   1285
 
-#define MSG_COUNT 1285
+#define MSG_COUNT 1286
 
 #endif /* DISKPART_STRINGS_H */
 
@@ -2586,5 +2587,6 @@ const char *const DPStringDefaults[MSG_COUNT] = {
     /* 1282 MSG_PCP_FS_ASK_FMT */ "The destination disk has no %s filesystem driver in its RDB.\nWithout it the cloned partition will not mount there.\n\nCopy the driver from the source disk into the destination RDB?",
     /* 1283 MSG_PCP_FS_ASK_GADGETS */ "Copy driver|Skip",
     /* 1284 MSG_PC_FS_COPIED_FMT */ "Copied the %s filesystem driver to the destination.\n",
+    /* 1285 MSG_PC_DST_BEYOND_DISK_FMT */ "Destination %s ends at block %lu, which cannot be read.\nThe disk image is smaller than its RDB claims (truncated),\nso the clone would write into space that does not exist.\n",
 };
 #endif /* DPSTRINGS_DEFINE_TABLE */
