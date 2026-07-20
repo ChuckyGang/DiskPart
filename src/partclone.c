@@ -717,24 +717,24 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
            source's physical position to the destination's. */
         PROG(src_count, src_count, GS(MSG_PC_UPDATING_SFS));
         pc_sfs_fixup(dbd, dst_base, src_base);
+        /* SFS validates its stored total against the partition's DosEnvec at
+           mount: far too small = "Uninitialized", too large = "no disk
+           present".  It only accepts a total within roughly one cylinder of
+           the partition capacity (the shape a normal SFS grow leaves behind).
+           Rather than GROW the cloned SFS to fill a larger destination
+           (bitmap relocation is risky and cannot be mount-tested here), shrink
+           the DESTINATION partition's DosEnvec so it just fits the cloned SFS.
+           The SFS itself stays byte-identical to the working source (only its
+           two root blocks moved), and total <= capacity within one cylinder -
+           the proven-mountable relationship. */
         if (dst_blocks > src_count) {
-            /* Larger destination: SFS validates its stored total, firstbyte
-               and lastbyte against the DosEnvec at mount, so a source-sized
-               SFS in a bigger partition mounts "Uninitialized".  Grow the
-               just-relocated SFS to fill the partition - passing the EXACT
-               destination SFS-block count so the total matches the DosEnvec
-               (the cylinder-derived total can be off by a block or two). */
-            ULONG spb  = (dst->block_size >= 1024) ? (dst->block_size / 512) : 1;
             ULONG dbpc = (dst->heads   > 0 ? dst->heads   : dh) *
-                         (dst->sectors > 0 ? dst->sectors : ds) * spb;
-            ULONG old_hi = dst->low_cyl + (dbpc ? (src_count / dbpc) : 0);
-            static char growbuf[256];
-            if (old_hi > dst->low_cyl) old_hi -= 1; else old_hi = dst->low_cyl;
-            growbuf[0] = '\0';
-            if (!SFS_GrowPartition(dbd, drdb, dst, old_hi, dst_blocks / spb,
-                                   growbuf, progress_fn, progress_ud)) {
-                strncpy(err_buf, growbuf, ebsz - 1); err_buf[ebsz - 1] = '\0';
-                goto out;   /* ok stays FALSE */
+                         (dst->sectors > 0 ? dst->sectors : ds) *
+                         ((dst->block_size >= 1024) ? (dst->block_size/512) : 1);
+            if (dbpc) {
+                ULONG need_cyls = (src_count + dbpc - 1) / dbpc;   /* ceil */
+                ULONG new_high  = dst->low_cyl + need_cyls - 1;
+                if (new_high < dst->high_cyl) dst->high_cyl = new_high;
             }
         }
     } else if (PFS_IsSupportedType(src->dos_type)) {

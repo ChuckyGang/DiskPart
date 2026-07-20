@@ -1312,7 +1312,7 @@ static LONG do_grow(ULONG ln, char **tok, UWORD ntok)
 
     switch (fskind) {
         case GROW_FS_SFS:
-            ok = SFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi, 0,
+            ok = SFS_GrowPartition(s_st.bd, &s_st.rdb, pi, old_hi,
                                    s_msg, script_grow_progress, NULL);
             break;
         case GROW_FS_PFS:
