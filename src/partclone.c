@@ -30,6 +30,9 @@
 #define SFS_O_LASTBYTE   44
 #define SFS_O_TOTALBLOCKS 48
 #define SFS_O_BLOCKSIZE  52
+#define SFS_O_ROOTOBJ    104   /* be_rootobjectcontainer block (partition-rel) */
+#define SFS_OC_ID        0x4F424A43UL   /* 'OBJC' object-container id          */
+#define SFS_OC_NAME_OFF  49    /* object[0].name in the root objectcontainer   */
 
 /* ------------------------------------------------------------------ */
 /* Big-endian header pack/unpack (fixed 512-byte block)               */
@@ -585,6 +588,64 @@ static void pc_relabel_ffs(struct BlockDev *bd, ULONG dst_base,
     FreeVec(rb);
 }
 
+/* SFS: the volume name is the root object's name - a C-string (NUL-
+   terminated) at offset 49 of the root objectcontainer block, followed by
+   the object's comment (also NUL-terminated).  SmartFilesystem identifies a
+   volume by name + creation-date (usevolumenode), so a byte-identical clone
+   looks like the SAME volume as the mounted source and is REFUSED.  Renaming
+   the volume "CL-<old>" makes it distinct so both can mount.  The block's
+   fsRootInfo (be_freeblocks/be_datecreated/... in the last 36 bytes) is left
+   untouched; the checksum is recomputed. */
+static void pc_relabel_sfs(struct BlockDev *bd, ULONG dst_base)
+{
+    UBYTE  root[512];
+    UBYTE *oc;
+    ULONG  bsz, sphys, rootobj, i, limit, p, w;
+    ULONG  oldlen, clen = 0, nl;
+    UBYTE  newname[64];
+    UBYTE  comment[80];
+
+    if (!BlockDev_ReadBlock(bd, dst_base, root)) return;
+    if (sfs_getl(root, SFS_O_ID) != SFS_ROOT_ID_V) return;
+    bsz = sfs_getl(root, SFS_O_BLOCKSIZE);
+    if (bsz < 512 || (bsz & (bsz - 1)) || (bsz % 512)) return;
+    sphys   = bsz / 512;
+    rootobj = sfs_getl(root, SFS_O_ROOTOBJ);
+    if (rootobj < 2) return;
+
+    oc = (UBYTE *)AllocVec(bsz, MEMF_PUBLIC);
+    if (!oc) return;
+    for (i = 0; i < sphys; i++)
+        if (!BlockDev_ReadBlock(bd, dst_base + rootobj * sphys + i, oc + i * 512))
+            { FreeVec(oc); return; }
+    if (sfs_getl(oc, 0) != SFS_OC_ID) { FreeVec(oc); return; }
+
+    limit = bsz - 40;                 /* stay clear of the trailing fsRootInfo */
+    /* old name */
+    p = SFS_OC_NAME_OFF;
+    while (p < limit && oc[p] != 0) p++;
+    oldlen = p - SFS_OC_NAME_OFF;
+    /* comment follows the name's NUL */
+    {
+        ULONG cp = (p < limit) ? p + 1 : p;
+        while (cp < limit && oc[cp] != 0 && clen < sizeof(comment) - 1)
+            comment[clen++] = oc[cp++];
+    }
+    nl = pc_cl_name(newname, oc + SFS_OC_NAME_OFF,
+                    oldlen > 60 ? 60 : oldlen, 60);
+    /* rewrite name + NUL + comment + NUL */
+    w = SFS_OC_NAME_OFF;
+    for (i = 0; i < nl   && w < limit; i++) oc[w++] = newname[i];
+    if (w < limit) oc[w++] = 0;
+    for (i = 0; i < clen && w < limit; i++) oc[w++] = comment[i];
+    if (w < limit) oc[w++] = 0;
+
+    sfs_set_checksum(oc, bsz);
+    for (i = 0; i < sphys; i++)
+        (void)BlockDev_WriteBlock(bd, dst_base + rootobj * sphys + i, oc + i * 512);
+    FreeVec(oc);
+}
+
 /* PFS3: BCPL diskname at byte 20 of the rootblock (no block checksum). */
 static void pc_relabel_pfs(struct BlockDev *bd, ULONG part_base,
                            ULONG reserved, ULONG phys)
@@ -778,7 +839,9 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
     }
 
     /* Rename the cloned volume "CL-<old>" so it does not clash with the
-       source's label (best-effort; FFS/OFS and PFS3 supported). */
+       source's label - for SFS this is REQUIRED to mount, since SFS keys a
+       volume on name + creation date and would otherwise treat the clone as
+       the already-mounted source. */
     {
         ULONG spb    = (dst->block_size >= 1024) ? (dst->block_size / 512) : 1;
         ULONG nlongs = ((dst->block_size >= 512) ? dst->block_size : 512) / 4;
@@ -786,6 +849,8 @@ BOOL PartClone_PartToPart(struct BlockDev *sbd, const struct PartInfo *src,
             pc_relabel_ffs(dbd, dst_base, spb, nlongs);
         else if (PFS_IsSupportedType(dst->dos_type))
             pc_relabel_pfs(dbd, dst_base, dst->reserved_blks, spb);
+        else if (SFS_IsSupportedType(dst->dos_type))
+            pc_relabel_sfs(dbd, dst_base);
     }
     ok = TRUE;
 out:
