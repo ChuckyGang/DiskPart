@@ -36,6 +36,10 @@ ULONG parse_num (const char *s);
 LONG  parse_long(const char *s);
 ULONG parse_dostype(const char *s);
 
+/* Lowest "DH<N>" not used by any partition in rdb nor by any mounted
+   DosList device (avoids colliding with e.g. the boot DH0).  buf >= 8 bytes. */
+void  next_drive_name(const struct RDBInfo *rdb, char *buf);
+
 void  partition_advanced_dialog(struct PartInfo *pi);
 BOOL  partition_dialog(struct PartInfo *pi, const char *title,
                        const struct RDBInfo *rdb, BOOL is_new);

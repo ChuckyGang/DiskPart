@@ -1261,7 +1261,7 @@ static BOOL name_eq(const char *a, const char *b)
    in this RDB *and* is not already present in the AmigaOS DosList.
    Checking the DosList avoids suggesting e.g. DH0 when another disk
    already has a DH0: device mounted. */
-static void next_drive_name(const struct RDBInfo *rdb, char *buf)
+void next_drive_name(const struct RDBInfo *rdb, char *buf)
 {
     ULONG n;
     for (n = 0; n <= MAX_PARTITIONS; n++) {

@@ -364,8 +364,7 @@ BOOL copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         ULONG dbpc  = drdb.heads * drdb.sectors * spb;
         ULONG cyl_span = dbpc ? (src_dev + dbpc - 1) / dbpc : 0;
         ULONG low;
-        char  nm[8];
-        UWORD n;
+        char  nm[32];          /* next_drive_name writes up to buf[31] */
 
         if (drdb.num_parts >= MAX_PARTITIONS || cyl_span == 0) {
             pcp_msg(win, GS(MSG_PCP_TITLE), GS(MSG_PCP_DEST_NO_PARTS));
@@ -378,13 +377,10 @@ BOOL copy_partition_to_disk(struct Window *win, struct BlockDev *bd,
         }
         dpi = &drdb.parts[drdb.num_parts];
         memset(dpi, 0, sizeof(*dpi));
-        for (n = 0; n < 100; n++) {
-            UWORD j; BOOL taken = FALSE;
-            DP_SNPRINTF(nm, "DH%lu", (unsigned long)n);
-            for (j = 0; j < drdb.num_parts; j++)
-                if (pcp_devname_eq_ci(drdb.parts[j].drive_name, nm)) { taken = TRUE; break; }
-            if (!taken) break;
-        }
+        /* Pick a device name free on the destination RDB AND not already
+           mounted anywhere (checks the DosList) - a bare new disk would
+           otherwise get "DH0" and clash with the running boot device. */
+        next_drive_name(&drdb, nm);
         strncpy(dpi->drive_name, nm, sizeof(dpi->drive_name) - 1);
         dpi->low_cyl    = low;
         dpi->high_cyl   = low + cyl_span - 1;
